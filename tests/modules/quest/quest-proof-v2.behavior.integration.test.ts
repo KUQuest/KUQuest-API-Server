@@ -703,7 +703,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         .where(
           and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, worker.id))
         )
-    ).toEqual([{ filerUserId: worker.id, status: 'DISPUTE_CASE_PENDING' }]);
+    ).toEqual([]);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
       remainingSatang: 1_020,

@@ -286,7 +286,11 @@ describe('Admin Dispute API', () => {
     const response = await adminRequest(`/api/v1/admin/disputes/open/${fixture.questId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workerId: fixture.workerId }),
+      body: JSON.stringify({
+        workerId: fixture.workerId,
+        category: 'PROOF_REVIEW',
+        submittedDetail: 'The Worker provided this dispute detail.',
+      }),
     });
     const body = (await response.json()) as {
       data: { id: string; questId: string; filerUserId: string; openedByAdminId: string | null };
@@ -307,7 +311,11 @@ describe('Admin Dispute API', () => {
     const response = await adminRequest(`/api/v1/admin/disputes/open/${fixture.questId}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ workerId: fixture.hirerId }),
+      body: JSON.stringify({
+        workerId: fixture.hirerId,
+        category: 'PROOF_REVIEW',
+        submittedDetail: 'The Worker provided this dispute detail.',
+      }),
     });
     const body = (await response.json()) as { error: { code: string } };
     expect(response.status).toBe(409);
