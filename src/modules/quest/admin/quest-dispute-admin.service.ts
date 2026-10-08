@@ -15,7 +15,13 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
-import { formatDisputeDisplayId, formatDisplayIdSql, formatQuestDisplayId } from '@/modules/admin';
+import {
+  formatDisputeDisplayId,
+  formatDisplayIdSql,
+  formatQuestDisplayId,
+  getAdminMemberModerationContext,
+} from '@/modules/admin';
+import type { AdminMemberModerationContextFields, AdminMemberStatus } from '@/modules/admin';
 import {
   createAdminActionService,
   type AdminActionResult,
@@ -113,30 +119,32 @@ export type AdminDisputeCaseSummary = {
   updatedAt: string;
 };
 
-export type AdminDisputeCaseDetail = AdminDisputeCaseSummary & {
-  category: DisputeCaseCategory | null;
-  submittedDetail: string | null;
-  filerStatement: string | null;
-  respondentStatement: string | null;
-  filerDisplayId: string | null;
-  respondentDisplayId: string | null;
-  resolvedWorkerDisplayId: string | null;
-  decision: {
-    reasonCode: string | null;
-    decisionReasonText: string | null;
+export type AdminDisputeCaseDetail = AdminDisputeCaseSummary &
+  AdminMemberModerationContextFields & {
+    category: DisputeCaseCategory | null;
+    submittedDetail: string | null;
+    filerStatement: string | null;
+    respondentStatement: string | null;
+    filerDisplayId: string | null;
+    respondentDisplayId: string | null;
+    member: { status: AdminMemberStatus } | null;
+    resolvedWorkerDisplayId: string | null;
+    decision: {
+      reasonCode: string | null;
+      decisionReasonText: string | null;
+    };
+    quest: {
+      id: string;
+      displayId: string | null;
+      title: string;
+      hirerId: string;
+      hirerDisplayId: string | null;
+      questStatus: string;
+      version: number;
+      failedAt: string | null;
+      fundingReservationId: string | null;
+    };
   };
-  quest: {
-    id: string;
-    displayId: string | null;
-    title: string;
-    hirerId: string;
-    hirerDisplayId: string | null;
-    questStatus: string;
-    version: number;
-    failedAt: string | null;
-    fundingReservationId: string | null;
-  };
-};
 
 export type AdminDisputeEvidence = {
   caseId: string;
@@ -567,6 +575,7 @@ export const getAdminDisputeCase = async (
   const [row] = await db
     .select({
       disputeCase: adminDisputeCase,
+      caseCreatedAt: sql<string>`to_char(${adminDisputeCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
       quest: {
         id: quest.id,
         publicSequence: quest.publicSequence,
@@ -608,6 +617,27 @@ export const getAdminDisputeCase = async (
     .limit(1);
   if (!row)
     throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  let respondentUserId = row.disputeCase.respondentUserId;
+  if (!respondentUserId) {
+    if (row.disputeCase.filerUserId === row.quest.hirerId) {
+      if (row.disputeCase.resolvedWorkerId) {
+        respondentUserId = row.disputeCase.resolvedWorkerId;
+      } else {
+        const assignedWorkers = await db
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, row.quest.id))
+          .limit(2);
+        if (assignedWorkers.length === 1) respondentUserId = assignedWorkers[0]!.workerId;
+      }
+    } else {
+      respondentUserId = row.quest.hirerId;
+    }
+  }
+  const moderationContext = await getAdminMemberModerationContext(
+    respondentUserId,
+    row.caseCreatedAt
+  );
   const [decision] = await db
     .select({
       reasonCode: adminAction.reasonCode,
@@ -634,6 +664,8 @@ export const getAdminDisputeCase = async (
     respondentStatement: row.disputeCase.respondentStatement,
     filerDisplayId: row.filerDisplayId,
     respondentDisplayId: row.respondentDisplayId,
+    ...moderationContext,
+    member: moderationContext.memberStatus ? { status: moderationContext.memberStatus } : null,
     resolvedWorkerDisplayId: row.resolvedWorkerDisplayId,
     decision: {
       reasonCode: decision?.reasonCode ?? null,

@@ -1,4 +1,8 @@
-import { adminDecisionReasonTextSchema } from '@/modules/admin';
+import {
+  adminDecisionReasonTextSchema,
+  adminMemberModerationContextFieldsSchema,
+  adminMemberStatusSchema,
+} from '@/modules/admin';
 import { disputeCaseCategories } from '@/database/schema/admin.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
@@ -154,6 +158,7 @@ export const adminDisputeDetailResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Intersect([
     adminDisputeSummarySchema,
+    adminMemberModerationContextFieldsSchema,
     t.Object({
       category: t.Nullable(disputeCaseCategorySchema),
       submittedDetail: t.Nullable(t.String()),
@@ -165,6 +170,10 @@ export const adminDisputeDetailResponseSchema = t.Object({
       decision: t.Object({
         reasonCode: t.Nullable(t.String()),
         decisionReasonText: t.Nullable(t.String({ maxLength: 200 })),
+      }),
+      member: t.Union([t.Object({ status: adminMemberStatusSchema }), t.Null()], {
+        description:
+          'The related respondent Member record, used to distinguish an empty history from unavailable Member data.',
       }),
       quest: t.Object({
         id: t.String({ format: 'uuid' }),
