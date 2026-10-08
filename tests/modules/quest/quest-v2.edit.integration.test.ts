@@ -7,6 +7,7 @@ import {
   questCandidateTeamV2,
   questCommand,
   questEditHistory,
+  questV2EditRequest,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createQuestV2, expireQuestV2EditRequest, type QuestV2CreateInput } from '@/modules/quest';
@@ -687,5 +688,146 @@ describe('Quest Edit v2', () => {
       .from(quest)
       .where(eq(quest.id, questId));
     expect(condition?.text).toBe('Concurrent requirement');
+  });
+});
+
+type PendingEditRequest = { requestId: string; expiresAt: string } | null;
+
+const readPendingEdit = async (questId: string, viewer: 'hirer' | 'worker', cookie: string) => {
+  const path = viewer === 'hirer' ? questId : `${questId}/participation`;
+  const response = await app.handle(
+    new Request(`http://localhost/api/v2/quests/${path}`, { headers: { cookie } })
+  );
+  expect(response.status).toBe(200);
+  const body = (await response.json()) as { data: { pendingEditRequest: PendingEditRequest } };
+  return body.data.pendingEditRequest;
+};
+
+const createPendingEdit = async (questId: string) => {
+  const created = await createEdit(questId, { condition: { items: ['Pending requirement'] } });
+  expect(created.status).toBe(201);
+  return ((await created.json()) as { data: { requestId: string; expiresAt: string } }).data;
+};
+
+describe('Quest Edit v2 pendingEditRequest on detail reads', () => {
+  it('documents pendingEditRequest on the Hirer and participation reads only', async () => {
+    const response = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await response.json()) as {
+      paths: Record<
+        string,
+        {
+          get?: {
+            responses?: Record<
+              string,
+              {
+                content?: Record<
+                  string,
+                  { schema?: { properties?: { data?: { properties?: object } } } }
+                >;
+              }
+            >;
+          };
+        }
+      >;
+    };
+    const dataProperties = (path: string) =>
+      document.paths[path]?.get?.responses?.['200']?.content?.['application/json']?.schema
+        ?.properties?.data?.properties ?? {};
+
+    expect(dataProperties('/api/v2/quests/{questId}')).toHaveProperty('pendingEditRequest');
+    expect(dataProperties('/api/v2/quests/{questId}/participation')).toHaveProperty(
+      'pendingEditRequest'
+    );
+    expect(dataProperties('/api/v2/quests/{questId}/public')).toHaveProperty('condition');
+    expect(dataProperties('/api/v2/quests/{questId}/public')).not.toHaveProperty(
+      'pendingEditRequest'
+    );
+  });
+
+  it('shows a pending request to the Hirer and to each responding Active Worker', async () => {
+    const questId = await createAssignedQuest([worker.id, secondWorker.id]);
+    expect(await readPendingEdit(questId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(questId, 'worker', worker.cookie)).toBeNull();
+
+    const request = await createPendingEdit(questId);
+    const expected = { requestId: request.requestId, expiresAt: request.expiresAt };
+
+    expect(await readPendingEdit(questId, 'hirer', owner.cookie)).toEqual(expected);
+    expect(await readPendingEdit(questId, 'worker', worker.cookie)).toEqual(expected);
+    expect(await readPendingEdit(questId, 'worker', secondWorker.cookie)).toEqual(expected);
+
+    // A response does not end the request while another Active Worker has not answered.
+    await respondToEdit(request.requestId, { decision: 'EDIT_RESPONSE_ACCEPTED' }, worker.cookie);
+    expect(await readPendingEdit(questId, 'worker', secondWorker.cookie)).toEqual(expected);
+  });
+
+  it('reads null after the request is applied or declined', async () => {
+    const appliedQuestId = await createAssignedQuest();
+    const applied = await createPendingEdit(appliedQuestId);
+    await respondToEdit(applied.requestId, { decision: 'EDIT_RESPONSE_ACCEPTED' }, worker.cookie);
+    expect(await readPendingEdit(appliedQuestId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(appliedQuestId, 'worker', worker.cookie)).toBeNull();
+
+    const declinedQuestId = await createAssignedQuest();
+    const declined = await createPendingEdit(declinedQuestId);
+    await respondToEdit(declined.requestId, { decision: 'EDIT_RESPONSE_DECLINED' }, worker.cookie);
+    expect(await readPendingEdit(declinedQuestId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(declinedQuestId, 'worker', worker.cookie)).toBeNull();
+  });
+
+  it('reads null after a timeout, and an expired request reads null without a write', async () => {
+    const timedOutQuestId = await createAssignedQuest();
+    const timedOut = await createPendingEdit(timedOutQuestId);
+    expect(
+      await expireQuestV2EditRequest(timedOut.requestId, new Date(Date.now() + 11 * 60 * 1000))
+    ).toBe(true);
+    expect(await readPendingEdit(timedOutQuestId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(timedOutQuestId, 'worker', worker.cookie)).toBeNull();
+
+    const expiredQuestId = await createAssignedQuest();
+    const expired = await createPendingEdit(expiredQuestId);
+    await db
+      .update(questV2EditRequest)
+      .set({
+        createdAt: new Date(Date.now() - 11 * 60 * 1000),
+        expiresAt: new Date(Date.now() - 1000),
+      })
+      .where(eq(questV2EditRequest.id, expired.requestId));
+
+    expect(await readPendingEdit(expiredQuestId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(expiredQuestId, 'worker', worker.cookie)).toBeNull();
+    const [row] = await db
+      .select({ status: questV2EditRequest.requestStatus })
+      .from(questV2EditRequest)
+      .where(eq(questV2EditRequest.id, expired.requestId));
+    expect(row?.status).toBe('EDIT_REQUEST_PENDING');
+  });
+
+  it('reads null for everyone when an Active Worker leaves the request', async () => {
+    const questId = await createAssignedQuest([worker.id, secondWorker.id]);
+    await createPendingEdit(questId);
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: 'ASSIGNMENT_CANCELLED' })
+      .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, worker.id)));
+
+    expect(await readPendingEdit(questId, 'hirer', owner.cookie)).toBeNull();
+    expect(await readPendingEdit(questId, 'worker', worker.cookie)).toBeNull();
+    expect(await readPendingEdit(questId, 'worker', secondWorker.cookie)).toBeNull();
+  });
+
+  it('hides a request from a former Worker who is not one of its responders', async () => {
+    const questId = await createAssignedQuest([secondWorker.id]);
+    await db.insert(questAssignment).values({
+      questId,
+      workerId: worker.id,
+      assignmentStatus: 'ASSIGNMENT_CANCELLED',
+    });
+    const request = await createPendingEdit(questId);
+
+    expect(await readPendingEdit(questId, 'worker', secondWorker.cookie)).toMatchObject({
+      requestId: request.requestId,
+    });
+    expect(await readPendingEdit(questId, 'worker', worker.cookie)).toBeNull();
   });
 });
