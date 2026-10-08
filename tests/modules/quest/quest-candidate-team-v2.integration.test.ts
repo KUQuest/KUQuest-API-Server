@@ -2049,6 +2049,56 @@ describe('Quest Candidate Team API v2', () => {
     );
   });
 
+  it('rejects a submitted Candidate Team when a Team Member has an overlapping Worker Assignment', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const activeQuestId = await createOpenGroupCandidateQuest({
+      questStatus: 'QUEST_ASSIGNED',
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+      dueAt: new Date('2030-01-01T12:00:00.000Z'),
+    });
+    await db.insert(questAssignment).values({
+      questId: activeQuestId,
+      workerId: secondCandidate.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    const selectionQuestId = await createOpenGroupCandidateQuest({
+      headcount: 2,
+      questFundingTotalSatang: 2000,
+      startTime: new Date('2030-01-01T11:00:00.000Z'),
+      dueAt: new Date('2030-01-01T13:00:00.000Z'),
+    });
+    const team = await createTeam(
+      selectionQuestId,
+      candidate.id,
+      2,
+      'candidate-team-v2-overlap-create'
+    );
+    const joined = await joinTeam(
+      selectionQuestId,
+      team.id,
+      secondCandidate.id,
+      team.joinCode,
+      'candidate-team-v2-overlap-join'
+    );
+    expect(joined.status).toBe(200);
+    await submitTeam(selectionQuestId, team.id, candidate.id, 'candidate-team-v2-overlap-submit');
+
+    const selection = await request(
+      `/api/v2/quests/${selectionQuestId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-v2-overlap-select' }
+    );
+    expect(selection.status).toBe(409);
+    expect((await selection.json()).error.code).toBe('WORKER_SCHEDULE_CONFLICT');
+    const [storedTeam] = await db
+      .select({ state: questCandidateTeamV2.state })
+      .from(questCandidateTeamV2)
+      .where(eq(questCandidateTeamV2.id, team.id));
+    expect(storedTeam?.state).toBe('TEAM_SUBMITTED');
+  });
+
   it('selects one submitted Team atomically, creates the full Assignment roster, and rejects other Candidates', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenGroupCandidateQuest();

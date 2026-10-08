@@ -4,7 +4,9 @@ import { authAdmin } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
 
-const firstAdminBootstrapLockName = 'kuquest:first-admin-bootstrap';
+import { sql as drizzleSql } from 'drizzle-orm';
+
+const adminSeedLockName = 'kuquest:admin-seed';
 
 const readRequiredEnv = (name: string, trim = true): string => {
   const rawValue = process.env[name];
@@ -36,22 +38,19 @@ const main = async (): Promise<void> => {
 
   // Keep this transaction open for the full awaited critical section. Better Auth
   // uses its own pooled connection, so this transaction provides the advisory
-  // lock only; Better Auth owns write atomicity. auth_admin has no one-row
-  // database constraint.
+  // lock only; Better Auth owns write atomicity.
   const result = await sql.begin(async (transaction) => {
     await transaction`select pg_advisory_xact_lock(
-      hashtextextended(${firstAdminBootstrapLockName}, 0)
+      hashtextextended(${adminSeedLockName}, 0)
     )`;
 
-    const existingAdmin = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
+    const [configuredAdmin] = await db
+      .select({ email: authAdmin.email })
+      .from(authAdmin)
+      .where(drizzleSql`lower(${authAdmin.email}) = ${email}`)
+      .limit(1);
 
-    if (existingAdmin.length > 0) {
-      const errorMessage =
-        existingAdmin[0].email.toLowerCase() === email
-          ? 'An Admin with this email already exists; no changes were made'
-          : 'An Admin already exists; first-Admin bootstrap made no changes';
-      throw new Error(errorMessage);
-    }
+    if (configuredAdmin) return null;
 
     const seedAuth = createAdminAuth({
       allowSignUp: true,
@@ -69,6 +68,11 @@ const main = async (): Promise<void> => {
       },
     });
   });
+
+  if (!result) {
+    console.log(`Admin ${email} already exists; no changes were made`);
+    return;
+  }
 
   if (!result.user) throw new Error('Better Auth did not create the Admin user');
 

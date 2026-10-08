@@ -851,6 +851,110 @@ describe('Quest Candidate API v2', () => {
     ).toBe(candidate.id);
   });
 
+  it('rejects Candidate selection for an overlapping Active Worker assignment', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const activeQuestId = await createOpenCandidateQuest({
+      questStatus: 'QUEST_ASSIGNED',
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+      dueAt: new Date('2030-01-01T12:00:00.000Z'),
+    });
+    await db.insert(questAssignment).values({
+      questId: activeQuestId,
+      workerId: candidate.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+
+    const overlappingQuestId = await createOpenCandidateQuest({
+      startTime: new Date('2030-01-01T11:00:00.000Z'),
+      dueAt: new Date('2030-01-01T13:00:00.000Z'),
+    });
+    const application = await request(
+      `/api/v2/quests/${overlappingQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-overlap-apply' }
+    );
+    const applicationId = (await application.json()).data.id as string;
+
+    const rejected = await request(
+      `/api/v2/quests/${overlappingQuestId}/applications/${applicationId}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-overlap-select' }
+    );
+
+    expect(rejected.status).toBe(409);
+    expect((await rejected.json()).error.code).toBe('WORKER_SCHEDULE_CONFLICT');
+
+    const nextQuestId = await createOpenCandidateQuest({
+      startTime: new Date('2030-01-01T12:00:00.000Z'),
+      dueAt: new Date('2030-01-01T14:00:00.000Z'),
+    });
+    const nextApplication = await request(
+      `/api/v2/quests/${nextQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-adjacent-apply' }
+    );
+    const nextApplicationId = (await nextApplication.json()).data.id as string;
+    const allowed = await request(
+      `/api/v2/quests/${nextQuestId}/applications/${nextApplicationId}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-v2-adjacent-select' }
+    );
+
+    expect(allowed.status).toBe(200);
+  });
+
+  it('serializes Candidate selection and FCFS Join for the same Worker schedule', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const candidateQuestId = await createOpenCandidateQuest({
+      startTime: new Date('2030-01-01T10:00:00.000Z'),
+      dueAt: new Date('2030-01-01T12:00:00.000Z'),
+    });
+    const fcfsQuestId = await createOpenCandidateQuest({
+      mode: 'NO_CANDIDATE',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      startTime: new Date('2030-01-01T11:00:00.000Z'),
+      dueAt: new Date('2030-01-01T13:00:00.000Z'),
+    });
+    const application = await request(
+      `/api/v2/quests/${candidateQuestId}/applications`,
+      'POST',
+      candidate.id,
+      { 'idempotency-key': 'candidate-v2-race-apply' }
+    );
+    expect(application.status).toBe(200);
+    const applicationId = (await application.json()).data.id as string;
+
+    const [selection, join] = await Promise.all([
+      request(
+        `/api/v2/quests/${candidateQuestId}/applications/${applicationId}/select`,
+        'POST',
+        hirer.id,
+        { 'idempotency-key': 'candidate-v2-race-select' }
+      ),
+      request(`/api/v2/quests/${fcfsQuestId}/join`, 'POST', candidate.id, {
+        'idempotency-key': 'candidate-v2-race-join',
+      }),
+    ]);
+    const responses = [selection, join];
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
+    expect(responses.filter((response) => response.status === 409)).toHaveLength(1);
+    const conflict = responses.find((response) => response.status === 409);
+    if (!conflict) throw new Error('Expected one schedule-conflict response');
+    expect((await conflict.json()).error.code).toBe('WORKER_SCHEDULE_CONFLICT');
+    expect(
+      await db
+        .select()
+        .from(questAssignment)
+        .where(inArray(questAssignment.questId, [candidateQuestId, fcfsQuestId]))
+    ).toHaveLength(1);
+  });
+
   it('allows only one concurrent Hirer selection to win and rejects the losing command', async () => {
     if (!postgresAvailable) return;
     const questId = await createOpenCandidateQuest();

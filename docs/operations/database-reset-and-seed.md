@@ -50,6 +50,12 @@ reset the database. Repeat seed runs preserve Quest activity and do not repeat
 starter credit. `db:verify-staging-seed` is a separate check for a fresh bootstrap;
 it is not used after each CD run because Members can change their Wallets and Quests.
 
+CD also runs a dedicated Admin seed step after deployment and before the demo
+seed. It invokes `scripts/seed-admin.ts` to create the configured Admin when
+the email does not exist. This can add an Admin while keeping other Admin
+accounts. A repeat run leaves the matching account and password unchanged. The
+existing demo seed and login verification steps stay in place.
+
 CD verifies demo Member logins with Bun in the validated API image. For HTTP 429,
 it waits for the Server's retry delay and retries the login at most twice.
 Merge CD workflow fixes into `main` before merging the next PR into `develop`.
