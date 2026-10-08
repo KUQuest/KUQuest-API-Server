@@ -498,7 +498,7 @@ const expectedV2OperationContracts: Record<
   },
   submitQuestCandidateTeamV2: {
     bodyProperties: ['text', 'fileIds'],
-    requiredBodyProperties: ['text', 'fileIds'],
+    requiredBodyProperties: ['text'],
     responseStatuses: ['200', '400', '401', '404', '409', '503'],
   },
   submitQuestV2ProofSubmission: {

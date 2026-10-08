@@ -497,7 +497,8 @@ const validateSubmissionFiles = async (
   memberId: string,
   fileIds: string[]
 ): Promise<boolean> => {
-  if (fileIds.length === 0 || new Set(fileIds).size !== fileIds.length) return false;
+  if (fileIds.length === 0) return true;
+  if (new Set(fileIds).size !== fileIds.length) return false;
   const rows = await transaction
     .select({
       id: file.id,
@@ -1422,11 +1423,12 @@ export const submitQuestV2CandidateTeam = async (
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
   const text = input.text.trim();
+  const fileIds = input.fileIds ?? [];
   const requestHash = await sha256Json({
     authenticatedMemberId: leaderId,
     operation: questV2CandidateTeamSubmitOperationScope,
     path: '/api/v2/quests/:questId/teams/:teamId/submit',
-    body: { questId, teamId, text, fileIds: input.fileIds },
+    body: { questId, teamId, text, fileIds },
   });
 
   return db.transaction(async (transaction) => {
@@ -1477,17 +1479,19 @@ export const submitQuestV2CandidateTeam = async (
         if (!text || text.length > 1000) {
           return { kind: 'rejected', rejection: 'submission-invalid' };
         }
-        if (!(await validateSubmissionFiles(transaction, leaderId, input.fileIds))) {
+        if (!(await validateSubmissionFiles(transaction, leaderId, fileIds))) {
           return { kind: 'rejected', rejection: 'submission-files-invalid' };
         }
 
-        const [usedFile] = await transaction
-          .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
-          .from(questCandidateTeamV2SubmissionFile)
-          .where(inArray(questCandidateTeamV2SubmissionFile.fileId, input.fileIds))
-          .limit(1);
-        if (usedFile) {
-          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        if (fileIds.length > 0) {
+          const [usedFile] = await transaction
+            .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
+            .from(questCandidateTeamV2SubmissionFile)
+            .where(inArray(questCandidateTeamV2SubmissionFile.fileId, fileIds))
+            .limit(1);
+          if (usedFile) {
+            return { kind: 'rejected', rejection: 'submission-files-invalid' };
+          }
         }
 
         const [updatedTeam] = await transaction
@@ -1505,11 +1509,13 @@ export const submitQuestV2CandidateTeam = async (
           .returning(teamFields);
         if (!updatedTeam) throw new Error('Candidate Team submission update returned no row');
 
-        await transaction
-          .insert(questCandidateTeamV2SubmissionFile)
-          .values(
-            input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
-          );
+        if (fileIds.length > 0) {
+          await transaction
+            .insert(questCandidateTeamV2SubmissionFile)
+            .values(
+              fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
+            );
+        }
         await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
 
         const result = await readTeam(transaction, updatedTeam);
@@ -1703,7 +1709,10 @@ export const selectQuestV2CandidateTeam = async (
         return { kind: 'rejected', rejection: 'headcount-mismatch' };
       }
       const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
-      if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
+      if (
+        submissionFileIds.length > 0 &&
+        !(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))
+      ) {
         return { kind: 'rejected', rejection: 'not-selectable' };
       }
 

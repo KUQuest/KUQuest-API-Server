@@ -20,7 +20,7 @@ const teamNameSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' }
 
 const submissionSchema = t.Object({
   text: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
-  fileIds: t.Array(t.String({ format: 'uuid' }), { minItems: 1, uniqueItems: true }),
+  fileIds: t.Array(t.String({ format: 'uuid' }), { uniqueItems: true }),
   submittedAt: t.String({ format: 'date-time' }),
 });
 
@@ -98,7 +98,7 @@ export const questV2CandidateTeamJoinSchema = t.Object(
 export const questV2CandidateTeamSubmissionSchema = t.Object(
   {
     text: t.String({ minLength: 1, maxLength: 1000, pattern: '\\S' }),
-    fileIds: t.Array(t.String({ format: 'uuid' }), { minItems: 1, uniqueItems: true }),
+    fileIds: t.Optional(t.Array(t.String({ format: 'uuid' }), { uniqueItems: true })),
   },
   { additionalProperties: false }
 );

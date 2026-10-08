@@ -1304,6 +1304,36 @@ describe('Quest Candidate Team API v2', () => {
     expect(joinAfterSubmit.status).toBe(409);
     expect((await joinAfterSubmit.json()).error.code).toBe('TEAM_NOT_FORMING');
   });
+
+  it('submits and selects a full Candidate Team without files', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createOpenGroupCandidateQuest();
+    authenticate();
+    const team = await createTeam(questId, candidate.id, 2);
+    await joinTeam(questId, team.id, secondCandidate.id, team.joinCode);
+
+    const submitted = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/submit`,
+      'POST',
+      candidate.id,
+      { 'content-type': 'application/json', 'idempotency-key': 'candidate-team-no-files-submit' },
+      JSON.stringify({ text: 'Team work without attachments' })
+    );
+    expect(submitted.status).toBe(200);
+    expect((await submitted.json()).data.submission).toMatchObject({
+      text: 'Team work without attachments',
+      fileIds: [],
+    });
+
+    const selected = await request(
+      `/api/v2/quests/${questId}/teams/${team.id}/select`,
+      'POST',
+      hirer.id,
+      { 'idempotency-key': 'candidate-team-no-files-select' }
+    );
+    expect(selected.status).toBe(200);
+    expect((await selected.json()).data.assignments).toHaveLength(2);
+  });
   it('returns expiring links for submitted Candidate Team files to Hirers and Team Members only', async () => {
     if (!postgresAvailable) return;
     authenticate();
