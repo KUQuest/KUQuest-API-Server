@@ -45,6 +45,7 @@ export const errorHandlerPlugin = new Elysia({ name: 'error-handler' }).onError(
           pathname.includes('/proof-submissions') ||
           pathname.includes('/completion-confirmation') ||
           pathname.includes('/reviews') ||
+          pathname.includes('/conduct-reports') ||
           pathname.includes('/edit-requests') ||
           pathname.endsWith('/cancel') ||
           pathname.endsWith('/select');

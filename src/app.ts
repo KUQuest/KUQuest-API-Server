@@ -22,6 +22,7 @@ import {
 import {
   questAssignmentV2Route,
   questCandidateV2Route,
+  questConductReportV2Route,
   questCandidateTeamV2Route,
   questV2RewardAllocationRoute,
   questProofV2Route,
@@ -94,6 +95,7 @@ export const createApp = () => {
     .use(questV2RewardAllocationRoute)
     .use(questProofV2Route)
     .use(questReviewV2Route)
+    .use(questConductReportV2Route)
     .use(questV2RealtimeRoute)
     .use(questV2Route)
     .use(questRoute)
