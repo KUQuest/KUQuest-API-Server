@@ -1,4 +1,8 @@
 import { questStatus as persistedQuestStatus } from '@/database/schema/quest.schema';
+import {
+  memberPenaltyAddReasonCodes,
+  memberPenaltyRemoveReasonCodes,
+} from '@/modules/admin/member-penalty/member-penalty.policy';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
 import { t, type Static } from 'elysia';
@@ -35,7 +39,7 @@ export const adminMemberModerationContextFieldsSchema = t.Object({
   }),
   confirmedViolationCount: t.Union([t.Integer({ minimum: 0 }), t.Null()], {
     description:
-      'The historical confirmedMisconductCount for this Member before the current Case. It includes exempt and later-reversed original records, and excludes reversal rows. Null when the Member record is unavailable.',
+      'The historical confirmedMisconductCount for this Member before the current Case. It includes exempt and later-reversed source events, including direct Admin Record violation actions, and excludes reversal and recalculation rows. Null when the Member record is unavailable.',
   }),
   previousModerationActions: t.Array(adminMemberModerationActionSchema, {
     maxItems: 5,
@@ -204,6 +208,7 @@ const memberPenaltySourceSchema = t.Union([
   t.Literal('REPORT_CASE'),
   t.Literal('CONDUCT_REPORT'),
   t.Literal('REVIEW_AVERAGE'),
+  t.Literal('ADMIN'),
 ]);
 const memberPenaltyResultSchema = t.Union([
   t.Literal('PENALTY_EXEMPT'),
@@ -213,6 +218,23 @@ const memberPenaltyResultSchema = t.Union([
   t.Literal('PENALTY_PERMANENT_BAN'),
   t.Literal('PENALTY_REVERSAL'),
 ]);
+const memberPenaltyAddResultSchema = t.Union([
+  t.Literal('PENALTY_RED_FLAG'),
+  t.Literal('PENALTY_TEMPORARY_BAN_7_DAYS'),
+  t.Literal('PENALTY_PERMANENT_BAN'),
+]);
+const memberPenaltyAddReasonCodeSchema = t.Union(
+  memberPenaltyAddReasonCodes.map((code) => t.Literal(code)) as [
+    ReturnType<typeof t.Literal<(typeof memberPenaltyAddReasonCodes)[number]>>,
+    ...ReturnType<typeof t.Literal<(typeof memberPenaltyAddReasonCodes)[number]>>[],
+  ]
+);
+const memberPenaltyRemoveReasonCodeSchema = t.Union(
+  memberPenaltyRemoveReasonCodes.map((code) => t.Literal(code)) as [
+    ReturnType<typeof t.Literal<(typeof memberPenaltyRemoveReasonCodes)[number]>>,
+    ...ReturnType<typeof t.Literal<(typeof memberPenaltyRemoveReasonCodes)[number]>>[],
+  ]
+);
 
 const adminMemberPenaltyHistoryItemSchema = t.Object({
   ladder: memberPenaltyLadderSchema,
@@ -225,12 +247,30 @@ const adminMemberPenaltyHistoryItemSchema = t.Object({
     displayName: t.String(),
   }),
   reasonCode: t.String(),
+  adminNote: t.Union([t.String({ minLength: 1, maxLength: 200 }), t.Null()]),
   createdAt: dateTime,
   reviewRating: t.Union([t.Integer({ minimum: 1, maximum: 5 }), t.Null()]),
+  isEffective: t.Boolean(),
   isEffectiveActiveMisconductPenalty: t.Boolean(),
   reversal: t.Union([
     t.Object({
       relation: t.Union([t.Literal('REVERSAL_OF'), t.Literal('REVERSED_BY')]),
+      sequenceNumber: t.Integer({ minimum: 1 }),
+      result: memberPenaltyResultSchema,
+      createdAt: dateTime,
+    }),
+    t.Null(),
+  ]),
+  recalculatedFrom: t.Union([
+    t.Object({
+      sequenceNumber: t.Integer({ minimum: 1 }),
+      result: memberPenaltyResultSchema,
+      createdAt: dateTime,
+    }),
+    t.Null(),
+  ]),
+  replacedBy: t.Union([
+    t.Object({
       sequenceNumber: t.Integer({ minimum: 1 }),
       result: memberPenaltyResultSchema,
       createdAt: dateTime,
@@ -246,6 +286,7 @@ export const adminMemberPenaltyHistoryResponseSchema = t.Object({
     confirmedMisconductCount: t.Integer({ minimum: 0 }),
     effectiveActiveMisconductPenaltyCount: t.Integer({ minimum: 0 }),
     reviewLadderRecordCount: t.Integer({ minimum: 0 }),
+    versionToken: t.Integer({ minimum: 0 }),
     items: t.Array(adminMemberPenaltyHistoryItemSchema),
     totalCount: t.Integer({ minimum: 0 }),
     nextCursor: t.Union([t.String(), t.Null()]),
@@ -270,6 +311,40 @@ export type AdminMemberCertificatesData = Static<
 >['data'];
 export type AdminMemberPenaltyHistoryData = Static<
   typeof adminMemberPenaltyHistoryResponseSchema
+>['data'];
+
+export const adminMemberPenaltyAddBodySchema = t.Object({
+  expectedVersionToken: t.Integer({ minimum: 0 }),
+  result: t.Optional(memberPenaltyAddResultSchema),
+  reasonCode: memberPenaltyAddReasonCodeSchema,
+  adminNote: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+});
+
+export const adminMemberPenaltyRemoveBodySchema = t.Object({
+  expectedVersionToken: t.Integer({ minimum: 0 }),
+  recordId: uuid,
+  reasonCode: memberPenaltyRemoveReasonCodeSchema,
+  adminNote: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+});
+
+export const adminMemberPenaltyCommandResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    command: t.Object({
+      kind: t.Union([t.Literal('ADD'), t.Literal('REMOVE')]),
+      outcome: t.Union([t.Literal('ADDED'), t.Literal('EXEMPTED'), t.Literal('REMOVED')]),
+      recordId: uuid,
+      commandRecordId: uuid,
+      result: memberPenaltyResultSchema,
+      versionToken: t.Integer({ minimum: 0 }),
+    }),
+  }),
+});
+
+export type AdminMemberPenaltyAddBody = Static<typeof adminMemberPenaltyAddBodySchema>;
+export type AdminMemberPenaltyRemoveBody = Static<typeof adminMemberPenaltyRemoveBodySchema>;
+export type AdminMemberPenaltyCommandData = Static<
+  typeof adminMemberPenaltyCommandResponseSchema
 >['data'];
 
 export const adminMemberReviewsQuerySchema = t.Object({

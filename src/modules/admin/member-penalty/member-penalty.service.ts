@@ -1,8 +1,17 @@
 import { db } from '@/database/client';
-import { memberPenaltyRecord, type MemberPenaltyResult } from '@/database/schema/admin.schema';
-import { authUser } from '@/database/schema/auth.schema';
+import {
+  memberPenaltyRecord,
+  type MemberPenaltyCommandKind,
+  type MemberPenaltyResult,
+} from '@/database/schema/admin.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { review } from '@/database/schema/quest.schema';
 import { walletStatusHistory, walletWallet } from '@/database/schema/wallet.schema';
+import {
+  type MemberPenaltyAddReasonCode,
+  type MemberPenaltyRemoveReasonCode,
+  MemberPenaltyCommandError,
+} from '@/modules/admin/member-penalty/member-penalty.policy';
 import { changeWalletStatusInTransaction } from '@/modules/wallet/wallet.status.service';
 import { ensureWalletInTransaction } from '@/modules/wallet/wallet.service';
 
@@ -14,6 +23,7 @@ import {
   eq,
   exists,
   isNotNull,
+  isNull,
   lte,
   not,
   sql as drizzleSql,
@@ -141,7 +151,7 @@ const lockMember = async (
     .where(eq(authUser.id, memberId))
     .limit(1);
 
-  if (!member) throw new Error('Member Penalty requires an existing Member.');
+  if (!member) throw new MemberPenaltyCommandError('MEMBER_NOT_FOUND', 'Member was not found.');
   return member;
 };
 
@@ -249,6 +259,7 @@ const confirmedMisconductRecords = (records: MemberPenaltyRow[], memberCreatedAt
     (record) =>
       record.ladder === 'MISCONDUCT' &&
       record.source !== 'REVIEW_AVERAGE' &&
+      record.recalculationOfRecordId === null &&
       record.createdAt >= memberCreatedAt
   );
 
@@ -256,6 +267,485 @@ const misconductResult = (strikeCount: number): MemberPenaltyResult => {
   if (strikeCount === 1) return 'PENALTY_RED_FLAG';
   if (strikeCount === 2) return 'PENALTY_TEMPORARY_BAN_7_DAYS';
   return 'PENALTY_PERMANENT_BAN';
+};
+
+const reviewResult = (strikeCount: number): MemberPenaltyResult =>
+  strikeCount === 1
+    ? 'PENALTY_TEMPORARY_BAN_7_DAYS'
+    : strikeCount === 2
+      ? 'PENALTY_TEMPORARY_BAN_1_MONTH'
+      : 'PENALTY_PERMANENT_BAN';
+
+const banLiftTimes = (records: MemberPenaltyRow[], now: Date): Date[] => {
+  const reversals = new Map(
+    records.flatMap((record) =>
+      record.result === 'PENALTY_REVERSAL' && record.reversalOfRecordId
+        ? [[record.reversalOfRecordId, record.createdAt] as const]
+        : []
+    )
+  );
+
+  return originalRecords(records).flatMap((record) => {
+    if (record.result === 'PENALTY_PERMANENT_BAN') {
+      const reversalAt = reversals.get(record.id);
+      return reversalAt ? [reversalAt] : [];
+    }
+
+    if (!isTemporaryBan(record.result)) return [];
+    const expiry = temporaryBanExpiresAt(record);
+    if (!expiry) return [];
+
+    const reversalAt = reversals.get(record.id);
+    if (reversalAt) return [reversalAt < expiry ? reversalAt : expiry];
+    return expiry <= now ? [expiry] : [];
+  });
+};
+
+type AutomaticPenaltyRecalculation = {
+  original: MemberPenaltyRow;
+  result: MemberPenaltyResult;
+};
+
+const automaticPenaltyRecalculations = (
+  records: MemberPenaltyRow[],
+  excludedRecordId?: string
+): AutomaticPenaltyRecalculation[] => {
+  return (['MISCONDUCT', 'REVIEW'] as const).flatMap((ladder) => {
+    const automatic = activeOriginalRecords(records)
+      .filter(
+        (record) =>
+          record.id !== excludedRecordId &&
+          record.ladder === ladder &&
+          record.result !== 'PENALTY_EXEMPT' &&
+          (ladder === 'MISCONDUCT'
+            ? record.source === 'REPORT_CASE' || record.source === 'CONDUCT_REPORT'
+            : record.source === 'REVIEW_AVERAGE')
+      )
+      .sort((left, right) => {
+        return left.sequenceNumber - right.sequenceNumber || left.id.localeCompare(right.id);
+      });
+
+    return automatic.flatMap((record, index) => {
+      const expectedResult =
+        ladder === 'MISCONDUCT' ? misconductResult(index + 1) : reviewResult(index + 1);
+      return record.result === expectedResult ? [] : [{ original: record, result: expectedResult }];
+    });
+  });
+};
+
+const appendAutomaticPenaltyRecalculations = async (
+  transaction: MemberPenaltyTransaction,
+  input: {
+    memberId: string;
+    plans: AutomaticPenaltyRecalculation[];
+    actorAdminId: string;
+    reasonCode: string;
+    adminNote: string | null;
+    now: Date;
+  }
+): Promise<MemberPenaltyRow[]> => {
+  const createdRows: MemberPenaltyRow[] = [];
+  for (const plan of input.plans) {
+    const { original } = plan;
+    // Keep each reversal before its linked replacement in the audit history.
+    // eslint-disable-next-line no-await-in-loop
+    const [reversal] = await transaction
+      .insert(memberPenaltyRecord)
+      .values({
+        memberId: input.memberId,
+        ladder: original.ladder,
+        source: original.source,
+        sourceId: original.sourceId,
+        sequenceNumber: original.sequenceNumber,
+        result: 'PENALTY_REVERSAL',
+        actorType: 'ADMIN',
+        actorAdminId: input.actorAdminId,
+        reasonCode: input.reasonCode,
+        adminNote: input.adminNote,
+        createdAt: input.now,
+        reversalOfRecordId: original.id,
+      })
+      .returning();
+    if (!reversal) throw new Error('Member Penalty recalculation reversal could not be created.');
+
+    // eslint-disable-next-line no-await-in-loop
+    const [replacement] = await transaction
+      .insert(memberPenaltyRecord)
+      .values({
+        memberId: input.memberId,
+        ladder: original.ladder,
+        source: original.source,
+        sourceId: original.sourceId,
+        sequenceNumber: original.sequenceNumber,
+        result: plan.result,
+        actorType: 'ADMIN',
+        actorAdminId: input.actorAdminId,
+        reasonCode: input.reasonCode,
+        adminNote: input.adminNote,
+        createdAt: input.now,
+        recalculationOfRecordId: original.id,
+      })
+      .returning();
+    if (!replacement)
+      throw new Error('Member Penalty recalculation replacement could not be created.');
+    createdRows.push(reversal, replacement);
+  }
+  return createdRows;
+};
+
+const countMemberPenaltyRecords = async (
+  transaction: MemberPenaltyTransaction,
+  memberId: string
+): Promise<number> => {
+  const [row] = await transaction
+    .select({ total: count() })
+    .from(memberPenaltyRecord)
+    .where(eq(memberPenaltyRecord.memberId, memberId));
+  return row?.total ?? 0;
+};
+
+const assertEnabledPenaltyAdmin = async (
+  transaction: MemberPenaltyTransaction,
+  adminId: string
+): Promise<void> => {
+  const [admin] = await transaction
+    .select({ id: authAdmin.id })
+    .from(authAdmin)
+    .where(and(eq(authAdmin.id, adminId), isNull(authAdmin.disabledAt)))
+    .limit(1);
+  if (!admin)
+    throw new MemberPenaltyCommandError('ADMIN_DISABLED', 'Enabled Admin account does not exist.');
+};
+
+const normalizePenaltyRequest = async (input: {
+  adminId: string;
+  kind: MemberPenaltyCommandKind;
+  requestKey: string;
+  expectedVersionToken: number;
+  memberId: string;
+  recordId?: string;
+  result?: MemberPenaltyResult;
+  reasonCode: string;
+  adminNote: string | null;
+}): Promise<{ requestKey: string; requestHash: string; adminNote: string | null }> => {
+  const requestKey = input.requestKey.trim();
+  if (requestKey.length < 1 || requestKey.length > 200) {
+    throw new MemberPenaltyCommandError(
+      'INVALID_IDEMPOTENCY_KEY',
+      'Idempotency-Key must contain 1 to 200 characters.'
+    );
+  }
+  if (!Number.isInteger(input.expectedVersionToken) || input.expectedVersionToken < 0) {
+    throw new MemberPenaltyCommandError(
+      'INVALID_VERSION_TOKEN',
+      'A non-negative Penalty History version token is required.'
+    );
+  }
+  const adminNote = input.adminNote?.trim() || null;
+  if (input.adminNote !== null && (adminNote === null || adminNote.length > 200)) {
+    throw new MemberPenaltyCommandError(
+      'INVALID_ADMIN_NOTE',
+      'Admin note must contain 1 to 200 non-space characters.'
+    );
+  }
+  const hashInput = {
+    adminId: input.adminId,
+    kind: input.kind,
+    memberId: input.memberId,
+    expectedVersionToken: input.expectedVersionToken,
+    recordId: input.recordId ?? null,
+    result: input.result ?? null,
+    reasonCode: input.reasonCode,
+    adminNote,
+  };
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(hashInput))
+  );
+  const requestHash = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
+  return { requestKey, requestHash, adminNote };
+};
+
+const lockPenaltyCommandKey = async (
+  transaction: MemberPenaltyTransaction,
+  adminId: string,
+  kind: MemberPenaltyCommandKind,
+  requestKey: string
+): Promise<void> => {
+  await transaction.execute(
+    drizzleSql`select pg_advisory_xact_lock(hashtextextended(${`member-penalty-command:${adminId}:${kind}:${requestKey}`}, 0))`
+  );
+};
+
+const findExistingPenaltyCommand = async (
+  transaction: MemberPenaltyTransaction,
+  adminId: string,
+  kind: MemberPenaltyCommandKind,
+  requestKey: string
+): Promise<MemberPenaltyRow | undefined> => {
+  const [record] = await transaction
+    .select()
+    .from(memberPenaltyRecord)
+    .where(
+      and(
+        eq(memberPenaltyRecord.actorAdminId, adminId),
+        eq(memberPenaltyRecord.commandKind, kind),
+        eq(memberPenaltyRecord.commandRequestKey, requestKey)
+      )
+    )
+    .limit(1)
+    .for('update');
+  return record;
+};
+
+const penaltyCommandResult = (
+  kind: MemberPenaltyCommandKind,
+  record: MemberPenaltyRow
+): MemberPenaltyCommandResult => ({
+  command: {
+    kind,
+    outcome:
+      kind === 'REMOVE' ? 'REMOVED' : record.result === 'PENALTY_EXEMPT' ? 'EXEMPTED' : 'ADDED',
+    recordId: kind === 'REMOVE' ? record.reversalOfRecordId! : record.id,
+    commandRecordId: record.id,
+    result: record.result,
+    versionToken: record.commandResultVersionToken!,
+  },
+});
+
+export type MemberPenaltyCommandResult = {
+  command: {
+    kind: MemberPenaltyCommandKind;
+    outcome: 'ADDED' | 'EXEMPTED' | 'REMOVED';
+    recordId: string;
+    commandRecordId: string;
+    result: MemberPenaltyResult;
+    versionToken: number;
+  };
+};
+
+const checkPenaltyCommandReplay = (
+  existing: MemberPenaltyRow | undefined,
+  requestHash: string,
+  kind: MemberPenaltyCommandKind
+): MemberPenaltyCommandResult | undefined => {
+  if (!existing) return undefined;
+  if (existing.commandRequestHash !== requestHash) {
+    throw new MemberPenaltyCommandError(
+      'IDEMPOTENCY_KEY_REUSED',
+      'Idempotency-Key was used with a different Member Penalty command.'
+    );
+  }
+  return penaltyCommandResult(kind, existing);
+};
+
+const assertPenaltyVersion = (expected: number, current: number): void => {
+  if (expected !== current) {
+    throw new MemberPenaltyCommandError(
+      'PENALTY_HISTORY_STALE',
+      'Penalty History changed. Reload the current history before retrying.'
+    );
+  }
+};
+
+const directActionExemptionApplies = (
+  records: MemberPenaltyRow[],
+  memberCreatedAt: Date,
+  now: Date
+): boolean => {
+  const confirmed = confirmedMisconductRecords(records, memberCreatedAt);
+  if (confirmed.length < 10) return true;
+  const lastBanLift = latestDate(banLiftTimes(records, now));
+  const violationsSinceBanLift = lastBanLift
+    ? confirmed.filter((record) => record.createdAt >= lastBanLift).length
+    : Number.POSITIVE_INFINITY;
+  return lastBanLift !== null && !activeBanRecord(records, now) && violationsSinceBanLift < 3;
+};
+
+export const addAdminMemberPenalty = async (input: {
+  memberId: string;
+  adminId: string;
+  requestKey: string;
+  expectedVersionToken: number;
+  result?: Extract<
+    MemberPenaltyResult,
+    'PENALTY_RED_FLAG' | 'PENALTY_TEMPORARY_BAN_7_DAYS' | 'PENALTY_PERMANENT_BAN'
+  >;
+  reasonCode: MemberPenaltyAddReasonCode;
+  adminNote?: string;
+  now?: Date;
+}): Promise<MemberPenaltyCommandResult> => {
+  const now = input.now ?? new Date();
+  const normalized = await normalizePenaltyRequest({
+    adminId: input.adminId,
+    kind: 'ADD',
+    requestKey: input.requestKey,
+    expectedVersionToken: input.expectedVersionToken,
+    memberId: input.memberId,
+    result: input.result,
+    reasonCode: input.reasonCode,
+    adminNote: input.adminNote ?? null,
+  });
+
+  return db.transaction(async (transaction) => {
+    await lockPenaltyCommandKey(transaction, input.adminId, 'ADD', normalized.requestKey);
+    await assertEnabledPenaltyAdmin(transaction, input.adminId);
+    const existing = checkPenaltyCommandReplay(
+      await findExistingPenaltyCommand(transaction, input.adminId, 'ADD', normalized.requestKey),
+      normalized.requestHash,
+      'ADD'
+    );
+    if (existing) return existing;
+
+    const member = await lockMember(transaction, input.memberId);
+    const records = await readMemberRecords(transaction, input.memberId);
+    const currentVersion = await countMemberPenaltyRecords(transaction, input.memberId);
+    assertPenaltyVersion(input.expectedVersionToken, currentVersion);
+    const exempt = directActionExemptionApplies(records, member.createdAt, now);
+    if (exempt && input.result) {
+      throw new MemberPenaltyCommandError(
+        'PENALTY_EXEMPTION_APPLIES',
+        'A direct-action exemption applies. Do not select a penalty result.'
+      );
+    }
+    if (!exempt && !input.result) {
+      throw new MemberPenaltyCommandError(
+        'PENALTY_RESULT_REQUIRED',
+        'Select a permitted penalty result for this Add command.'
+      );
+    }
+
+    const recordId = crypto.randomUUID();
+    const result = exempt ? 'PENALTY_EXEMPT' : input.result!;
+    const [created] = await transaction
+      .insert(memberPenaltyRecord)
+      .values({
+        id: recordId,
+        memberId: input.memberId,
+        ladder: 'MISCONDUCT',
+        source: 'ADMIN',
+        sourceId: recordId,
+        sequenceNumber: nextSequenceNumber(records, 'MISCONDUCT'),
+        result,
+        actorType: 'ADMIN',
+        actorAdminId: input.adminId,
+        reasonCode: input.reasonCode,
+        adminNote: normalized.adminNote,
+        createdAt: now,
+        commandKind: 'ADD',
+        commandRequestKey: normalized.requestKey,
+        commandRequestHash: normalized.requestHash,
+        commandExpectedVersionToken: input.expectedVersionToken,
+        commandResultVersionToken: currentVersion + 1,
+      })
+      .returning();
+    if (!created) throw new Error('Admin Member Penalty Add command could not be recorded.');
+
+    await rebuildMemberProjections(transaction, input.memberId, now);
+    if (isBanResult(created.result)) {
+      await reconcileBanWalletStatusInTransaction(
+        transaction,
+        input.memberId,
+        [...records, created],
+        now
+      );
+    }
+    return penaltyCommandResult('ADD', created);
+  });
+};
+
+export const removeAdminMemberPenalty = async (input: {
+  memberId: string;
+  adminId: string;
+  requestKey: string;
+  expectedVersionToken: number;
+  recordId: string;
+  reasonCode: MemberPenaltyRemoveReasonCode;
+  adminNote?: string;
+  now?: Date;
+}): Promise<MemberPenaltyCommandResult> => {
+  const now = input.now ?? new Date();
+  const normalized = await normalizePenaltyRequest({
+    adminId: input.adminId,
+    kind: 'REMOVE',
+    requestKey: input.requestKey,
+    expectedVersionToken: input.expectedVersionToken,
+    memberId: input.memberId,
+    recordId: input.recordId,
+    reasonCode: input.reasonCode,
+    adminNote: input.adminNote ?? null,
+  });
+
+  return db.transaction(async (transaction) => {
+    await lockPenaltyCommandKey(transaction, input.adminId, 'REMOVE', normalized.requestKey);
+    await assertEnabledPenaltyAdmin(transaction, input.adminId);
+    const existing = checkPenaltyCommandReplay(
+      await findExistingPenaltyCommand(transaction, input.adminId, 'REMOVE', normalized.requestKey),
+      normalized.requestHash,
+      'REMOVE'
+    );
+    if (existing) return existing;
+
+    await lockMember(transaction, input.memberId);
+    const records = await readMemberRecords(transaction, input.memberId);
+    const currentVersion = await countMemberPenaltyRecords(transaction, input.memberId);
+    assertPenaltyVersion(input.expectedVersionToken, currentVersion);
+    const reversed = reversedRecordIds(records);
+    const original = records.find((record) => record.id === input.recordId);
+    if (!original || original.result === 'PENALTY_REVERSAL') {
+      throw new MemberPenaltyCommandError(
+        'PENALTY_RECORD_NOT_FOUND',
+        'Penalty record was not found.'
+      );
+    }
+    if (original.result === 'PENALTY_EXEMPT' || reversed.has(original.id)) {
+      throw new MemberPenaltyCommandError(
+        'PENALTY_RECORD_NOT_EFFECTIVE',
+        'Only an effective penalty record can be removed.'
+      );
+    }
+
+    const plans = automaticPenaltyRecalculations(records, original.id);
+    const resultVersion = currentVersion + 1 + plans.length * 2;
+    const [reversal] = await transaction
+      .insert(memberPenaltyRecord)
+      .values({
+        memberId: input.memberId,
+        ladder: original.ladder,
+        source: original.source,
+        sourceId: original.sourceId,
+        sequenceNumber: original.sequenceNumber,
+        result: 'PENALTY_REVERSAL',
+        actorType: 'ADMIN',
+        actorAdminId: input.adminId,
+        reasonCode: input.reasonCode,
+        adminNote: normalized.adminNote,
+        createdAt: now,
+        reversalOfRecordId: original.id,
+        commandKind: 'REMOVE',
+        commandRequestKey: normalized.requestKey,
+        commandRequestHash: normalized.requestHash,
+        commandExpectedVersionToken: input.expectedVersionToken,
+        commandResultVersionToken: resultVersion,
+      })
+      .returning();
+    if (!reversal) throw new Error('Admin Member Penalty Remove command could not be recorded.');
+
+    const recalculations = await appendAutomaticPenaltyRecalculations(transaction, {
+      memberId: input.memberId,
+      plans,
+      actorAdminId: input.adminId,
+      reasonCode: input.reasonCode,
+      adminNote: normalized.adminNote,
+      now,
+    });
+    const updatedRecords = [...records, reversal, ...recalculations];
+    await rebuildMemberProjections(transaction, input.memberId, now);
+    await reconcileBanWalletStatusInTransaction(transaction, input.memberId, updatedRecords, now);
+    return penaltyCommandResult('REMOVE', reversal);
+  });
 };
 
 /** Record one confirmed Report Case or Conduct Report violation in its caller's transaction. */
@@ -274,7 +764,10 @@ export const recordMemberConfirmedViolationInTransaction = async (
   const reportCaseExemptionUsed = confirmed.some((record) => record.source === 'REPORT_CASE');
   const exemptionApplies = input.source === 'REPORT_CASE' && !reportCaseExemptionUsed;
   const strikeCount = activeOriginalRecords(records).filter(
-    (record) => record.ladder === 'MISCONDUCT' && record.result !== 'PENALTY_EXEMPT'
+    (record) =>
+      record.ladder === 'MISCONDUCT' &&
+      (record.source === 'REPORT_CASE' || record.source === 'CONDUCT_REPORT') &&
+      record.result !== 'PENALTY_EXEMPT'
   ).length;
   const result = exemptionApplies ? 'PENALTY_EXEMPT' : misconductResult(strikeCount + 1);
 
@@ -348,15 +841,21 @@ export const reverseReportCaseViolationInTransaction = async (
     .returning();
 
   if (!reversal) throw new Error('Member Penalty reversal could not be created.');
+  const recalculations = await appendAutomaticPenaltyRecalculations(transaction, {
+    memberId: input.memberId,
+    plans: automaticPenaltyRecalculations([...records, reversal]),
+    actorAdminId: input.actorAdminId,
+    reasonCode: input.reasonCode,
+    adminNote: null,
+    now: input.now,
+  });
   await rebuildMemberProjections(transaction, input.memberId, input.now);
-  if (isBanResult(original.result)) {
-    await reconcileBanWalletStatusInTransaction(
-      transaction,
-      input.memberId,
-      [...records, reversal],
-      input.now
-    );
-  }
+  await reconcileBanWalletStatusInTransaction(
+    transaction,
+    input.memberId,
+    [...records, reversal, ...recalculations],
+    input.now
+  );
   return reversal;
 };
 

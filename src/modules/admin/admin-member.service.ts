@@ -125,6 +125,14 @@ const assertMemberProfileCollectionCursor = async (
 
 const adminMemberPenaltyReversal = alias(memberPenaltyRecord, 'admin_member_penalty_reversal');
 const adminMemberPenaltyOriginal = alias(memberPenaltyRecord, 'admin_member_penalty_original');
+const adminMemberPenaltyRecalculatedFrom = alias(
+  memberPenaltyRecord,
+  'admin_member_penalty_recalculated_from'
+);
+const adminMemberPenaltyReplacement = alias(
+  memberPenaltyRecord,
+  'admin_member_penalty_replacement'
+);
 const adminMemberPenaltyActor = alias(authAdmin, 'admin_member_penalty_actor');
 
 export const getAdminMemberProfileTags = async (
@@ -272,8 +280,9 @@ export const listAdminMemberPenaltyHistory = async (
 
   const originalMisconduct = sql<boolean>`
     ${memberPenaltyRecord.ladder} = 'MISCONDUCT'
-    AND ${memberPenaltyRecord.source} IN ('REPORT_CASE', 'CONDUCT_REPORT')
+    AND ${memberPenaltyRecord.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'ADMIN')
     AND ${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'
+    AND ${memberPenaltyRecord.recalculationOfRecordId} IS NULL
     AND ${memberPenaltyRecord.createdAt} >= ${member.createdAt.toISOString()}::timestamptz
   `;
   const hasPenaltyReversal = exists(
@@ -285,6 +294,10 @@ export const listAdminMemberPenaltyHistory = async (
   const effectiveActiveMisconduct = sql<boolean>`
     ${originalMisconduct}
     AND ${memberPenaltyRecord.result} <> 'PENALTY_EXEMPT'
+    AND ${not(hasPenaltyReversal)}
+  `;
+  const effectivePenalty = sql<boolean>`
+    ${memberPenaltyRecord.result} NOT IN ('PENALTY_EXEMPT', 'PENALTY_REVERSAL')
     AND ${not(hasPenaltyReversal)}
   `;
 
@@ -337,8 +350,10 @@ export const listAdminMemberPenaltyHistory = async (
             actorFirstName: adminMemberPenaltyActor.firstName,
             actorLastName: adminMemberPenaltyActor.lastName,
             reasonCode: memberPenaltyRecord.reasonCode,
+            adminNote: memberPenaltyRecord.adminNote,
             createdAt: memberPenaltyRecord.createdAt,
             reviewRating: review.rating,
+            isEffective: effectivePenalty,
             isEffectiveActiveMisconductPenalty: effectiveActiveMisconduct,
             originalSequenceNumber: adminMemberPenaltyOriginal.sequenceNumber,
             originalResult: adminMemberPenaltyOriginal.result,
@@ -346,6 +361,12 @@ export const listAdminMemberPenaltyHistory = async (
             reversalSequenceNumber: adminMemberPenaltyReversal.sequenceNumber,
             reversalResult: adminMemberPenaltyReversal.result,
             reversalCreatedAt: adminMemberPenaltyReversal.createdAt,
+            recalculatedFromSequenceNumber: adminMemberPenaltyRecalculatedFrom.sequenceNumber,
+            recalculatedFromResult: adminMemberPenaltyRecalculatedFrom.result,
+            recalculatedFromCreatedAt: adminMemberPenaltyRecalculatedFrom.createdAt,
+            replacementSequenceNumber: adminMemberPenaltyReplacement.sequenceNumber,
+            replacementResult: adminMemberPenaltyReplacement.result,
+            replacementCreatedAt: adminMemberPenaltyReplacement.createdAt,
           })
           .from(memberPenaltyRecord)
           .leftJoin(
@@ -377,6 +398,14 @@ export const listAdminMemberPenaltyHistory = async (
           .leftJoin(
             adminMemberPenaltyReversal,
             eq(adminMemberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id)
+          )
+          .leftJoin(
+            adminMemberPenaltyRecalculatedFrom,
+            eq(adminMemberPenaltyRecalculatedFrom.id, memberPenaltyRecord.recalculationOfRecordId)
+          )
+          .leftJoin(
+            adminMemberPenaltyReplacement,
+            eq(adminMemberPenaltyReplacement.recalculationOfRecordId, memberPenaltyRecord.id)
           )
           .leftJoin(
             adminMemberPenaltyActor,
@@ -418,6 +447,26 @@ export const listAdminMemberPenaltyHistory = async (
             result: linkedRecord.result,
             createdAt: linkedRecord.createdAt.toISOString(),
           };
+    const recalculatedFrom =
+      row.recalculatedFromSequenceNumber === null ||
+      row.recalculatedFromResult === null ||
+      row.recalculatedFromCreatedAt === null
+        ? null
+        : {
+            sequenceNumber: row.recalculatedFromSequenceNumber,
+            result: row.recalculatedFromResult,
+            createdAt: row.recalculatedFromCreatedAt.toISOString(),
+          };
+    const replacedBy =
+      row.replacementSequenceNumber === null ||
+      row.replacementResult === null ||
+      row.replacementCreatedAt === null
+        ? null
+        : {
+            sequenceNumber: row.replacementSequenceNumber,
+            result: row.replacementResult,
+            createdAt: row.replacementCreatedAt.toISOString(),
+          };
     const adminDisplayName = [row.actorFirstName, row.actorLastName]
       .filter((name): name is string => name !== null)
       .join(' ');
@@ -433,10 +482,14 @@ export const listAdminMemberPenaltyHistory = async (
         displayName: row.actorType === 'SYSTEM' ? 'System' : adminDisplayName || 'Admin',
       },
       reasonCode: row.reasonCode,
+      adminNote: row.adminNote,
       createdAt: row.createdAt.toISOString(),
       reviewRating: row.reviewRating,
+      isEffective: row.isEffective,
       isEffectiveActiveMisconductPenalty: row.isEffectiveActiveMisconductPenalty,
       reversal,
+      recalculatedFrom,
+      replacedBy,
     };
   });
   const counts = countRows[0];
@@ -446,6 +499,7 @@ export const listAdminMemberPenaltyHistory = async (
     confirmedMisconductCount: counts?.confirmedMisconductCount ?? 0,
     effectiveActiveMisconductPenaltyCount: counts?.effectiveActiveMisconductPenaltyCount ?? 0,
     reviewLadderRecordCount: counts?.reviewLadderRecordCount ?? 0,
+    versionToken: counts?.totalCount ?? 0,
     items,
     totalCount: counts?.totalCount ?? 0,
     nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,

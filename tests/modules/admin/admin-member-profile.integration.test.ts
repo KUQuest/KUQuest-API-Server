@@ -68,7 +68,7 @@ type PenaltyHistorySeed = {
   id: string;
   memberId: string;
   ladder: 'MISCONDUCT' | 'REVIEW';
-  source: 'REPORT_CASE' | 'CONDUCT_REPORT' | 'REVIEW_AVERAGE';
+  source: 'REPORT_CASE' | 'CONDUCT_REPORT' | 'REVIEW_AVERAGE' | 'ADMIN';
   sourceId: string;
   sequenceNumber: number;
   result: MemberPenaltyResult;
@@ -678,11 +678,23 @@ type PenaltyHistoryItem = {
   result: MemberPenaltyResult;
   actor: { type: 'ADMIN' | 'SYSTEM'; displayName: string | null };
   reasonCode: string;
+  adminNote: string | null;
   createdAt: string;
   reviewRating: number | null;
+  isEffective: boolean;
   isEffectiveActiveMisconductPenalty: boolean;
   reversal: {
     relation: 'REVERSAL_OF' | 'REVERSED_BY';
+    sequenceNumber: number;
+    result: MemberPenaltyResult;
+    createdAt: string;
+  } | null;
+  recalculatedFrom: {
+    sequenceNumber: number;
+    result: MemberPenaltyResult;
+    createdAt: string;
+  } | null;
+  replacedBy: {
     sequenceNumber: number;
     result: MemberPenaltyResult;
     createdAt: string;
@@ -695,6 +707,7 @@ type PenaltyHistoryBody = {
     confirmedMisconductCount: number;
     effectiveActiveMisconductPenaltyCount: number;
     reviewLadderRecordCount: number;
+    versionToken: number;
     items: PenaltyHistoryItem[];
     totalCount: number;
     nextCursor: string | null;
@@ -753,17 +766,22 @@ describe('Admin Member Profile collection reads', () => {
       'member',
       'nextCursor',
       'reviewLadderRecordCount',
+      'versionToken',
       'totalCount',
     ]);
     const itemProperties = dataProperties?.items?.items?.properties;
     expect(Object.keys(itemProperties ?? {}).sort()).toEqual([
       'actor',
+      'adminNote',
       'createdAt',
+      'isEffective',
       'isEffectiveActiveMisconductPenalty',
       'ladder',
+      'recalculatedFrom',
       'reasonCode',
       'result',
       'reversal',
+      'replacedBy',
       'reviewRating',
       'sequenceNumber',
       'source',
@@ -850,12 +868,16 @@ describe('Admin Member Profile collection reads', () => {
     });
     expect(Object.keys(exempt ?? {}).sort()).toEqual([
       'actor',
+      'adminNote',
       'createdAt',
+      'isEffective',
       'isEffectiveActiveMisconductPenalty',
       'ladder',
+      'recalculatedFrom',
       'reasonCode',
       'result',
       'reversal',
+      'replacedBy',
       'reviewRating',
       'sequenceNumber',
       'source',

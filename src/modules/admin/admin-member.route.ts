@@ -9,6 +9,7 @@ import {
 import { Elysia } from 'elysia';
 
 import {
+  addAdminMemberPenaltyController,
   getAdminMemberDetailController,
   getAdminMemberProfileTagsController,
   listAdminMemberCertificatesController,
@@ -17,8 +18,12 @@ import {
   listAdminMemberReviewsController,
   listAdminMemberWorkExperiencesController,
   listAdminMembersController,
+  removeAdminMemberPenaltyController,
 } from './admin-member.controller';
 import {
+  adminMemberPenaltyAddBodySchema,
+  adminMemberPenaltyCommandResponseSchema,
+  adminMemberPenaltyRemoveBodySchema,
   adminMemberCertificatesResponseSchema,
   adminMemberDetailResponseSchema,
   adminMemberHistoryQuerySchema,
@@ -138,8 +143,34 @@ export const adminMemberRoute = new Elysia({
       tags: ['Admin Members'],
       summary: 'List a Member’s Penalty History',
       description:
-        'Returns immutable penalty records and separate Misconduct and Review ladder counts with safe source Display IDs.',
+        'Returns immutable penalty records, effective status, Admin notes, reversal and recalculation links, separate Misconduct and Review counts, and a version token for Add/Remove commands. Expired timed penalties remain effective until reversed.',
       operationId: 'listAdminMemberPenaltyHistory',
-      security: betterAuthSecurity,
+      security: betterAuthAdminSecurity,
+    },
+  })
+  .post('/:id/penalty-actions/add', addAdminMemberPenaltyController, {
+    params: adminMemberParamsSchema,
+    body: adminMemberPenaltyAddBodySchema,
+    response: responses(adminMemberPenaltyCommandResponseSchema, 400, 401, 403, 404, 409),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'Add a direct Member Penalty',
+      description:
+        'Records a direct Admin Record violation in immutable Penalty History. Requires the current history version token and Idempotency-Key. An applicable PC-12 or PC-13 exemption creates an exempt record and does not accept a selected result. Direct Admin results do not count toward the automatic Misconduct ladder.',
+      operationId: 'addAdminMemberPenalty',
+      security: betterAuthAdminSecurity,
+    },
+  })
+  .post('/:id/penalty-actions/remove', removeAdminMemberPenaltyController, {
+    params: adminMemberParamsSchema,
+    body: adminMemberPenaltyRemoveBodySchema,
+    response: responses(adminMemberPenaltyCommandResponseSchema, 400, 401, 403, 404, 409),
+    detail: {
+      tags: ['Admin Members'],
+      summary: 'Remove an effective Member Penalty',
+      description:
+        'Appends a reversal for any effective penalty, including expired penalties, and recalculates later automatic results from the remaining effective history. Requires the current history version token and Idempotency-Key.',
+      operationId: 'removeAdminMemberPenalty',
+      security: betterAuthAdminSecurity,
     },
   });
