@@ -1,4 +1,5 @@
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+import { adminMemberModerationContextFieldsSchema } from '@/modules/admin/admin-member.schema';
 
 import { t, type Static } from 'elysia';
 
@@ -372,6 +373,7 @@ const adminConductReportDecisionSchema = t.Union([
 
 export const adminConductReportDetailSchema = t.Composite([
   adminConductReportSummarySchema,
+  adminMemberModerationContextFieldsSchema,
   t.Object({
     assignment: adminConductReportAssignmentSchema,
     proofSubmission: t.Nullable(adminConductReportProofSchema),
@@ -390,13 +392,18 @@ export const adminConductReportDetailSchema = t.Composite([
   }),
 ]);
 
+const adminReportCaseDetailSchema = t.Composite([
+  adminReportCaseSummarySchema,
+  adminMemberModerationContextFieldsSchema,
+]);
+
 const adminReportListItemSchema = t.Union([
   adminReportCaseSummarySchema,
   adminConductReportSummarySchema,
 ]);
 
 const adminReportDetailSchema = t.Union([
-  adminReportCaseSummarySchema,
+  adminReportCaseDetailSchema,
   adminConductReportDetailSchema,
 ]);
 

@@ -17,6 +17,33 @@ export const adminMemberStatusSchema = t.Union(
   }
 );
 
+const adminMemberModerationActionSchema = t.Union([
+  t.Literal('REPORT_CASE_DISMISS'),
+  t.Literal('REPORT_CASE_HIDE'),
+  t.Literal('REPORT_CASE_RESTORE'),
+  t.Literal('CONDUCT_REPORT_DISMISS'),
+  t.Literal('CONDUCT_REPORT_UPHOLD'),
+]);
+
+export const adminMemberModerationContextFieldsSchema = t.Object({
+  memberStatus: t.Union([adminMemberStatusSchema, t.Null()], {
+    description: 'The current Member status. Null when the related Member record is unavailable.',
+  }),
+  previousReportCount: t.Union([t.Integer({ minimum: 0 }), t.Null()], {
+    description:
+      'The number of earlier Report Cases filed against this Member. Each Case counts once; the current Case is excluded. Null when the Member record is unavailable.',
+  }),
+  confirmedViolationCount: t.Union([t.Integer({ minimum: 0 }), t.Null()], {
+    description:
+      'The historical confirmedMisconductCount for this Member before the current Case. It includes exempt and later-reversed original records, and excludes reversal rows. Null when the Member record is unavailable.',
+  }),
+  previousModerationActions: t.Array(adminMemberModerationActionSchema, {
+    maxItems: 5,
+    description:
+      'The five most recent earlier Report Case or Conduct Report decisions for this Member, newest first. Empty when no earlier decisions exist or the Member record is unavailable.',
+  }),
+});
+
 export const adminMemberParamsSchema = t.Object({
   id: uuid,
 });
@@ -283,6 +310,10 @@ export type AdminMemberReviewsData = Static<typeof adminMemberReviewsResponseSch
 export type AdminMemberParams = Static<typeof adminMemberParamsSchema>;
 export type AdminMemberListItem = Static<typeof adminMemberListItemSchema>;
 export type AdminMemberStatus = Static<typeof adminMemberStatusSchema>;
+export type AdminMemberModerationAction = Static<typeof adminMemberModerationActionSchema>;
+export type AdminMemberModerationContextFields = Static<
+  typeof adminMemberModerationContextFieldsSchema
+>;
 export type AdminMemberListQuery = Static<typeof adminMemberListQuerySchema>;
 export type AdminMemberListData = Static<typeof adminMemberListResponseSchema>['data'];
 export type AdminMemberDetailData = Static<typeof adminMemberDetailResponseSchema>['data'];
