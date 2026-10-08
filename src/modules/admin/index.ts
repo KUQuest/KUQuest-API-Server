@@ -15,6 +15,7 @@ export type {
 } from './admin-member.schema';
 export { getAdminMemberModerationContext } from './admin-member-moderation-context.service';
 export {
+  formatConductReportDisplayId,
   formatDisplayIdSql,
   formatDisputeDisplayId,
   formatQuestDisplayId,
