@@ -254,6 +254,7 @@ Use this table:
 | Quest is assigned                               | Assignment, Work Chat, explicit Start Work  |
 | Quest is in progress                            | Proof Submission or completion confirmation |
 | Quest is terminal                               | Rating Review                               |
+| Quest is assigned through 1 day after terminal  | Conduct Report                              |
 
 Do not apply a SINGLE rule to a GROUP Quest.
 Do not apply a FIRST_COME_FIRST_SERVED rule to a CANDIDATE Quest.
@@ -2993,6 +2994,69 @@ Errors:
 - 400 INVALID_COMMENT
 - idempotency errors
 
+### 14.3 Conduct Report
+
+A Conduct Report is not a Rating Review. It asks an Admin to review how one Member behaved on the Quest. Filing moves no money, changes no Quest or Assignment state, and sends no notification. The reported Member never learns who filed. An Admin decides CONDUCT_REPORT_UPHELD or CONDUCT_REPORT_DISMISSED later.
+
+Read what the caller can file and what the caller filed:
+
+```http
+GET /api/v2/quests/:questId/conduct-reports
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "windowEndsAt": "2026-10-09T10:00:00.000Z",
+    "reportable": [{ "memberId": "worker-uuid", "reason": "CONDUCT_ABANDONED" }],
+    "items": []
+  }
+}
+```
+
+- Show a report action only for a pair in `reportable`. The Server decides it; do not rebuild the rules on the client.
+- `items` are the caller's own Conduct Reports: `{ id, displayId, questId, reportedMemberId, reason, detail, status, createdAt }`. `displayId` reads `CND-000123`. `status` is CONDUCT_REPORT_PENDING, CONDUCT_REPORT_UPHELD, or CONDUCT_REPORT_DISMISSED.
+- `windowEndsAt` is 1 day after the Quest became Terminal. It is null while the Quest is not Terminal.
+- Only the Hirer and Members with an Assignment can read; others get 404 QUEST_NOT_FOUND.
+
+Rules the Server applies to `reportable`:
+
+| Filer → Reported | reason               | When                                                                                                                                                                 |
+| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hirer → Worker   | CONDUCT_ABANDONED    | After `dueAt`, the Worker sent no Proof Submission and made no proof-free confirmation. A cancelled Assignment is excluded. GROUP + CANDIDATE: the Team Leader only. |
+| Worker → Hirer   | CONDUCT_OUT_OF_SCOPE | Any Worker with an Assignment.                                                                                                                                       |
+| Worker → Worker  | CONDUCT_NO_SHOW      | GROUP + FIRST_COME_FIRST_SERVED only, against another Worker as for CONDUCT_ABANDONED.                                                                               |
+
+The window opens at QUEST_ASSIGNED and closes at `windowEndsAt`. Each Member can be reported once per Quest, by any filer.
+
+File a Conduct Report:
+
+```http
+POST /api/v2/quests/:questId/conduct-reports
+Idempotency-Key: conduct-report-client-action-id
+Content-Type: application/json
+```
+
+```json
+{
+  "reportedMemberId": "worker-uuid",
+  "reason": "CONDUCT_ABANDONED",
+  "detail": "No work arrived before the deadline."
+}
+```
+
+`detail` is optional, 1 to 1000 characters, not blank. Success is HTTP 200 with one item in the `items` shape.
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 403 CONDUCT_REPORT_NOT_ALLOWED
+- 409 CONDUCT_REPORT_WINDOW_CLOSED
+- 409 CONDUCT_REPORT_ALREADY_EXISTS
+- 400 INVALID_DETAIL
+- idempotency errors
+
 ## 15. Candidate Inquiry Conversation
 
 Candidate Inquiry Conversation is not Work Chat.
@@ -3160,7 +3224,7 @@ EDIT_REQUEST_FAILED.
 
 ## 17. Complete endpoint catalog
 
-The current Quest v2 route set has 46 endpoints:
+The current Quest v2 route set has 48 endpoints:
 
 |   # | Method | Path                                                                | Main actor                 |
 | --: | ------ | ------------------------------------------------------------------- | -------------------------- |
@@ -3211,6 +3275,8 @@ The current Quest v2 route set has 46 endpoints:
 |  44 | POST   | /api/v2/quests/:questId/completion-confirmation                     | Worker                     |
 |  45 | POST   | /api/v2/quests/:questId/reviews                                     | Hirer or Worker            |
 |  46 | PATCH  | /api/v2/quests/:questId/reviews/:reviewId                           | review author              |
+|  47 | GET    | /api/v2/quests/:questId/conduct-reports                             | Hirer or Assignment holder |
+|  48 | POST   | /api/v2/quests/:questId/conduct-reports                             | Hirer or Assignment holder |
 
 ## 18. Error handling checklist
 
