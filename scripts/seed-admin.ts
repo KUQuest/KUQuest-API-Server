@@ -4,6 +4,8 @@ import { authAdmin } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { isValidAdminPassword } from '@/modules/auth/admin-auth.policy';
 
+import { sql as drizzleSql } from 'drizzle-orm';
+
 const firstAdminBootstrapLockName = 'kuquest:first-admin-bootstrap';
 
 const readRequiredEnv = (name: string, trim = true): string => {
@@ -43,14 +45,17 @@ const main = async (): Promise<void> => {
       hashtextextended(${firstAdminBootstrapLockName}, 0)
     )`;
 
-    const existingAdmin = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
+    const [configuredAdmin] = await db
+      .select({ email: authAdmin.email })
+      .from(authAdmin)
+      .where(drizzleSql`lower(${authAdmin.email}) = ${email}`)
+      .limit(1);
 
-    if (existingAdmin.length > 0) {
-      const errorMessage =
-        existingAdmin[0].email.toLowerCase() === email
-          ? 'An Admin with this email already exists; no changes were made'
-          : 'An Admin already exists; first-Admin bootstrap made no changes';
-      throw new Error(errorMessage);
+    if (configuredAdmin) return null;
+
+    const [existingAdmin] = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
+    if (existingAdmin) {
+      throw new Error('An Admin already exists; first-Admin bootstrap made no changes');
     }
 
     const seedAuth = createAdminAuth({
@@ -69,6 +74,11 @@ const main = async (): Promise<void> => {
       },
     });
   });
+
+  if (!result) {
+    console.log(`Admin ${email} already exists; no changes were made`);
+    return;
+  }
 
   if (!result.user) throw new Error('Better Auth did not create the Admin user');
 
