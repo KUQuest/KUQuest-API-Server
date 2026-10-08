@@ -13,7 +13,7 @@ import {
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
+import { createQuestV2, formatQuestV2ScheduleTime, type QuestV2CreateInput } from '@/modules/quest';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { detectQuestV2Underfilled } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
@@ -99,8 +99,8 @@ const nextFixtureSchedule = () => {
   const startTime = nextFixtureStartTime;
   nextFixtureStartTime = new Date(nextFixtureStartTime.getTime() + 3 * 60 * 60 * 1000);
   return {
-    startTime: startTime.toISOString(),
-    dueAt: new Date(startTime.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+    startTime: formatQuestV2ScheduleTime(startTime),
+    dueAt: formatQuestV2ScheduleTime(new Date(startTime.getTime() + 2 * 60 * 60 * 1000)),
   };
 };
 

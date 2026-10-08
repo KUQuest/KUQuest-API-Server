@@ -1352,8 +1352,8 @@ describe('Quest API v1 to v2 migration verification', () => {
         .from(questCandidateApplicationV2)
         .where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))
     ).toEqual([
-      { memberId: worker.id, state: 'APPLICATION_REJECTED' },
       { memberId: secondWorker.id, state: 'APPLICATION_SELECTED' },
+      { memberId: worker.id, state: 'APPLICATION_REJECTED' },
     ]);
     expect(
       await db
