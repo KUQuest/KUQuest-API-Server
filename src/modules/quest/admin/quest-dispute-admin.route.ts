@@ -54,7 +54,7 @@ export const adminDisputeRoute = new Elysia({
       tags: ['Admin Disputes'],
       summary: 'Open a Dispute Case for a Worker',
       description:
-        'Opens one Admin-filed Dispute Case for a Worker with an Assignment on a failed Quest within the five-day filing window.',
+        'Opens one Admin-filed Dispute Case for an assigned Worker on a failed Quest within five days. The Admin submits the Worker-provided category, submittedDetail, and optional filerStatement.',
       operationId: 'openAdminDispute',
       security: betterAuthSecurity,
     },

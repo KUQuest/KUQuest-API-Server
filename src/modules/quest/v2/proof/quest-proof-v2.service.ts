@@ -32,7 +32,6 @@ import {
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
 } from '../../shared/command/quest-command.service';
-import { createAdminDisputeCaseInTransaction } from '../../admin';
 
 import {
   failQuestV2InTransaction,
@@ -2224,13 +2223,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.now,
           input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
         );
-        if (current.questState === 'QUEST_IN_PROGRESS') {
-          await createAdminDisputeCaseInTransaction(transaction, {
-            questId: input.questId,
-            filerUserId: subject.workerId,
-            now: input.now,
-          });
-        }
         questStatus = failure.questStatus;
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments

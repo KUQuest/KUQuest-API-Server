@@ -1174,6 +1174,8 @@ const seedDisputeCases = async (
     const disputeCase = await createAdminDisputeCase({
       questId: questSeed.questId,
       filerUserId: questSeed.roleIds[seed.filerRole],
+      category: 'PROOF_REVIEW',
+      submittedDetail: 'The proof review needs an Admin decision.',
     });
     results.push(
       await applyDisputeStatus({

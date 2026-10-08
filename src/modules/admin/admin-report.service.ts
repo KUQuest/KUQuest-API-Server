@@ -584,6 +584,7 @@ const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSumma
     proofRequired: row.quest.proofRequired,
     startTime: row.quest.startTime.toISOString(),
     dueAt: serializeDate(row.quest.dueAt),
+    failedAt: serializeDate(row.quest.failedAt),
     createdAt: row.quest.createdAt.toISOString(),
     updatedAt: row.quest.updatedAt.toISOString(),
     hirer: row.hirer,

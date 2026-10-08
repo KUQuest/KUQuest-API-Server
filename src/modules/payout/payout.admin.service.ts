@@ -1,6 +1,7 @@
 import { formatDisplayIdSql, formatPayoutDisplayId } from '@/modules/admin/admin-display-id';
 import { db } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { adminAction } from '@/database/schema/admin.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutStatusHistory,
   paymentPayoutQuotes,
@@ -17,7 +18,7 @@ import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, count, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, or } from 'drizzle-orm';
 
 import {
   payoutAdminActionCatalog,
@@ -109,8 +110,11 @@ export type AdminPayoutStatusHistory = {
   providerStatus: string | null;
   actorUserId: string | null;
   actorAdminId: string | null;
+  admin: { firstName: string; lastName: string } | null;
   source: string;
   reason: string | null;
+  reasonCode: string | null;
+  decisionReasonText: string | null;
   occurredAt: Date;
 };
 
@@ -341,21 +345,62 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
       providerStatus: paymentPayoutStatusHistory.providerStatus,
       actorUserId: paymentPayoutStatusHistory.actorUserId,
       actorAdminId: paymentPayoutStatusHistory.actorAdminId,
+      adminFirstName: authAdmin.firstName,
+      adminLastName: authAdmin.lastName,
       source: paymentPayoutStatusHistory.source,
       reason: paymentPayoutStatusHistory.reason,
+      decisionReasonText: adminAction.decisionReasonText,
       occurredAt: paymentPayoutStatusHistory.occurredAt,
     })
     .from(paymentPayoutStatusHistory)
+    .leftJoin(
+      adminAction,
+      and(
+        eq(adminAction.resourceType, 'payout'),
+        eq(adminAction.resourceId, payoutId),
+        eq(adminAction.adminId, paymentPayoutStatusHistory.actorAdminId),
+        or(
+          and(
+            eq(paymentPayoutStatusHistory.source, 'ADMIN_APPROVAL'),
+            eq(adminAction.action, 'PAYOUT_APPROVE')
+          ),
+          and(
+            eq(paymentPayoutStatusHistory.source, 'ADMIN_CANCELLATION'),
+            eq(adminAction.action, 'PAYOUT_CANCEL')
+          )
+        )
+      )
+    )
+    .leftJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
   return rows.map((row) => {
+    const admin =
+      row.adminFirstName !== null && row.adminLastName !== null
+        ? { firstName: row.adminFirstName, lastName: row.adminLastName }
+        : null;
+    const historyRow = {
+      id: row.id,
+      fromStatus: row.fromStatus,
+      toStatus: row.toStatus,
+      providerStatus: row.providerStatus,
+      actorUserId: row.actorUserId,
+      actorAdminId: row.actorAdminId,
+      admin,
+      source: row.source,
+      reason: row.reason,
+      decisionReasonText: row.decisionReasonText,
+      occurredAt: row.occurredAt,
+    };
     if (row.source === 'ADMIN_APPROVAL') {
-      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE') };
+      const reasonCode = safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE');
+      return { ...historyRow, reason: reasonCode, reasonCode };
     }
     if (row.source === 'ADMIN_CANCELLATION') {
-      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL') };
+      const reasonCode = safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL');
+      return { ...historyRow, reason: reasonCode, reasonCode };
     }
-    return row;
+    return { ...historyRow, reasonCode: null, decisionReasonText: null };
   }) as AdminPayoutStatusHistory[];
 };
 

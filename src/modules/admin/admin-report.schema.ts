@@ -268,6 +268,7 @@ const adminConductReportQuestSchema = t.Object({
   proofRequired: t.Boolean(),
   startTime: dateTime,
   dueAt: t.Nullable(dateTime),
+  failedAt: t.Nullable(dateTime),
   createdAt: dateTime,
   updatedAt: dateTime,
   hirer: adminReportMemberSchema,

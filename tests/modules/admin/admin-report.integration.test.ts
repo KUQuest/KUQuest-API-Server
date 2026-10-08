@@ -1332,7 +1332,7 @@ describe('Admin Report Case API', () => {
       id: fixture.reportId,
       displayId: expect.stringMatching(/^CND-\d{6}$/),
       reportedMember: { id: reporterId, studentId: reporterStudentId },
-      quest: { hirer: { id: senderId, studentId: senderStudentId } },
+      quest: { failedAt: null, hirer: { id: senderId, studentId: senderStudentId } },
       assignment: {
         id: fixture.assignmentId,
         worker: { id: reporterId, studentId: reporterStudentId },
@@ -1342,6 +1342,15 @@ describe('Admin Report Case API', () => {
       decision: null,
       detail: 'The Quest record requires Admin review.',
     });
+
+    const failedAt = new Date('2020-02-02T10:30:00.000Z');
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_FAILED', failedAt })
+      .where(eq(quest.id, fixture.questId));
+    const failedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(failedDetail.status).toBe(200);
+    expect((await failedDetail.json()).data.quest.failedAt).toBe(failedAt.toISOString());
 
     const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
     await db
