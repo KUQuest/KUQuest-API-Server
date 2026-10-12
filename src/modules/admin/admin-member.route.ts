@@ -156,7 +156,7 @@ export const adminMemberRoute = new Elysia({
       tags: ['Admin Members'],
       summary: 'Add a direct Member Penalty',
       description:
-        'Records a direct Admin Record violation in immutable Penalty History. Requires the current history version token and Idempotency-Key. An applicable PC-12 or PC-13 exemption creates an exempt record and does not accept a selected result. Direct Admin results do not count toward the automatic Misconduct ladder.',
+        'Records a direct Admin Record violation in immutable Penalty History. PC-12 and PC-13 do not exempt a new direct Add. A new Add requires the current history version token, Idempotency-Key, and one permitted result. A request without a result can only replay a previously accepted command. Direct Admin results do not count toward the automatic Misconduct ladder.',
       operationId: 'addAdminMemberPenalty',
       security: betterAuthAdminSecurity,
     },
