@@ -64,9 +64,8 @@ Fully automatic system evaluation (not Admin-triggered):
 
 - **Record violation** is a direct Admin action. It does not require a Report Case or Conduct Report.
 - The Admin selects one permitted Misconduct result: `PENALTY_RED_FLAG`, `PENALTY_TEMPORARY_BAN_7_DAYS`, or `PENALTY_PERMANENT_BAN`. The 1-month Temporary ban belongs only to the automatic Review ladder.
-- The existing direct-action exemptions remain in effect. `PC-12` exempts the first 10 confirmed violations after account creation. `PC-13` exempts the first 3 confirmed violations after a temporary or permanent ban lifts. If an exemption applies, no penalty is added and the Admin cannot select a penalty.
-- The Add command records an exempt `PENALTY_EXEMPT` history row when `PC-12` or `PC-13` applies. It rejects a selected result in that case. When no exemption applies, the Admin must select one permitted result.
-- Direct-action exemption counts include confirmed Misconduct events from Report Cases, Conduct Reports, and earlier direct Record violation actions. Review events do not count. A direct Record violation counts toward later direct-action exemption checks.
+- `PC-12` and `PC-13` do not exempt a new direct Record violation. The Admin must select one permitted result, and the Add command saves that result.
+- A new Add command without a result is rejected. A request without a result is accepted only when it replays a previously accepted idempotent command.
 - A direct Admin-selected result stays as selected. It does not count toward later automatic Misconduct ladder results, and recalculation does not change it.
 - Add reason codes are `MEMBER_PENALTY_VIOLATION_CONFIRMED`, `MEMBER_PENALTY_REPEATED_VIOLATION_CONFIRMED`, `MEMBER_PENALTY_SAFETY_RISK_CONFIRMED`, and `MEMBER_PENALTY_OTHER_VIOLATION_CONFIRMED`.
 - The Admin must select an Add reason code. An optional Admin note has a maximum of 200 characters and appears in Penalty History.

@@ -276,31 +276,6 @@ const reviewResult = (strikeCount: number): MemberPenaltyResult =>
       ? 'PENALTY_TEMPORARY_BAN_1_MONTH'
       : 'PENALTY_PERMANENT_BAN';
 
-const banLiftTimes = (records: MemberPenaltyRow[], now: Date): Date[] => {
-  const reversals = new Map(
-    records.flatMap((record) =>
-      record.result === 'PENALTY_REVERSAL' && record.reversalOfRecordId
-        ? [[record.reversalOfRecordId, record.createdAt] as const]
-        : []
-    )
-  );
-
-  return originalRecords(records).flatMap((record) => {
-    if (record.result === 'PENALTY_PERMANENT_BAN') {
-      const reversalAt = reversals.get(record.id);
-      return reversalAt ? [reversalAt] : [];
-    }
-
-    if (!isTemporaryBan(record.result)) return [];
-    const expiry = temporaryBanExpiresAt(record);
-    if (!expiry) return [];
-
-    const reversalAt = reversals.get(record.id);
-    if (reversalAt) return [reversalAt < expiry ? reversalAt : expiry];
-    return expiry <= now ? [expiry] : [];
-  });
-};
-
 type AutomaticPenaltyRecalculation = {
   original: MemberPenaltyRow;
   result: MemberPenaltyResult;
@@ -550,20 +525,6 @@ const assertPenaltyVersion = (expected: number, current: number): void => {
   }
 };
 
-const directActionExemptionApplies = (
-  records: MemberPenaltyRow[],
-  memberCreatedAt: Date,
-  now: Date
-): boolean => {
-  const confirmed = confirmedMisconductRecords(records, memberCreatedAt);
-  if (confirmed.length < 10) return true;
-  const lastBanLift = latestDate(banLiftTimes(records, now));
-  const violationsSinceBanLift = lastBanLift
-    ? confirmed.filter((record) => record.createdAt >= lastBanLift).length
-    : Number.POSITIVE_INFINITY;
-  return lastBanLift !== null && !activeBanRecord(records, now) && violationsSinceBanLift < 3;
-};
-
 export const addAdminMemberPenalty = async (input: {
   memberId: string;
   adminId: string;
@@ -599,18 +560,11 @@ export const addAdminMemberPenalty = async (input: {
     );
     if (existing) return existing;
 
-    const member = await lockMember(transaction, input.memberId);
+    await lockMember(transaction, input.memberId);
     const records = await readMemberRecords(transaction, input.memberId);
     const currentVersion = await countMemberPenaltyRecords(transaction, input.memberId);
     assertPenaltyVersion(input.expectedVersionToken, currentVersion);
-    const exempt = directActionExemptionApplies(records, member.createdAt, now);
-    if (exempt && input.result) {
-      throw new MemberPenaltyCommandError(
-        'PENALTY_EXEMPTION_APPLIES',
-        'A direct-action exemption applies. Do not select a penalty result.'
-      );
-    }
-    if (!exempt && !input.result) {
+    if (!input.result) {
       throw new MemberPenaltyCommandError(
         'PENALTY_RESULT_REQUIRED',
         'Select a permitted penalty result for this Add command.'
@@ -618,7 +572,6 @@ export const addAdminMemberPenalty = async (input: {
     }
 
     const recordId = crypto.randomUUID();
-    const result = exempt ? 'PENALTY_EXEMPT' : input.result!;
     const [created] = await transaction
       .insert(memberPenaltyRecord)
       .values({
@@ -628,7 +581,7 @@ export const addAdminMemberPenalty = async (input: {
         source: 'ADMIN',
         sourceId: recordId,
         sequenceNumber: nextSequenceNumber(records, 'MISCONDUCT'),
-        result,
+        result: input.result,
         actorType: 'ADMIN',
         actorAdminId: input.adminId,
         reasonCode: input.reasonCode,
