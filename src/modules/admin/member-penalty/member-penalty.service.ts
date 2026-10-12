@@ -276,31 +276,6 @@ const reviewResult = (strikeCount: number): MemberPenaltyResult =>
       ? 'PENALTY_TEMPORARY_BAN_1_MONTH'
       : 'PENALTY_PERMANENT_BAN';
 
-const banLiftTimes = (records: MemberPenaltyRow[], now: Date): Date[] => {
-  const reversals = new Map(
-    records.flatMap((record) =>
-      record.result === 'PENALTY_REVERSAL' && record.reversalOfRecordId
-        ? [[record.reversalOfRecordId, record.createdAt] as const]
-        : []
-    )
-  );
-
-  return originalRecords(records).flatMap((record) => {
-    if (record.result === 'PENALTY_PERMANENT_BAN') {
-      const reversalAt = reversals.get(record.id);
-      return reversalAt ? [reversalAt] : [];
-    }
-
-    if (!isTemporaryBan(record.result)) return [];
-    const expiry = temporaryBanExpiresAt(record);
-    if (!expiry) return [];
-
-    const reversalAt = reversals.get(record.id);
-    if (reversalAt) return [reversalAt < expiry ? reversalAt : expiry];
-    return expiry <= now ? [expiry] : [];
-  });
-};
-
 type AutomaticPenaltyRecalculation = {
   original: MemberPenaltyRow;
   result: MemberPenaltyResult;
