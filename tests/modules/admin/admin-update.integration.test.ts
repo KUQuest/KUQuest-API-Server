@@ -60,24 +60,37 @@ const adminEventsRequest = (cookie = adminCookies[0]!, origin?: string) =>
     })
   );
 
-const readText = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-  let timeout: ReturnType<typeof setTimeout>;
-  let next: Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>;
+const readWithTimeout = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMessage: string,
+  timeoutMs: number
+) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    next = await Promise.race([
+    return await Promise.race([
       reader.read(),
       new Promise<never>((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('Timed out waiting for Admin SSE data.')),
-          5_000
-        );
+        timeout = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
       }),
     ]);
   } finally {
-    clearTimeout(timeout!);
+    if (timeout !== undefined) clearTimeout(timeout);
   }
+};
+
+const readText = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  const next = await readWithTimeout(reader, 'Timed out waiting for Admin SSE data.', 5_000);
   if (next.done) throw new Error('Admin SSE stream closed before the expected event.');
   return new TextDecoder().decode(next.value);
+};
+
+const expectStreamToClose = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  const result = await readWithTimeout(
+    reader,
+    'Timed out waiting for Admin SSE stream to close.',
+    10_000
+  );
+  expect(result.done).toBe(true);
 };
 
 const readEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
@@ -122,6 +135,7 @@ describe('Admin SSE updates', () => {
           string,
           {
             operationId?: string;
+            description?: string;
             security?: Array<Record<string, unknown>>;
             responses?: Record<
               string,
@@ -137,6 +151,9 @@ describe('Admin SSE updates', () => {
 
     expect(response.status).toBe(200);
     expect(operation?.operationId).toBe('subscribeAdminUpdates');
+    expect(operation?.description).toContain('GET /api/v1/admin/reports/{reportId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/overview');
+    expect(operation?.description).toContain('Other resource types need a documented read mapping');
     expect(operation?.security?.[0]).toHaveProperty('betterAuthAdminSession');
     expect(operation?.responses).toHaveProperty('401');
     expect(operation?.responses).toHaveProperty('403');
@@ -284,6 +301,46 @@ describe('Admin SSE updates', () => {
       expect(await readText(reconnectReader)).toContain(': connected');
     } finally {
       await reconnectReader.cancel();
+    }
+  });
+
+  it('closes open streams after an unexpected PostgreSQL listener disconnect so clients can reconnect', async () => {
+    if (!databaseReady) return;
+
+    const response = await adminEventsRequest(adminCookies[0]);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      expect(await readText(reader)).toContain(': connected');
+      const streamClose = expectStreamToClose(reader);
+
+      const [listener] = await sql<{ pid: number }[]>`
+        select pid
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and state = 'idle'
+          and query = 'listen "kuquest_admin_updates"'
+        limit 1
+      `;
+      if (!listener) throw new Error('Admin update PostgreSQL listener is missing.');
+
+      const [{ terminated }] = await sql<{ terminated: boolean }[]>`
+        select pg_terminate_backend(${listener.pid}) as terminated
+      `;
+      expect(terminated).toBe(true);
+      await streamClose;
+
+      const reconnected = await adminEventsRequest(adminCookies[0]);
+      expect(reconnected.status).toBe(200);
+      const reconnectReader = reconnected.body!.getReader();
+      try {
+        expect(await readText(reconnectReader)).toContain(': connected');
+      } finally {
+        await reconnectReader.cancel();
+      }
+    } finally {
+      await reader.cancel();
     }
   });
 });
