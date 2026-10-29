@@ -15,11 +15,13 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import {
   formatDisputeDisplayId,
   formatDisplayIdSql,
   formatQuestDisplayId,
   getAdminMemberModerationContext,
+  notifyAdminResourceUpdated,
 } from '@/modules/admin';
 import type { AdminMemberModerationContextFields, AdminMemberStatus } from '@/modules/admin';
 import {
@@ -70,6 +72,25 @@ const notifyDisputeCaseUpdated = (
     ),
     changeType: 'DISPUTE_CASE_UPDATED',
   });
+
+/**
+ * Admin Dispute Case queues, counts, detail, and linked Admin Quest detail use
+ * these rows as their source. Notify in the same transaction as each write so
+ * rollback and idempotent replay do not publish a stale invalidation.
+ */
+const notifyAdminDisputeCaseViewsUpdated = async (
+  transaction: WalletTransaction,
+  record: Pick<typeof adminDisputeCase.$inferSelect, 'id' | 'questId'>,
+  walletIds: string[] = []
+) => {
+  await notifyAdminResourceUpdated(transaction, 'DISPUTE_CASE', record.id);
+  await notifyAdminResourceUpdated(transaction, 'QUEST', record.questId);
+  await Promise.all(
+    [...new Set(walletIds)].map((walletId) =>
+      notifyAdminResourceUpdated(transaction, 'WALLET', walletId)
+    )
+  );
+};
 
 /** Rulebook: Hirer/Worker self-file within 1 day of failure; Admin on a Worker's behalf within 5. */
 const disputeFilingWindowMs = (adminOpened: boolean) =>
@@ -365,6 +386,7 @@ export const createAdminDisputeCaseInTransaction = async (
         .returning();
   if (created) {
     await notifyDisputeCaseUpdated(transaction, created);
+    await notifyAdminDisputeCaseViewsUpdated(transaction, created);
     return created;
   }
   const [concurrent] = await transaction
@@ -484,6 +506,7 @@ export const submitDisputeCaseResponse = async ({
       );
     }
     await notifyDisputeCaseUpdated(transaction, updated);
+    await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
     return summaryFromRecord(updated);
   });
 
@@ -995,6 +1018,7 @@ export const resolveAdminDisputeCase = async (
                 'Dispute Case changed before dismissal.'
               );
             await notifyDisputeCaseUpdated(transaction, updated);
+            await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
             return summaryResultInTransaction(transaction, updated.id);
           }
 
@@ -1052,7 +1076,22 @@ export const resolveAdminDisputeCase = async (
               'DISPUTE_CASE_NOT_PENDING',
               'Dispute Case changed before resolution.'
             );
+          const affectedWallets = await transaction
+            .select({ id: walletWallet.id })
+            .from(walletWallet)
+            .where(
+              or(
+                eq(walletWallet.userId, currentQuest.hirerId),
+                eq(walletWallet.userId, input.workerId!)
+              )
+            )
+            .orderBy(asc(walletWallet.id));
           await notifyDisputeCaseUpdated(transaction, updated);
+          await notifyAdminDisputeCaseViewsUpdated(
+            transaction,
+            updated,
+            affectedWallets.map(({ id }) => id)
+          );
           return summaryResultInTransaction(transaction, updated.id);
         },
       };

@@ -1,6 +1,7 @@
 import { db, sql as postgresSql } from '@/database/client';
 
 import { sql } from 'drizzle-orm';
+import postgres from 'postgres';
 
 import {
   parseAdminUpdateNotification,
@@ -9,6 +10,7 @@ import {
 } from './admin-update.schema';
 
 const adminUpdateChannel = 'kuquest_admin_updates';
+export const adminUpdateListenerApplicationName = `kuquest-admin-${process.pid}-${crypto.randomUUID()}`;
 const keepAliveIntervalMs = 15_000;
 
 type AdminUpdateTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -21,9 +23,13 @@ type Subscription = {
 };
 
 const subscriptions = new Map<string, Subscription>();
-let listenerStart: Promise<void> | undefined;
-let unlisten: (() => Promise<void>) | undefined;
-let listenerRegistered = false;
+type AdminUpdateListener = {
+  client: ReturnType<typeof postgres>;
+  registered: boolean;
+  start: Promise<void>;
+};
+
+let activeListener: AdminUpdateListener | undefined;
 let deliveryQueue = Promise.resolve();
 
 const encodeSseData = (event: AdminUpdateNotification) =>
@@ -65,35 +71,53 @@ export const notifyAdminResourceUpdated = async (
 };
 
 export const ensureAdminUpdateListener = async () => {
-  if (!listenerStart) {
-    listenerStart = postgresSql
+  let listener = activeListener;
+  if (!listener) {
+    // postgres.js re-registers cloned listeners on reconnect. A private client lets stop end every clone.
+    const client = postgres({
+      ...postgresSql.options,
+      connection: {
+        ...postgresSql.options.connection,
+        application_name: adminUpdateListenerApplicationName,
+      },
+      max: 1,
+    } as unknown as postgres.Options<{}>);
+    listener = { client, registered: false, start: Promise.resolve() };
+    activeListener = listener;
+    const currentListener = listener;
+    currentListener.start = client
       .listen(
         adminUpdateChannel,
         (payload) => {
+          // postgres.js re-registers callbacks on reconnect, even after their owner stops.
+          if (activeListener !== currentListener) return;
           const event = parseAdminUpdateNotification(payload);
           if (!event) return;
           deliveryQueue = deliveryQueue
-            .then(() => deliver(event))
+            .then(() => {
+              if (activeListener === currentListener) deliver(event);
+            })
             .catch((error: unknown) => {
+              if (activeListener !== currentListener) return;
               console.error('[admin-update] Could not deliver committed update:', error);
               closeAllSubscriptions();
             });
         },
         () => {
-          if (listenerRegistered) closeAllSubscriptions();
-          listenerRegistered = true;
+          if (activeListener !== currentListener) return;
+          if (currentListener.registered) closeAllSubscriptions();
+          currentListener.registered = true;
         }
       )
-      .then((listener) => {
-        unlisten = listener.unlisten;
-      })
-      .catch((error: unknown) => {
-        listenerStart = undefined;
+      .then(() => undefined)
+      .catch(async (error: unknown) => {
+        if (activeListener === currentListener) activeListener = undefined;
+        await client.end().catch(() => undefined);
         throw error;
       });
   }
 
-  await listenerStart;
+  await listener.start;
 };
 
 export const subscribeToAdminUpdates = (
@@ -129,14 +153,12 @@ export const subscribeToAdminUpdates = (
 };
 
 export const stopAdminUpdateListener = async () => {
-  const starting = listenerStart;
-  if (starting) await starting.catch(() => undefined);
-  const stop = unlisten;
-  unlisten = undefined;
-  listenerStart = undefined;
-  listenerRegistered = false;
+  const listener = activeListener;
+  activeListener = undefined;
   closeAllSubscriptions();
-  await stop?.();
+  if (!listener) return;
+  await listener.start.catch(() => undefined);
+  await listener.client.end();
 };
 
 export const adminUpdateSseResponse = (expiresAt: Date) => {
