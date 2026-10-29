@@ -12,6 +12,7 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 - **Per-Quest shared cap**: The total Satang redirected across all of a Quest's Dispute Cases must never exceed what remains in that Quest's held Funding Reservation. The cap starts as the amount returned to the Hirer at failure settlement and shrinks if a post-failure Proof approval settles a Reward first.
 - **One-way money flow**: Money moves exclusively Hirer &rarr; Worker. A Dispute Case can never reclaim a Reward already transferred directly to a Worker before the Quest failed.
 - **Failed Quest scope**: A `QUEST_CANCELLED` Quest has no Dispute Case path.
+- **Partial result scope**: A `GROUP + FIRST_COME_FIRST_SERVED` Quest that ends as `QUEST_COMPLETED` with at least one `ASSIGNMENT_INCOMPLETE` Assignment also has a Dispute Case path. It follows the same rules as `QUEST_FAILED`. Every window and hold in this contract starts when the Quest becomes terminal (`QUEST_COMPLETED` or `QUEST_FAILED`). The returning funding is not in the hold before that time, so a Dispute Case cannot redirect it earlier.
 
 ## Filing windows
 
@@ -40,7 +41,7 @@ The filing `category` is separate from the Admin decision `reasonCode`. The cate
 
 ## 7-Day money hold
 
-- When a Quest becomes `QUEST_FAILED`, the returned funding is held for **7 days** in the Quest's Funding Reservation (kept `ACTIVE` with remaining Satang), not released as ordinary Spending Balance.
+- When a Quest becomes `QUEST_FAILED`, or becomes `QUEST_COMPLETED` with at least one `ASSIGNMENT_INCOMPLETE` Assignment, the returned funding is held for **7 days** in the Quest's Funding Reservation (kept `ACTIVE` with remaining Satang), not released as ordinary Spending Balance.
 - The hold includes the returning Platform Fee; the reservation is not split.
 - Post-failure Proof approvals settle from this held reservation.
 - The hold releases automatically and unconditionally 7 days after `QUEST_FAILED`.

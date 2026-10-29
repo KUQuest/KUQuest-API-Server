@@ -34,7 +34,9 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Failure and Admin Review Item
 
-- A `PROOF_NOT_APPROVED` decision makes the Assignment `ASSIGNMENT_INCOMPLETE`, gives that Worker no Reward, and makes the Quest `QUEST_FAILED` immediately.
+- A `PROOF_NOT_APPROVED` decision makes the Assignment `ASSIGNMENT_INCOMPLETE` and gives that Worker no Reward.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, the decision does not change the Quest State. The other Workers can still send Proof until `dueAt`. The Quest ends only when every Worker has a final result: `QUEST_COMPLETED` if at least one Worker is `ASSIGNMENT_COMPLETED`, otherwise `QUEST_FAILED`.
+- In every other mode, the decision makes the Quest `QUEST_FAILED` immediately.
 - The same decision creates exactly one **Admin Review Item** automatically. It links the Quest, Assignment, Proof Submission, Hirer, Worker, decision reason, and evidence references, sending it to the Admin review queue.
 - The Admin Review Item is for review and audit only. It does not delay or undo `QUEST_FAILED`, reopen the Quest, create Rework, or allow a second Proof Submission.
 - Notification failure does not undo `QUEST_FAILED`; retries reuse the same Item identity.
