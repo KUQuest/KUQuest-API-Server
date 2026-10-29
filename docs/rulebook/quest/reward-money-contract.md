@@ -31,4 +31,5 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
   - Unpaid Worker-slot funding returns to the Hirer. Already transferred Rewards are not reclaimed.
   - That return is held for 7 days before the Hirer can spend it, so a Dispute Case still has funds to redirect (see `docs/rulebook/admin/admin-rulebook.md` §2 and `docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md`).
   - A failed Quest has no Platform Fee; the fee returns to the Hirer.
+- **On `QUEST_COMPLETED` with an `ASSIGNMENT_INCOMPLETE` Assignment** (`GROUP + FIRST_COME_FIRST_SERVED` only): Rewards of `ASSIGNMENT_COMPLETED` Workers are paid as usual. The funding of each `ASSIGNMENT_INCOMPLETE` slot, with its Platform Fee, returns to the Hirer and is held for 7 days, as for `QUEST_FAILED`.
 - **On cancellation**: Settlement follows the matrix in [Quest Lifecycle Contract](quest-lifecycle-contract.md). An `ASSIGNMENT_CANCELLED` Assignment receives no Reward.

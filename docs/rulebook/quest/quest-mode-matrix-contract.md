@@ -98,7 +98,9 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 5. **Proof Submission & Partial Success**:
    - **Every Active Worker** submits individual Proof (1–5 files) or confirms completion.
    - Hirer reviews each Worker's submission individually.
-   - `PROOF_NOT_APPROVED` on any Worker fails the Quest (`QUEST_FAILED`).
+   - `PROOF_NOT_APPROVED` on one Worker makes only that Worker's Assignment `ASSIGNMENT_INCOMPLETE`. The Quest stays `QUEST_IN_PROGRESS`, and every other Worker can still submit Proof or confirm completion before `dueAt`.
+   - The Quest becomes `QUEST_COMPLETED` when every Worker has a final result and at least one Worker is `ASSIGNMENT_COMPLETED`. It becomes `QUEST_FAILED` when every Worker is `ASSIGNMENT_INCOMPLETE`.
+   - A Worker with `ASSIGNMENT_INCOMPLETE` receives no Reward. The Reward share of that Worker returns to the Hirer when the Quest ends (see [Reward & Money Contract](reward-money-contract.md)).
    - **Completed Workers keep Reward**: Any Worker who completed work before failure keeps their Reward.
    - Post-failure pending Proofs can still be reviewed by the Hirer and paid from the 7-day held Funding Reservation.
 6. **Conduct Reports**:

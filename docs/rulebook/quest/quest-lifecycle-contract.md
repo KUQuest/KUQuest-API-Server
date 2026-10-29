@@ -62,9 +62,11 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 - Approved or proof-free `GROUP + CANDIDATE` Team work opens a 24-hour Team Reward Allocation window after the Quest becomes `QUEST_COMPLETED`. The Team Leader assigns each teammate a percentage; the Leader receives the remainder. Teammate percentages cannot exceed 100% in total. If no allocation is submitted before the deadline, the Server applies an equal split. Every member's Assignment is completed when the work succeeds; payment waits for the allocation and then goes directly from Quest Escrow to each member's Earnings Balance.
 - Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - A missing required Team Proof Submission or Team confirmation makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, Hirer non-approval makes only the affected Assignment `ASSIGNMENT_INCOMPLETE`. The Quest keeps its State until every Worker has a final result (see [Quest Mode Matrix Contract](quest-mode-matrix-contract.md)). All other Quest modes keep the rule in the next bullet.
 - Hirer non-approval, a missing required submission, a missing proof-free confirmation, or a missing Start Work action at `dueAt` makes the Quest `QUEST_FAILED`.
 - Failure gives the affected Assignment `ASSIGNMENT_INCOMPLETE`. No Rework or second Proof Submission exists.
-- In a `GROUP` Quest, an Assignment that completed before another Assignment fails keeps its Quest Reward. The Quest remains `QUEST_FAILED`.
+- In a `GROUP` Quest, an Assignment that completed before another Assignment fails keeps its Quest Reward. When the Quest becomes `QUEST_FAILED`, it remains `QUEST_FAILED`.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, a Quest with at least one `ASSIGNMENT_COMPLETED` Assignment and one `ASSIGNMENT_INCOMPLETE` Assignment ends as `QUEST_COMPLETED` when the Hirer did not approve only some Proof Submissions.
 
 ## Cancellation settlement
 
