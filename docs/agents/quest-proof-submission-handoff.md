@@ -317,7 +317,14 @@ the work passed review.
   while another Worker is still Active. The other Workers can still send Proof
   until `dueAt`. When the last Active Worker has a result, the Quest becomes
   `QUEST_COMPLETED` if one Worker is `ASSIGNMENT_COMPLETED`, otherwise
-  `QUEST_FAILED`. The affected Worker gets one `PROOF_NOT_APPROVED` Push.
+  `QUEST_FAILED`. While the Quest goes on, the affected Worker gets one
+  `PROOF_NOT_APPROVED` Push. When the Quest becomes `QUEST_COMPLETED`, each
+  `ASSIGNMENT_INCOMPLETE` Worker gets one `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`
+  Push, and `QUEST_COMPLETED` and `DISPUTE_WINDOW_OPENED` reach the Hirer, the
+  Workers who were Active, and every `ASSIGNMENT_INCOMPLETE` Worker.
+- Hirer cancellation of a running `GROUP + FIRST_COME_FIRST_SERVED` Quest with
+  an `ASSIGNMENT_INCOMPLETE` Worker answers `409 QUEST_SETTLEMENT_NOT_ALLOWED`.
+  Admin termination of that Quest answers `409 QUEST_ACTION_NOT_ALLOWED`.
 - In every other mode, makes the Quest `QUEST_FAILED` immediately.
 - Gives that Worker no Quest Reward.
 - Creates exactly one Admin Review Item.

@@ -44,6 +44,30 @@ export const enqueueQuestFailedPush = async (
   }
 };
 
+export const enqueueQuestCompletedDisputeWindowPush = async (
+  transaction: QuestTransaction,
+  input: { recipients: { workerId: string; assignmentId: string }[]; questId: string; now: Date }
+) => {
+  for (const { workerId, assignmentId } of input.recipients) {
+    const transitionId = `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentId}`;
+    await enqueuePushDeliveryInTransaction(transaction, {
+      recipientMemberId: workerId,
+      eventKey: transitionId,
+      eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+      title: 'Quest finished',
+      body: 'The Quest finished, but your Proof Submission was not approved, so you get no Reward. You can open a Dispute Case within 1 day.',
+      deepLink: `kuquest://quest/${input.questId}`,
+      data: {
+        type: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        questId: input.questId,
+        assignmentId,
+        transitionId,
+      },
+      now: input.now,
+    });
+  }
+};
+
 export const enqueueProofNotApprovedPush = async (
   transaction: QuestTransaction,
   input: { recipientMemberId: string; assignmentId: string; questId: string; now: Date }

@@ -25,6 +25,7 @@ import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import {
   enqueueProofNotApprovedPush,
+  enqueueQuestCompletedDisputeWindowPush,
   enqueueQuestFailedPush,
 } from '../lifecycle/quest-failed-v2.push';
 import {
@@ -546,21 +547,25 @@ const activeAssignmentWorkerIds = async (
   return assignments.map(({ workerId }) => workerId);
 };
 
-const failureRecipientWorkerIds = async (
+const assignmentsWithStatus = (
   transaction: QuestTransaction,
-  questId: string
-): Promise<string[]> => {
-  const assignments = await transaction
-    .select({ workerId: questAssignment.workerId })
+  questId: string,
+  statuses: ('ASSIGNMENT_ACTIVE' | 'ASSIGNMENT_INCOMPLETE')[]
+) =>
+  transaction
+    .select({ assignmentId: questAssignment.id, workerId: questAssignment.workerId })
     .from(questAssignment)
     .where(
-      and(
-        eq(questAssignment.questId, questId),
-        inArray(questAssignment.assignmentStatus, ['ASSIGNMENT_ACTIVE', 'ASSIGNMENT_INCOMPLETE'])
-      )
+      and(eq(questAssignment.questId, questId), inArray(questAssignment.assignmentStatus, statuses))
     );
-  return assignments.map(({ workerId }) => workerId);
-};
+
+const failureRecipientWorkerIds = async (transaction: QuestTransaction, questId: string) =>
+  (
+    await assignmentsWithStatus(transaction, questId, [
+      'ASSIGNMENT_ACTIVE',
+      'ASSIGNMENT_INCOMPLETE',
+    ])
+  ).map(({ workerId }) => workerId);
 
 const failedQuestPendingProofParticipantIds = async (
   transaction: QuestTransaction,
@@ -2201,7 +2206,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       let questStatus: QuestV2State = current.questState as QuestV2State;
       let allocationPending = false;
       let holdsRemainder = false;
-      let workerEndedAlone = false;
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
           transaction,
@@ -2262,7 +2266,6 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
               actorId
             );
         questStatus = failure.questStatus;
-        workerEndedAlone = failure.questStatus !== 'QUEST_FAILED';
         holdsRemainder = failure.questStatus === 'QUEST_COMPLETED';
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments
@@ -2352,21 +2355,39 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           now: input.now,
         });
       } else if (current.questState !== 'QUEST_COMPLETED' && questStatus === 'QUEST_COMPLETED') {
-        await emitQuestUpdate(
-          transaction,
-          input.questId,
-          'QUEST_COMPLETED',
-          [current.hirerId, ...activeWorkerIds],
-          allocationPending ? [] : activeWorkerIds
-        );
         if (holdsRemainder) {
-          await emitQuestUpdate(transaction, input.questId, 'DISPUTE_WINDOW_OPENED', [
-            current.hirerId,
-            ...activeWorkerIds,
+          const incomplete = await assignmentsWithStatus(transaction, input.questId, [
+            'ASSIGNMENT_INCOMPLETE',
           ]);
+          const incompleteWorkerIds = incomplete.map(({ workerId }) => workerId);
+          const completedWorkerIds = activeWorkerIds.filter(
+            (workerId) => !incompleteWorkerIds.includes(workerId)
+          );
+          const recipientIds = [current.hirerId, ...activeWorkerIds, ...incompleteWorkerIds];
+          await emitQuestUpdate(transaction, input.questId, 'QUEST_COMPLETED', recipientIds);
+          await emitQuestUpdate(
+            transaction,
+            input.questId,
+            'DISPUTE_WINDOW_OPENED',
+            recipientIds,
+            completedWorkerIds
+          );
+          await enqueueQuestCompletedDisputeWindowPush(transaction, {
+            recipients: incomplete,
+            questId: input.questId,
+            now: input.now,
+          });
+        } else {
+          await emitQuestUpdate(
+            transaction,
+            input.questId,
+            'QUEST_COMPLETED',
+            [current.hirerId, ...activeWorkerIds],
+            allocationPending ? [] : activeWorkerIds
+          );
         }
       }
-      if (workerEndedAlone) {
+      if (questStatus === 'QUEST_IN_PROGRESS' && input.decision === 'PROOF_NOT_APPROVED') {
         await enqueueProofNotApprovedPush(transaction, {
           recipientMemberId: subject.workerId,
           assignmentId: subject.assignmentId,

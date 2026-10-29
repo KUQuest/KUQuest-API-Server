@@ -2196,6 +2196,38 @@ const pushRowsOf = async (questId: string) =>
     ).map((row) => ({ ...row }))
   );
 
+type QuestUpdateSeen = {
+  changeType: string;
+  recipientMemberIds: string[];
+  closeMemberIds: string[];
+};
+
+const listenQuestUpdates = async (questId: string) => {
+  const events: QuestUpdateSeen[] = [];
+  let read = 0;
+  let wake = () => {};
+  const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+    const event = JSON.parse(payload);
+    if (event.questId !== questId) return;
+    events.push({
+      changeType: event.changeType,
+      recipientMemberIds: [...event.recipientMemberIds].sort(),
+      closeMemberIds: [...(event.closeMemberIds ?? [])].sort(),
+    });
+    wake();
+  });
+  return {
+    next: async (count: number) => {
+      while (events.length < read + count) {
+        await new Promise<void>((resolve) => (wake = resolve));
+      }
+      read += count;
+      return events.slice(read - count, read);
+    },
+    stop: () => listener.unlisten(),
+  };
+};
+
 describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
   it('keeps the Quest in progress after one Worker is not approved and lets another Worker submit', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
@@ -2321,11 +2353,19 @@ describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(notApprovedBody);
+    expect((await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED')).status).toBe(
+      200
+    );
     expect(await pushRowsOf(questId)).toEqual([
       {
         recipient: worker.id,
         eventType: 'PROOF_NOT_APPROVED',
         eventKey: `quest-v2:PROOF_NOT_APPROVED:${assignmentIdOf(worker.id)}`,
+      },
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        eventKey: `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentIdOf(worker.id)}`,
       },
     ]);
     expect(
@@ -2340,7 +2380,7 @@ describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
 
   it('completes the Quest when the last Active Worker is not approved after another was approved', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
-    const { questId } = await createGroupFcfsQuest();
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest();
     const first = await createSentProofForQuest(questId, worker.id);
     const second = await createSentProofForQuest(questId, secondWorker.id);
     expect((await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED')).status).toBe(
@@ -2352,14 +2392,21 @@ describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
       first.proofSubmissionId,
       'PROOF_NOT_APPROVED'
     );
-    expect((await notApproved.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const notApprovedBody = await notApproved.json();
+    expect(notApprovedBody.data.questStatus).toBe('QUEST_COMPLETED');
+    const replay = await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+    expect(await replay.json()).toEqual(notApprovedBody);
     expect((await questStatusOf(questId))?.moneyHoldStartedAt).toBeInstanceOf(Date);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
       remainingSatang: 1_020,
     });
-    expect((await pushRowsOf(questId)).map(({ eventType }) => eventType)).toEqual([
-      'PROOF_NOT_APPROVED',
+    expect(await pushRowsOf(questId)).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        eventKey: `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentIdOf(worker.id)}`,
+      },
     ]);
   });
 
@@ -2368,41 +2415,57 @@ describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
     const { questId } = await createGroupFcfsQuest();
     const first = await createSentProofForQuest(questId, worker.id);
     const second = await createSentProofForQuest(questId, secondWorker.id);
-    const events: {
-      questId: string;
-      changeType: string;
-      recipientMemberIds: string[];
-      closeMemberIds?: string[];
-    }[] = [];
-    let wake!: () => void;
-    let waiting = new Promise<void>((resolve) => (wake = resolve));
-    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
-      const event = JSON.parse(payload);
-      if (event.questId !== questId) return;
-      events.push(event);
-      wake();
-      waiting = new Promise<void>((resolve) => (wake = resolve));
-    });
+    const updates = await listenQuestUpdates(questId);
     try {
       await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
-      while (events.length < 1) await waiting;
-      expect(events).toEqual([
+      expect(await updates.next(1)).toEqual([
         {
-          questId,
           changeType: 'PROOF_REVIEWED',
-          recipientMemberIds: [hirer.id, worker.id],
+          recipientMemberIds: [hirer.id, worker.id].sort(),
           closeMemberIds: [worker.id],
         },
       ]);
       await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED');
-      while (events.length < 4) await waiting;
-      expect(events.slice(1).map(({ changeType }) => changeType)).toEqual([
-        'PROOF_REVIEWED',
-        'QUEST_COMPLETED',
-        'DISPUTE_WINDOW_OPENED',
+      const everyone = [hirer.id, worker.id, secondWorker.id].sort();
+      expect(await updates.next(3)).toEqual([
+        {
+          changeType: 'PROOF_REVIEWED',
+          recipientMemberIds: [hirer.id, secondWorker.id].sort(),
+          closeMemberIds: [],
+        },
+        { changeType: 'QUEST_COMPLETED', recipientMemberIds: everyone, closeMemberIds: [] },
+        {
+          changeType: 'DISPUTE_WINDOW_OPENED',
+          recipientMemberIds: everyone,
+          closeMemberIds: [secondWorker.id],
+        },
       ]);
     } finally {
-      await listener.unlisten();
+      await updates.stop();
+    }
+  });
+
+  it('keeps the last not-approved Worker stream open and sends that Worker the Dispute window', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+    await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED');
+    const updates = await listenQuestUpdates(questId);
+    try {
+      await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+      const hirerAndWorker = [hirer.id, worker.id].sort();
+      expect(await updates.next(3)).toEqual([
+        { changeType: 'PROOF_REVIEWED', recipientMemberIds: hirerAndWorker, closeMemberIds: [] },
+        { changeType: 'QUEST_COMPLETED', recipientMemberIds: hirerAndWorker, closeMemberIds: [] },
+        {
+          changeType: 'DISPUTE_WINDOW_OPENED',
+          recipientMemberIds: hirerAndWorker,
+          closeMemberIds: [],
+        },
+      ]);
+    } finally {
+      await updates.stop();
     }
   });
 
