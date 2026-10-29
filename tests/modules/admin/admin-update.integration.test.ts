@@ -12,7 +12,6 @@ import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { updateProfile } from '@/modules/profile/profile.service';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
-import { applyQuestStateTransition } from '@/modules/quest/shared';
 
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
@@ -290,15 +289,12 @@ describe('Admin SSE updates', () => {
         expect(await readText(reader)).toContain(': connected');
         await expect(
           db.transaction(async (transaction) => {
-            const applied = await applyQuestStateTransition(transaction, {
-              questId: questId!,
-              from: 'QUEST_DRAFT',
-              to: 'QUEST_OPEN',
-              now: new Date(),
-              workChat: [],
-              actor: { actorType: 'MEMBER', actorUserId: hirerId },
-            });
-            expect(applied).toBe(true);
+            const [updatedQuest] = await transaction
+              .update(quest)
+              .set({ description: 'This Quest change must roll back.' })
+              .where(eq(quest.id, questId!))
+              .returning({ id: quest.id });
+            expect(updatedQuest?.id).toBe(questId!);
             await notifyAdminResourceUpdated(transaction, 'QUEST', questId!);
             throw new Error('force Quest rollback');
           })
@@ -316,14 +312,14 @@ describe('Admin SSE updates', () => {
         ).rejects.toThrow('force Member rollback');
 
         const [questRow] = await db
-          .select({ questStatus: quest.questStatus })
+          .select({ description: quest.description })
           .from(quest)
           .where(eq(quest.id, questId));
         const [rolledBackMember] = await db
           .select({ bio: authUser.bio })
           .from(authUser)
           .where(eq(authUser.id, rolledBackMemberId));
-        expect(questRow?.questStatus).toBe('QUEST_DRAFT');
+        expect(questRow?.description).toBe('A Quest for rollback coverage.');
         expect(rolledBackMember?.bio).toBeNull();
 
         expect(await updateProfile(committedMemberId, { bio: 'Committed update' })).toBe('updated');
