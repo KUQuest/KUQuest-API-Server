@@ -30,6 +30,8 @@ const allowedPublisherImports: Record<string, string> = {
     'The Admin barrel loads Wallet routes; a runtime import fails in wallet.admin.service before createAdminActionService initializes.',
   'src/modules/work-experience/work-experience.service.ts':
     'The Admin barrel loads Wallet routes; a runtime import fails in wallet.admin.service before createAdminActionService initializes.',
+  'src/modules/work-chat/message-report.service.ts':
+    'The Admin barrel loads Wallet routes; a runtime import fails in wallet.admin.service before createAdminActionService initializes.',
 };
 const publisherImport = /from\s+['"]@\/modules\/admin\/admin-update\.delivery['"]/;
 
