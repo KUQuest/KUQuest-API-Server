@@ -2,7 +2,7 @@ import { app } from '@/app';
 import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
-import { quest } from '@/database/schema/quest.schema';
+import { quest, questCommand } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   notifyAdminResourceUpdated,
@@ -229,6 +229,7 @@ describe('Admin SSE updates', () => {
       await reader.cancel();
       if (questId) await db.delete(quest).where(eq(quest.id, questId));
       await db.delete(tag).where(eq(tag.id, tagId));
+      await db.delete(questCommand).where(eq(questCommand.principalUserId, memberId));
       await db.delete(authUser).where(eq(authUser.id, memberId));
     }
   });
@@ -337,6 +338,11 @@ describe('Admin SSE updates', () => {
     } finally {
       if (questId) await db.delete(quest).where(eq(quest.id, questId));
       await db.delete(tag).where(eq(tag.id, tagId));
+      await db
+        .delete(questCommand)
+        .where(
+          inArray(questCommand.principalUserId, [hirerId, rolledBackMemberId, committedMemberId])
+        );
       await db
         .delete(authUser)
         .where(inArray(authUser.id, [hirerId, rolledBackMemberId, committedMemberId]));
