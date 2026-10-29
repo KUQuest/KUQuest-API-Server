@@ -83,10 +83,12 @@ type DisputeFixture = {
 };
 
 const createDisputeFixture = async (
-  status: 'QUEST_FAILED' | 'QUEST_COMPLETED' | 'QUEST_CANCELLED' = 'QUEST_FAILED'
+  status: 'QUEST_FAILED' | 'QUEST_COMPLETED' | 'QUEST_CANCELLED' = 'QUEST_FAILED',
+  assignedWorkerId?: string
 ) => {
   const hirerId = await createMember('Hirer');
-  const workerId = await createMember('Worker');
+  const workerId = assignedWorkerId ?? (await createMember('Worker'));
+  if (assignedWorkerId) await ensureWallet(assignedWorkerId);
   await fundTestWallet(hirerId, 5_000);
 
   const questId = crypto.randomUUID();
@@ -188,6 +190,85 @@ const adminRequest = (path: string, init: RequestInit = {}) =>
       },
     })
   );
+
+const readAdminSseEvent = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs = 5_000
+) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let next: Awaited<ReturnType<typeof reader.read>>;
+  try {
+    next = await Promise.race([
+      reader.read(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for an Admin SSE event.')),
+          timeoutMs
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+  if (next.done) throw new Error('Admin SSE stream closed before the expected event.');
+  const frame = new TextDecoder().decode(next.value);
+  const data = frame.split('\n').find((line) => line.startsWith('data: '));
+  if (!data) throw new Error(`Admin SSE frame did not contain event data: ${frame}`);
+  return JSON.parse(data.slice('data: '.length)) as Record<string, unknown>;
+};
+
+const expectAdminSseEventMetadataOnly = (event: Record<string, unknown>) => {
+  expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+};
+
+const readAdminSseEventsForResources = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  expectedResources: Array<{ subjectType: string; subjectId: string }>
+): Promise<Record<string, unknown>[]> => {
+  const expectedKeys = new Set(
+    expectedResources.map(({ subjectType, subjectId }) => `${subjectType}:${subjectId}`)
+  );
+  const observedResources = new Set<string>();
+  const events: Record<string, unknown>[] = [];
+  const deadline = Date.now() + 5_000;
+  while (observedResources.size < expectedKeys.size) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error('Timed out waiting for all expected Admin SSE resources.');
+    }
+    const event = await readAdminSseEvent(reader, remainingMs);
+    expectAdminSseEventMetadataOnly(event);
+    const resourceKey = `${event.subjectType}:${event.subjectId}`;
+    if (!expectedKeys.has(resourceKey)) continue;
+
+    observedResources.add(resourceKey);
+    events.push(event);
+  }
+  return events;
+};
+
+const expectNoAdminSseResources = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  forbiddenResources: Array<{ subjectType: string; subjectId: string }>
+) => {
+  const forbiddenKeys = new Set(
+    forbiddenResources.map(({ subjectType, subjectId }) => `${subjectType}:${subjectId}`)
+  );
+  const quietUntil = Date.now() + 250;
+  while (Date.now() < quietUntil) {
+    try {
+      const event = await readAdminSseEvent(reader, quietUntil - Date.now());
+      expectAdminSseEventMetadataOnly(event);
+      const resourceKey = `${event.subjectType}:${event.subjectId}`;
+      expect(forbiddenKeys.has(resourceKey)).toBe(false);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Timed out waiting for an Admin SSE event.') {
+        return;
+      }
+      throw error;
+    }
+  }
+};
 
 beforeAll(async () => {
   try {
@@ -323,6 +404,147 @@ describe('Admin Dispute API', () => {
       filerUserId: fixture.workerId,
       openedByAdminId: expect.any(String),
     });
+  });
+
+  it('publishes Member and Admin Dispute Case changes through SSE, with related IDs and rollback safety', async () => {
+    if (!postgresAvailable) return;
+    const [authenticatedMember] = await db
+      .select({ id: authUser.id })
+      .from(authUser)
+      .where(eq(authUser.email, memberEmail));
+    if (!authenticatedMember) throw new Error('Dispute Member test account is missing.');
+
+    const fixture = await createDisputeFixture('QUEST_FAILED', authenticatedMember.id);
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+
+    const memberStreamResponse = await adminRequest('/api/v1/admin/events');
+    expect(memberStreamResponse.status).toBe(200);
+    expect(memberStreamResponse.headers.get('content-type')).toContain('text/event-stream');
+    const memberReader = memberStreamResponse.body!.getReader();
+    let filedCaseId = '';
+    let rolledBackDisputeCaseId = '';
+    let filingEvents: Record<string, unknown>[] = [];
+    try {
+      const connected = await memberReader.read();
+      expect(new TextDecoder().decode(connected.value)).toContain(': connected');
+
+      const filedResponse = await app.handle(
+        new Request(`http://localhost/api/v1/quests/${fixture.questId}/disputes`, {
+          method: 'POST',
+          headers: { cookie: memberCookie, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            category: 'PROOF_REVIEW',
+            submittedDetail: 'The Worker met the Quest Condition.',
+            filerStatement: 'This statement is private to the Dispute Case.',
+          }),
+        })
+      );
+      const filedBody = (await filedResponse.json()) as {
+        data: { id: string; status: string };
+      };
+      expect(filedResponse.status).toBe(200);
+      expect(filedBody.data.status).toBe('DISPUTE_CASE_PENDING');
+      filedCaseId = filedBody.data.id;
+
+      const expectedFilingResources = [
+        { subjectType: 'DISPUTE_CASE', subjectId: filedCaseId },
+        { subjectType: 'QUEST', subjectId: fixture.questId },
+      ];
+      filingEvents = await readAdminSseEventsForResources(memberReader, expectedFilingResources);
+      const publishedFilingResources = filingEvents
+        .map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+        .sort((left, right) =>
+          `${left.subjectType}:${left.subjectId}`.localeCompare(
+            `${right.subjectType}:${right.subjectId}`
+          )
+        );
+      expect(publishedFilingResources).toEqual(
+        [...expectedFilingResources].sort((left, right) =>
+          `${left.subjectType}:${left.subjectId}`.localeCompare(
+            `${right.subjectType}:${right.subjectId}`
+          )
+        )
+      );
+
+      await expect(
+        db.transaction(async (transaction) => {
+          const rolledBackCase = await createAdminDisputeCaseInTransaction(transaction, {
+            questId: fixture.questId,
+            filerUserId: fixture.hirerId,
+            category: 'OTHER',
+            submittedDetail: 'This Case must roll back.',
+          });
+          rolledBackDisputeCaseId = rolledBackCase.id;
+          throw new Error('force Dispute Case transaction rollback');
+        })
+      ).rejects.toThrow('force Dispute Case transaction rollback');
+      expect(rolledBackDisputeCaseId).not.toBe('');
+      await expectNoAdminSseResources(memberReader, [
+        { subjectType: 'DISPUTE_CASE', subjectId: rolledBackDisputeCaseId },
+        { subjectType: 'QUEST', subjectId: fixture.questId },
+      ]);
+    } finally {
+      await memberReader.cancel();
+    }
+
+    const decisionStreamResponse = await adminRequest('/api/v1/admin/events');
+    expect(decisionStreamResponse.status).toBe(200);
+    const decisionReader = decisionStreamResponse.body!.getReader();
+    try {
+      const connected = await decisionReader.read();
+      expect(new TextDecoder().decode(connected.value)).toContain(': connected');
+
+      const affectedWallets = await Promise.all(
+        [fixture.hirerId, fixture.workerId].map((userId) => readTestWallet(userId))
+      );
+      const decisionResponse = await adminRequest(`/api/v1/admin/disputes/${filedCaseId}/resolve`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-sse-resolve-${filedCaseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_RESOLVED',
+          reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+          workerId: fixture.workerId,
+          amountSatang: 300,
+        }),
+      });
+      expect(decisionResponse.status).toBe(200);
+
+      const expectedResources = [
+        { subjectType: 'DISPUTE_CASE', subjectId: filedCaseId },
+        { subjectType: 'QUEST', subjectId: fixture.questId },
+        ...affectedWallets.map(({ id }) => ({ subjectType: 'WALLET', subjectId: id })),
+      ];
+      const decisionEvents = await readAdminSseEventsForResources(
+        decisionReader,
+        expectedResources
+      );
+
+      const publishedResources = decisionEvents
+        .map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+        .sort((left, right) =>
+          `${left.subjectType}:${left.subjectId}`.localeCompare(
+            `${right.subjectType}:${right.subjectId}`
+          )
+        );
+      expect(publishedResources).toEqual(
+        [...expectedResources].sort((left, right) =>
+          `${left.subjectType}:${left.subjectId}`.localeCompare(
+            `${right.subjectType}:${right.subjectId}`
+          )
+        )
+      );
+      for (const event of [...filingEvents, ...decisionEvents]) {
+        expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+        expect(JSON.stringify(event)).not.toContain('The Worker met the Quest Condition.');
+        expect(JSON.stringify(event)).not.toContain('This statement is private');
+      }
+    } finally {
+      await decisionReader.cancel();
+    }
   });
 
   it('does not let an Admin file a Worker Dispute Case for the Hirer', async () => {

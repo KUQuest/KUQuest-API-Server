@@ -223,6 +223,17 @@ describe('Admin SSE updates', () => {
     expect(operation?.description).toContain('GET /api/v1/admin/overview');
     expect(operation?.description).toContain('GET /api/v1/admin/members/{id}/penalty-history');
     expect(operation?.description).toContain('GET /api/v1/admin/activity-log');
+    expect(operation?.description).toContain('GET /api/v1/admin/disputes/{disputeCaseId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/quests/{questId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/finance/quests/{questId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/wallets/{walletId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/finance/members/{userId}');
+    expect(operation?.description).toContain('wallet.id` equal to the event `subjectId`');
+    expect(operation?.description).toContain('response value `member.userId` for `{userId}`');
+    expect(operation?.description).toContain('active Funding Reservations');
+    expect(operation?.description).toContain(
+      'GET /api/v1/admin/finance/ledger/transactions?walletId={walletId}'
+    );
     expect(operation?.description).toContain('Other resource types need a documented read mapping');
     expect(operation?.security?.[0]).toHaveProperty('betterAuthAdminSession');
     expect(operation?.responses).toHaveProperty('401');
