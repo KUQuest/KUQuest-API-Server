@@ -1,4 +1,5 @@
 export * from './command';
+export * from './admin-updates';
 export * from './escrow';
 export * from './image';
 export * from './transition';

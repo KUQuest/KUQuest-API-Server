@@ -2180,6 +2180,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       const activeWorkerIds = await activeAssignmentWorkerIds(transaction, input.questId);
       let questStatus: QuestV2State = current.questState as QuestV2State;
       let allocationPending = false;
+      let changedAssignmentIds: string[] = [];
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
           transaction,
@@ -2191,6 +2192,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         );
         questStatus = settlement.questStatus as QuestV2State;
         allocationPending = settlement.allocationPending;
+        changedAssignmentIds = settlement.completedAssignmentIds;
         await recordAssignmentAudits(
           transaction,
           input.actor,
@@ -2225,6 +2227,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
         );
         questStatus = failure.questStatus;
+        changedAssignmentIds = failure.incompleteAssignmentIds;
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments
           .filter(
@@ -2324,12 +2327,21 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           allocationPending ? [] : activeWorkerIds
         );
       }
+      let relatedMemberIds: string[] = [];
+      if (changedAssignmentIds.length > 0) {
+        const assignments = await transaction
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(inArray(questAssignment.id, [...new Set(changedAssignmentIds)]));
+        relatedMemberIds = [...new Set(assignments.map(({ workerId }) => workerId))];
+      }
 
       return {
         kind: 'success',
         result: { proof, questStatus },
         resourceType: 'quest-v2-proof-command',
         resourceId: proof.id,
+        relatedMemberIds,
       };
     },
     toSnapshot: reviewSnapshotFor,

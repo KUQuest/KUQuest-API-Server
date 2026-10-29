@@ -3,6 +3,7 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { recordReviewAveragePenaltyInTransaction } from '@/modules/admin/member-penalty';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
@@ -169,6 +170,7 @@ export const createReview = async (
         rating: created.rating,
         now,
       });
+      await notifyAdminResourceUpdated(tx, 'MEMBER', created.revieweeId);
       return created;
     }
 
@@ -220,6 +222,7 @@ export const updateReview = async (
       })
       .where(eq(review.id, reviewId))
       .returning(reviewFields);
+    if (updated) await notifyAdminResourceUpdated(tx, 'MEMBER', updated.revieweeId);
     return updated ?? { outcome: 'conflict' };
   });
 

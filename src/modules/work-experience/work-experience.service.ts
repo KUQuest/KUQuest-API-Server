@@ -1,5 +1,6 @@
 import { db } from '@/database/client';
 import { profileWorkExperience } from '@/database/schema/profile.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import type { Static } from 'elysia';
@@ -78,20 +79,25 @@ export const createWorkExperience = async (
     return { outcome: 'invalid-date-range' };
   }
 
-  const [created] = await db
-    .insert(profileWorkExperience)
-    .values({
-      userId,
-      title: data.title,
-      employmentType: data.employmentType,
-      org: data.organization ?? null,
-      description: data.description ?? null,
-      startedAt: data.startedAt,
-      endedAt: data.endedAt ?? null,
-    })
-    .returning({ id: profileWorkExperience.id });
+  const createdId = await db.transaction(async (transaction) => {
+    const [created] = await transaction
+      .insert(profileWorkExperience)
+      .values({
+        userId,
+        title: data.title,
+        employmentType: data.employmentType,
+        org: data.organization ?? null,
+        description: data.description ?? null,
+        startedAt: data.startedAt,
+        endedAt: data.endedAt ?? null,
+      })
+      .returning({ id: profileWorkExperience.id });
 
-  return (await findWorkExperience(userId, created.id))!;
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return created.id;
+  });
+
+  return (await findWorkExperience(userId, createdId))!;
 };
 
 export type UpdateWorkExperienceOutcome =
@@ -116,24 +122,29 @@ export const updateWorkExperience = async (
     return { outcome: 'invalid-date-range' };
   }
 
-  const updated = await db
-    .update(profileWorkExperience)
-    .set({
-      title: data.title ?? current.title,
-      employmentType: data.employmentType ?? current.employmentType,
-      org: data.organization === undefined ? current.organization : data.organization,
-      description: data.description === undefined ? current.description : data.description,
-      startedAt,
-      endedAt,
-      updatedAt: new Date(),
-      version: sql`${profileWorkExperience.version} + 1`,
-    })
-    .where(
-      expectedVersion === undefined
-        ? ownedBy(userId, experienceId)
-        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
-    )
-    .returning({ id: profileWorkExperience.id });
+  const updated = await db.transaction(async (transaction) => {
+    const rows = await transaction
+      .update(profileWorkExperience)
+      .set({
+        title: data.title ?? current.title,
+        employmentType: data.employmentType ?? current.employmentType,
+        org: data.organization === undefined ? current.organization : data.organization,
+        description: data.description === undefined ? current.description : data.description,
+        startedAt,
+        endedAt,
+        updatedAt: new Date(),
+        version: sql`${profileWorkExperience.version} + 1`,
+      })
+      .where(
+        expectedVersion === undefined
+          ? ownedBy(userId, experienceId)
+          : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
+      )
+      .returning({ id: profileWorkExperience.id });
+
+    if (rows[0]) await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return rows;
+  });
 
   if (updated.length === 0) return { outcome: 'conflict' };
 
@@ -157,14 +168,19 @@ export const deleteWorkExperience = async (
     return { outcome: 'conflict' };
   }
 
-  const [deleted] = await db
-    .delete(profileWorkExperience)
-    .where(
-      expectedVersion === undefined
-        ? ownedBy(userId, experienceId)
-        : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
-    )
-    .returning({ id: profileWorkExperience.id });
+  const [deleted] = await db.transaction(async (transaction) => {
+    const [row] = await transaction
+      .delete(profileWorkExperience)
+      .where(
+        expectedVersion === undefined
+          ? ownedBy(userId, experienceId)
+          : and(ownedBy(userId, experienceId), eq(profileWorkExperience.version, expectedVersion))
+      )
+      .returning({ id: profileWorkExperience.id });
+
+    if (row) await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return [row];
+  });
 
   if (!deleted) return { outcome: 'conflict' };
   return { outcome: 'deleted', id: deleted.id, version: current.version + 1 };
