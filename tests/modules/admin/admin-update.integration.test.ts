@@ -187,7 +187,6 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await stopAdminUpdateListener();
   if (!databaseReady) return;
   if (adminIds.length > 0) await db.delete(authAdmin).where(inArray(authAdmin.id, adminIds));
 });

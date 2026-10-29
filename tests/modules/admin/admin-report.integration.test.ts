@@ -42,7 +42,6 @@ import {
 } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { stopAdminUpdateListener } from '@/modules/admin/admin-update.delivery';
 import {
   processExpiredMemberBanWalletFreeze,
   recordMemberConfirmedViolationInTransaction,
@@ -1030,7 +1029,6 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await stopAdminUpdateListener();
   await cleanFixtures();
   if (!postgresAvailable) return;
   await db.delete(tag).where(eq(tag.id, tagId));

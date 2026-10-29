@@ -12,7 +12,6 @@ import { tag } from '@/database/schema/tag.schema';
 import { chatConversation, chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { stopAdminUpdateListener } from '@/modules/admin/admin-update.delivery';
 
 import { randomUUID } from 'node:crypto';
 
@@ -423,7 +422,6 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await stopAdminUpdateListener();
   await cleanFixtures();
   if (!postgresAvailable) return;
   if (adminId) await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
