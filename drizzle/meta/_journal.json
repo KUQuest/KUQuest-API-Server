@@ -722,6 +722,13 @@
       "when": 1791486409002,
       "tag": "20261008190648_heavy_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793301541580,
+      "tag": "20261029191901_green_vulture",
+      "breakpoints": true
     }
   ]
 }

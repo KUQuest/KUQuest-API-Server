@@ -11,7 +11,7 @@ import {
   questV2TeamRewardAllocation,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
-import type { QuestTransaction } from '@/modules/quest/shared';
+import { isMoneyHoldOpen, type QuestTransaction } from '@/modules/quest/shared';
 
 import { and, eq, gt, isNotNull, lte, ne, or } from 'drizzle-orm';
 
@@ -52,6 +52,7 @@ export const getQuestUpdateAccess = async (
       hirerId: quest.hirerId,
       state: quest.questStatus,
       dueAt: quest.dueAt,
+      moneyHoldStartedAt: quest.moneyHoldStartedAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
@@ -121,7 +122,7 @@ export const getQuestUpdateAccess = async (
   }
   if (!assignment) return undefined;
 
-  if (current.state !== 'QUEST_FAILED' || current.dueAt === null) return undefined;
+  if (!isMoneyHoldOpen(current) || current.dueAt === null) return undefined;
   const [pendingProof] = await db
     .select({ id: questV2ProofSubmission.id })
     .from(questV2ProofSubmission)

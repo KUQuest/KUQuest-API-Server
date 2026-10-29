@@ -135,6 +135,7 @@ const createQuest = async ({
     updatedAt: terminalAt,
     questStatus: status,
     failedAt: status === 'QUEST_FAILED' ? terminalAt : null,
+    moneyHoldStartedAt: status === 'QUEST_FAILED' ? terminalAt : null,
   });
   await db.insert(questAssignment).values(
     workerIds.map((workerId, index) => ({

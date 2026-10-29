@@ -1434,7 +1434,7 @@ describe('Admin Report Case API', () => {
     const failedAt = new Date('2020-02-02T10:30:00.000Z');
     await db
       .update(quest)
-      .set({ questStatus: 'QUEST_FAILED', failedAt })
+      .set({ questStatus: 'QUEST_FAILED', failedAt, moneyHoldStartedAt: failedAt })
       .where(eq(quest.id, fixture.questId));
     const failedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
     expect(failedDetail.status).toBe(200);
@@ -2258,7 +2258,12 @@ describe('Admin Report Case API', () => {
     const terminalAt = new Date('2020-02-03T10:00:00.000Z');
     await db
       .update(quest)
-      .set({ questStatus: 'QUEST_FAILED', failedAt: terminalAt, updatedAt: terminalAt })
+      .set({
+        questStatus: 'QUEST_FAILED',
+        failedAt: terminalAt,
+        moneyHoldStartedAt: terminalAt,
+        updatedAt: terminalAt,
+      })
       .where(eq(quest.id, fixture.questId));
     await db
       .update(chatConversation)

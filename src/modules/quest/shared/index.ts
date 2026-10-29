@@ -13,6 +13,7 @@ export {
   type WorkChatMembershipWriter,
 } from './work-chat';
 export * from './contracts';
+export { isMoneyHoldOpen, moneyHoldDurationMs } from './money-hold';
 export {
   startQuestWork,
   questV1StartWorkOperationScope,

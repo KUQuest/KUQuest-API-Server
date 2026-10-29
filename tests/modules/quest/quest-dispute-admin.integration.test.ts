@@ -83,7 +83,7 @@ type DisputeFixture = {
 };
 
 const createDisputeFixture = async (
-  status: 'QUEST_FAILED' | 'QUEST_CANCELLED' = 'QUEST_FAILED'
+  status: 'QUEST_FAILED' | 'QUEST_COMPLETED' | 'QUEST_CANCELLED' = 'QUEST_FAILED'
 ) => {
   const hirerId = await createMember('Hirer');
   const workerId = await createMember('Worker');
@@ -100,8 +100,9 @@ const createDisputeFixture = async (
   );
   const tagId = crypto.randomUUID();
   await db.insert(tag).values({ id: tagId, name: `Dispute tag ${tagId}` });
-  const failedAt = status === 'QUEST_FAILED' ? new Date() : null;
   const now = new Date();
+  const failedAt = status === 'QUEST_FAILED' ? now : null;
+  const moneyHoldStartedAt = status === 'QUEST_CANCELLED' ? null : now;
   await db.insert(quest).values({
     id: questId,
     hirerId,
@@ -126,6 +127,7 @@ const createDisputeFixture = async (
     dueAt: now,
     proofRequired: true,
     failedAt,
+    moneyHoldStartedAt,
     cancelledAt: status === 'QUEST_CANCELLED' ? now : null,
     createdAt: now,
     updatedAt: now,
@@ -137,7 +139,7 @@ const createDisputeFixture = async (
     assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
   });
   const createdCase =
-    status === 'QUEST_FAILED'
+    status !== 'QUEST_CANCELLED'
       ? await db.transaction((transaction) =>
           createAdminDisputeCaseInTransaction(transaction, {
             questId,
@@ -1017,7 +1019,7 @@ describe('Admin Dispute API', () => {
     const failedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     await db
       .update(quest)
-      .set({ failedAt, updatedAt: failedAt })
+      .set({ failedAt, moneyHoldStartedAt: failedAt, updatedAt: failedAt })
       .where(eq(quest.id, fixture.questId));
     const clock = { now: () => new Date(failedAt.getTime() + 7 * 24 * 60 * 60 * 1000) };
     const options = { clock, autoApprove: async () => [] };
@@ -1176,6 +1178,48 @@ describe('Admin Dispute API', () => {
     expect(notFoundResponse.status).toBe(200);
     const emptyBody = (await notFoundResponse.json()) as { success: boolean; data: { case: null } };
     expect(emptyBody.data.case).toBeNull();
+  });
+
+  it('accepts a Dispute Case on a completed Quest with a money hold, as on a failed Quest', async () => {
+    if (!postgresAvailable) return;
+    const failed = await createDisputeFixture('QUEST_FAILED');
+    const completed = await createDisputeFixture('QUEST_COMPLETED');
+    const [completedQuest] = await db
+      .select({ moneyHoldStartedAt: quest.moneyHoldStartedAt })
+      .from(quest)
+      .where(eq(quest.id, completed.questId));
+    const holdStartedAt = completedQuest!.moneyHoldStartedAt!;
+
+    for (const fixture of [failed, completed]) {
+      const [created] = await db
+        .select({ status: adminDisputeCase.status, filerUserId: adminDisputeCase.filerUserId })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+      expect(created).toEqual({ status: 'DISPUTE_CASE_PENDING', filerUserId: fixture.workerId });
+    }
+    expect(await readQuestDisputeSummary(completed.hirerId, completed.questId)).toMatchObject({
+      canFile: true,
+      windowEndsAt: new Date(holdStartedAt.getTime() + 24 * 60 * 60 * 1000),
+    });
+    expect(await readQuestMoneyHold(completed.hirerId, completed.questId)).toEqual({
+      status: 'HELD',
+      releasesAt: new Date(holdStartedAt.getTime() + 7 * 24 * 60 * 60 * 1000),
+      heldSatang: 1_000,
+    });
+
+    await db.update(quest).set({ moneyHoldStartedAt: null }).where(eq(quest.id, completed.questId));
+    await expect(
+      db.transaction((transaction) =>
+        createAdminDisputeCaseInTransaction(transaction, {
+          questId: completed.questId,
+          filerUserId: completed.hirerId,
+          category: 'OTHER',
+          submittedDetail: 'The Quest completed with every slot paid.',
+        })
+      )
+    ).rejects.toMatchObject({ code: 'DISPUTE_CASE_QUEST_NOT_FAILED' });
+    expect(await readQuestDisputeSummary(completed.hirerId, completed.questId)).toBeNull();
+    expect(await readQuestMoneyHold(completed.hirerId, completed.questId)).toBeNull();
   });
 
   it('tells each viewer the self-file window and their own Case on a failed Quest', async () => {

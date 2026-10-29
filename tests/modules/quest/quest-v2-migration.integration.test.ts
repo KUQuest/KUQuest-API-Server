@@ -669,6 +669,7 @@ const createOpenGroupCandidateQuest = async (
 ) => {
   const id = randomUUID();
   questIds.push(id);
+  const failedAt = overrides.questStatus === 'QUEST_FAILED' ? new Date() : null;
   await db.insert(quest).values({
     id,
     hirerId: hirer.id,
@@ -690,7 +691,8 @@ const createOpenGroupCandidateQuest = async (
     startTime: new Date('2030-01-01T10:00:00.000Z'),
     dueAt: new Date('2030-01-01T11:00:00.000Z'),
     proofRequired: true,
-    failedAt: overrides.questStatus === 'QUEST_FAILED' ? new Date() : null,
+    failedAt,
+    moneyHoldStartedAt: failedAt,
     ...overrides,
   });
   return id;

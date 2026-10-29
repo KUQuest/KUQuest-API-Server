@@ -35,7 +35,7 @@ export const questDisputeRoute = new Elysia({
       tags: ['Quest Disputes'],
       summary: 'File a Dispute Case as the Hirer or Worker',
       description:
-        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a failed Quest within the one-day self-file window. The Member supplies the required category and submittedDetail and may supply filerStatement.',
+        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a Quest with a money hold (QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot) within the one-day self-file window. The Member supplies the required category and submittedDetail and may supply filerStatement.',
       operationId: 'fileQuestDispute',
       security: betterAuthSecurity,
     },
@@ -88,7 +88,7 @@ export const disputeCaseResponseRoute = new Elysia({
       tags: ['Quest Disputes'],
       summary: 'Submit a respondent statement for a Dispute Case',
       description:
-        'Lets the opposing Member submit one statement while the Quest is QUEST_FAILED and the Dispute Case is DISPUTE_CASE_PENDING, no later than seven days after the Quest failed.',
+        'Lets the opposing Member submit one statement while the Quest has a money hold and the Dispute Case is DISPUTE_CASE_PENDING, no later than seven days after the hold started.',
       operationId: 'respondToDisputeCase',
       security: betterAuthSecurity,
     },
