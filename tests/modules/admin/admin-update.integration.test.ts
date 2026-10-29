@@ -1,7 +1,9 @@
 import { app } from '@/app';
 import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
-import { authAdmin } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { quest, questCommand } from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
 import {
   adminUpdateListenerApplicationName,
   notifyAdminResourceUpdated,
@@ -9,6 +11,8 @@ import {
 } from '@/modules/admin/admin-update.delivery';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { updateProfile } from '@/modules/profile/profile.service';
+import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
@@ -220,10 +224,11 @@ describe('Admin SSE updates', () => {
     expect(operation?.operationId).toBe('subscribeAdminUpdates');
     expect(operation?.description).toContain('GET /api/v1/admin/reports/{reportId}');
     expect(operation?.description).toContain('GET /api/v1/admin/overview');
+    expect(operation?.description).toContain('GET /api/v1/admin/quests/{questId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/members/{memberId}');
     expect(operation?.description).toContain('GET /api/v1/admin/members/{id}/penalty-history');
     expect(operation?.description).toContain('GET /api/v1/admin/activity-log');
     expect(operation?.description).toContain('GET /api/v1/admin/disputes/{disputeCaseId}');
-    expect(operation?.description).toContain('GET /api/v1/admin/quests/{questId}');
     expect(operation?.description).toContain('GET /api/v1/admin/finance/quests/{questId}');
     expect(operation?.description).toContain('GET /api/v1/admin/wallets/{walletId}');
     expect(operation?.description).toContain('GET /api/v1/admin/finance/members/{userId}');
@@ -242,6 +247,181 @@ describe('Admin SSE updates', () => {
     expect(operation?.responses?.['200']?.content?.['text/event-stream']?.example).toContain(
       'CONDUCT_REPORT'
     );
+  });
+
+  it('publishes Quest creation and Member profile changes through the Admin stream', async () => {
+    if (!databaseReady) return;
+
+    const memberId = crypto.randomUUID();
+    const tagId = crypto.randomUUID();
+    let questId: string | undefined;
+    await db.insert(authUser).values({
+      id: memberId,
+      email: `${memberId}@ku.th`,
+      firstName: 'SSE',
+      lastName: 'Member',
+    });
+    await db.insert(tag).values({ id: tagId, name: `Admin SSE ${tagId}` });
+
+    const response = await adminEventsRequest();
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      expect(await readText(reader)).toContain(': connected');
+      const input: QuestV2CreateInput = {
+        title: 'Admin event Quest',
+        description: 'A Quest created for Admin invalidation coverage.',
+        condition: { items: ['Complete the work'] },
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        questFundingTotal: 10,
+        headcount: 1,
+        startTime: '2030-08-26T10:00:00.000+07:00',
+        dueAt: '2030-08-26T12:00:00.000+07:00',
+        tagId,
+        proofRequired: false,
+        locations: [],
+      };
+      const created = await createQuestV2(memberId, input, `admin-update-${crypto.randomUUID()}`);
+      if (!('quest' in created)) throw new Error(`Quest create failed: ${created.outcome}`);
+      questId = created.quest.id;
+
+      expect(await readEvent(reader)).toEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'QUEST',
+        subjectId: questId,
+      });
+      expect(await readEvent(reader)).toEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'MEMBER',
+        subjectId: memberId,
+      });
+
+      expect(await updateProfile(memberId, { bio: 'Updated by Member' })).toBe('updated');
+      expect(await readEvent(reader)).toEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'MEMBER',
+        subjectId: memberId,
+      });
+    } finally {
+      await reader.cancel();
+      if (questId) await db.delete(quest).where(eq(quest.id, questId));
+      await db.delete(tag).where(eq(tag.id, tagId));
+      await db.delete(questCommand).where(eq(questCommand.principalUserId, memberId));
+      await db.delete(authUser).where(eq(authUser.id, memberId));
+    }
+  });
+
+  it('does not publish rolled-back Quest or Member mutations through the Admin stream', async () => {
+    if (!databaseReady) return;
+
+    const hirerId = crypto.randomUUID();
+    const rolledBackMemberId = crypto.randomUUID();
+    const committedMemberId = crypto.randomUUID();
+    const tagId = crypto.randomUUID();
+    let questId: string | undefined;
+    await db.insert(authUser).values([
+      {
+        id: hirerId,
+        email: `${hirerId}@ku.th`,
+        firstName: 'Rollback',
+        lastName: 'Hirer',
+      },
+      {
+        id: rolledBackMemberId,
+        email: `${rolledBackMemberId}@ku.th`,
+        firstName: 'Rollback',
+        lastName: 'Member',
+      },
+      {
+        id: committedMemberId,
+        email: `${committedMemberId}@ku.th`,
+        firstName: 'Committed',
+        lastName: 'Member',
+      },
+    ]);
+    await db.insert(tag).values({ id: tagId, name: `Admin SSE rollback ${tagId}` });
+
+    try {
+      const input: QuestV2CreateInput = {
+        title: 'Rollback event Quest',
+        description: 'A Quest for rollback coverage.',
+        condition: { items: ['Complete the work'] },
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        questFundingTotal: 10,
+        headcount: 1,
+        startTime: '2030-08-26T10:00:00.000+07:00',
+        dueAt: '2030-08-26T12:00:00.000+07:00',
+        tagId,
+        proofRequired: false,
+        locations: [],
+      };
+      const created = await createQuestV2(hirerId, input, `admin-rollback-${crypto.randomUUID()}`);
+      if (!('quest' in created)) throw new Error(`Quest create failed: ${created.outcome}`);
+      questId = created.quest.id;
+
+      const response = await adminEventsRequest();
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      try {
+        expect(await readText(reader)).toContain(': connected');
+        await expect(
+          db.transaction(async (transaction) => {
+            const [updatedQuest] = await transaction
+              .update(quest)
+              .set({ description: 'This Quest change must roll back.' })
+              .where(eq(quest.id, questId!))
+              .returning({ id: quest.id });
+            expect(updatedQuest?.id).toBe(questId!);
+            await notifyAdminResourceUpdated(transaction, 'QUEST', questId!);
+            throw new Error('force Quest rollback');
+          })
+        ).rejects.toThrow('force Quest rollback');
+
+        await expect(
+          db.transaction(async (transaction) => {
+            await transaction
+              .update(authUser)
+              .set({ bio: 'This Member update must roll back.' })
+              .where(eq(authUser.id, rolledBackMemberId));
+            await notifyAdminResourceUpdated(transaction, 'MEMBER', rolledBackMemberId);
+            throw new Error('force Member rollback');
+          })
+        ).rejects.toThrow('force Member rollback');
+
+        const [questRow] = await db
+          .select({ description: quest.description })
+          .from(quest)
+          .where(eq(quest.id, questId));
+        const [rolledBackMember] = await db
+          .select({ bio: authUser.bio })
+          .from(authUser)
+          .where(eq(authUser.id, rolledBackMemberId));
+        expect(questRow?.description).toBe('A Quest for rollback coverage.');
+        expect(rolledBackMember?.bio).toBeNull();
+
+        expect(await updateProfile(committedMemberId, { bio: 'Committed update' })).toBe('updated');
+        expect(await readEvent(reader)).toEqual({
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'MEMBER',
+          subjectId: committedMemberId,
+        });
+      } finally {
+        await reader.cancel();
+      }
+    } finally {
+      if (questId) await db.delete(quest).where(eq(quest.id, questId));
+      await db.delete(tag).where(eq(tag.id, tagId));
+      await db
+        .delete(questCommand)
+        .where(
+          inArray(questCommand.principalUserId, [hirerId, rolledBackMemberId, committedMemberId])
+        );
+      await db
+        .delete(authUser)
+        .where(inArray(authUser.id, [hirerId, rolledBackMemberId, committedMemberId]));
+    }
   });
 
   it('allows enabled Admins and rejects anonymous, Member, disabled, and untrusted-origin callers', async () => {

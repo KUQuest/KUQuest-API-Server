@@ -11,6 +11,7 @@ import {
   questTeam,
   questTeamMember,
 } from '@/database/schema/quest.schema';
+import { notifyAdminMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
 
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 
@@ -48,6 +49,26 @@ type QuestProofRow = {
 
 const approvedProofStatuses = ['PROOF_APPROVED'] as const;
 const notApprovedProofStatuses = ['PROOF_NOT_APPROVED'] as const;
+
+const notifyAdminProofOwnerMembersUpdated = async (
+  tx: Tx,
+  owner: { workerId: string | null; teamId: string | null }
+) => {
+  if (owner.workerId) {
+    await notifyAdminMembersUpdated(tx, [owner.workerId]);
+    return;
+  }
+  if (!owner.teamId) return;
+
+  const teamMembers = await tx
+    .select({ memberId: questTeamMember.userId })
+    .from(questTeamMember)
+    .where(eq(questTeamMember.teamId, owner.teamId));
+  await notifyAdminMembersUpdated(
+    tx,
+    teamMembers.map(({ memberId }) => memberId)
+  );
+};
 
 export type ProofOutcome =
   | {
@@ -449,6 +470,7 @@ export const submitProof = async (
       fileIds: persistedFileIds,
       submittedAt: now,
     });
+    await notifyAdminQuestUpdated(tx, questId);
     await moveIfSubmitted(tx, current, now, userId);
     return { proof };
   });
@@ -555,6 +577,7 @@ export const reviewProof = async (
       .update(proofSubmission)
       .set({ submissionStatus: status, reviewNote: note, reviewedAt: now })
       .where(eq(proofSubmission.id, proofId));
+    await notifyAdminQuestUpdated(tx, questId);
     if (decision === 'PROOF_NOT_APPROVED') {
       const owner = proofOwner!;
       const rejected = await ownerCount(tx, questId, owner, [...notApprovedProofStatuses]);
@@ -598,6 +621,7 @@ export const reviewProof = async (
       });
     } else if (current.questStatus === questStatus.failed) {
       await settleApprovedLegacyQuestProofAfterFailureInTransaction(tx, questId, proofId);
+      await notifyAdminProofOwnerMembersUpdated(tx, proof);
     } else if (await allObligationsApproved(tx, current)) {
       await applyQuestStateTransition(tx, {
         questId,
@@ -733,6 +757,8 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
           id: proofSubmission.id,
           status: proofSubmission.submissionStatus,
           submittedAt: proofSubmission.submittedAt,
+          workerId: proofSubmission.workerId,
+          teamId: proofSubmission.teamId,
         })
         .from(proofSubmission)
         .innerJoin(quest, eq(proofSubmission.questId, quest.id))
@@ -764,6 +790,7 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
             eq(proofSubmission.submissionStatus, 'PROOF_PENDING')
           )
         );
+      await notifyAdminQuestUpdated(tx, candidate.questId);
       approved.push(candidate.id);
       if (current.questStatus === questStatus.failed) {
         await settleApprovedLegacyQuestProofAfterFailureInTransaction(
@@ -771,6 +798,7 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
           candidate.questId,
           candidate.id
         );
+        await notifyAdminProofOwnerMembersUpdated(tx, proof);
       } else if (await allObligationsApproved(tx, current)) {
         const approved = await applyQuestStateTransition(tx, {
           questId: current.id,

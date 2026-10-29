@@ -4,6 +4,7 @@ import {
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
 import type { AdminActionReasonCatalog } from '@/modules/admin/admin-action.policy';
+import { notifyAdminQuestAndMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
 
 import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 
@@ -127,6 +128,7 @@ const applyHide = async (
     .where(
       and(eq(quest.id, input.questId), eq(quest.version, expectedVersion), isNull(quest.hiddenAt))
     );
+  await notifyAdminQuestUpdated(transaction, input.questId);
   return summaryResult(transaction, input.questId);
 };
 
@@ -170,6 +172,7 @@ const applyRestore = async (
         isNotNull(quest.hiddenAt)
       )
     );
+  await notifyAdminQuestUpdated(transaction, input.questId);
   return summaryResult(transaction, input.questId);
 };
 
@@ -194,6 +197,7 @@ const applyTerminate = async (
       'Quest cannot be terminated in its current state.'
     );
   }
+  await notifyAdminQuestAndMembersUpdated(transaction, input.questId);
   return summaryResult(transaction, input.questId);
 };
 

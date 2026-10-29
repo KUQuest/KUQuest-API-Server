@@ -117,16 +117,25 @@ const adminEventsRequest = () =>
     })
   );
 
-const readAdminSseFrame = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+const readAdminSseFrame = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs?: number
+) => {
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const frame = await Promise.race([
-    reader.read(),
-    new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => reject(new Error('Timed out waiting for Admin SSE data.')), 5_000);
-    }),
-  ]).finally(() => {
-    if (timeout !== undefined) clearTimeout(timeout);
-  });
+  const frame =
+    timeoutMs === undefined
+      ? await reader.read()
+      : await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error('Timed out waiting for Admin SSE data.')),
+              timeoutMs
+            );
+          }),
+        ]).finally(() => {
+          if (timeout !== undefined) clearTimeout(timeout);
+        });
   if (frame.done) throw new Error('Admin SSE stream closed before the expected frame.');
   return new TextDecoder().decode(frame.value);
 };
@@ -148,17 +157,20 @@ const createAdminSseEventReader = (reader: ReadableStreamDefaultReader<Uint8Arra
   let pendingEvent: Promise<Record<string, unknown>> | undefined;
 
   const nextEvent = async (timeoutMs = 5_000) => {
-    const pending = (pendingEvent ??= readAdminSseEvent(reader).finally(() => {
-      pendingEvent = undefined;
-    }));
+    const pending = (pendingEvent ??= readAdminSseEvent(reader));
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
+      const event = await Promise.race([
         pending,
         new Promise<undefined>((resolve) => {
           timeout = setTimeout(() => resolve(undefined), timeoutMs);
         }),
       ]);
+      if (event !== undefined && pendingEvent === pending) pendingEvent = undefined;
+      return event;
+    } catch (error) {
+      if (pendingEvent === pending) pendingEvent = undefined;
+      throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }
@@ -1220,7 +1232,7 @@ describe('Admin Report Case API', () => {
     const eventStream = createAdminSseEventReader(reader);
 
     try {
-      expect(await readAdminSseFrame(reader)).toContain(': connected');
+      expect(await readAdminSseFrame(reader, 5_000)).toContain(': connected');
 
       const reportCaseDecision = await adminRequest(
         `/api/v1/admin/reports/${reportCase.caseId}/decide`,
@@ -1312,7 +1324,7 @@ describe('Admin Report Case API', () => {
     } finally {
       await reader.cancel();
     }
-  });
+  }, 15_000);
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
     if (!postgresAvailable) return;
@@ -3652,7 +3664,7 @@ describe('Admin Report Case API', () => {
     expect(eventResponse.status).toBe(200);
     const eventReader = eventResponse.body!.getReader();
     const eventStream = createAdminSseEventReader(eventReader);
-    expect(await readAdminSseFrame(eventReader)).toContain(': connected');
+    expect(await readAdminSseFrame(eventReader, 5_000)).toContain(': connected');
     await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_dismiss() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.action = 'CONDUCT_REPORT_DISMISS' THEN
