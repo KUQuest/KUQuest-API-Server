@@ -1,9 +1,11 @@
 import { db } from '@/database/client';
 import { questCommand } from '@/database/schema/quest.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { and, asc, eq, isNotNull } from 'drizzle-orm';
 
 import type { QuestTransaction } from '../work-chat/quest-work-chat.port';
+import { notifyAdminMembersUpdated, notifyAdminQuestMembersUpdated } from '../admin-updates';
 
 /** Hashes a request body into the 64 lowercase hex characters of a request digest. */
 export const sha256Json = async (value: object): Promise<string> => {
@@ -32,7 +34,13 @@ export type QuestCommandOutcomeCode =
 
 /** The work outcome: a business rejection is a recorded, replayable result. */
 export type QuestCommandWork<TResult, TRejection> =
-  | { kind: 'success'; result: TResult; resourceType?: string; resourceId?: string }
+  | {
+      kind: 'success';
+      result: TResult;
+      resourceType?: string;
+      resourceId?: string;
+      relatedMemberIds?: string[];
+    }
   | { kind: 'rejected'; rejection: TRejection };
 
 export type QuestCommandResult<TResult, TRejection> =
@@ -58,6 +66,22 @@ const questCommandRecordFields = {
 };
 
 const questCommandTtlMs = 24 * 60 * 60 * 1000;
+
+const questCommandInvalidations: Record<
+  string,
+  { quest: boolean; members?: 'quest-roster' | 'related' }
+> = {
+  dispute_case: { quest: false },
+  'quest-v2-conduct-report': { quest: false },
+  'quest-v2-review': { quest: false },
+  'quest-v2-team-reward-allocation': { quest: false },
+  quest: { quest: true, members: 'quest-roster' },
+  'quest-assignment-v2': { quest: true, members: 'quest-roster' },
+  'quest-v2-candidate-selection': { quest: true, members: 'quest-roster' },
+  'quest-v2-candidate-team-selection': { quest: true, members: 'quest-roster' },
+  QUEST_ASSIGNMENT: { quest: true, members: 'quest-roster' },
+  'quest-v2-proof-command': { quest: true, members: 'related' },
+};
 
 const questCommandSnapshotOf = (value: unknown): QuestCommandSnapshot | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -153,6 +177,17 @@ export const runQuestCommand = async <TResult, TRejection>(input: {
   }
 
   const work = await input.work({ commandId: created.id });
+  if (work.kind === 'success' && input.identity.questId) {
+    const invalidation = questCommandInvalidations[work.resourceType ?? ''] ?? { quest: true };
+    if (invalidation.quest) {
+      await notifyAdminResourceUpdated(input.transaction, 'QUEST', input.identity.questId);
+    }
+    if (invalidation.members === 'quest-roster') {
+      await notifyAdminQuestMembersUpdated(input.transaction, input.identity.questId);
+    } else if (invalidation.members === 'related' && work.relatedMemberIds) {
+      await notifyAdminMembersUpdated(input.transaction, work.relatedMemberIds);
+    }
+  }
   const completion =
     work.kind === 'success'
       ? {

@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { and, asc, eq, ne } from 'drizzle-orm';
 
@@ -72,7 +73,10 @@ export const updateOnboardingInfo = async (
   }
 
   try {
-    await db.update(authUser).set(data).where(eq(authUser.id, userId));
+    await db.transaction(async (transaction) => {
+      await transaction.update(authUser).set(data).where(eq(authUser.id, userId));
+      await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    });
   } catch (error) {
     if (isStudentIdUniquenessViolation(error)) {
       return 'STUDENT_ID_ALREADY_EXISTS';

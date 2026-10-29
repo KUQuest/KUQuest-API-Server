@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { quest, questAssignment, questDirectJoinCommand } from '@/database/schema/quest.schema';
 import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
+import { notifyAdminQuestAndMembersUpdated } from '@/modules/quest/shared';
 
 import { and, eq, sql } from 'drizzle-orm';
 
@@ -349,6 +350,7 @@ export const joinNoCandidateQuest = async (
       })
       .where(eq(questDirectJoinCommand.commandId, commandId));
 
+    await notifyAdminQuestAndMembersUpdated(transaction, questId);
     return { ...assignment, questStatus: nextStatus };
   });
 };
