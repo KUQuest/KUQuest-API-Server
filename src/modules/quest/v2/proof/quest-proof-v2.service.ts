@@ -23,6 +23,7 @@ import {
 import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
+import { enqueueQuestFailedPush } from '../lifecycle/quest-failed-v2.push';
 import {
   completeQuestCommand,
   findOpenQuestCommandPayloads,
@@ -2308,6 +2309,12 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           current.hirerId,
           ...activeWorkerIds,
         ]);
+        await enqueueQuestFailedPush(transaction, {
+          recipientMemberIds: activeWorkerIds,
+          questId: input.questId,
+          reason: 'PROOF_NOT_APPROVED',
+          now: input.now,
+        });
       } else if (current.questState !== 'QUEST_COMPLETED' && questStatus === 'QUEST_COMPLETED') {
         await emitQuestUpdate(
           transaction,
@@ -2540,6 +2547,12 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       current.hirerId,
       ...workerIds,
     ]);
+    await enqueueQuestFailedPush(transaction, {
+      recipientMemberIds: workerIds,
+      questId,
+      reason: 'DUE_AT_MISSED',
+      now,
+    });
     return true;
   });
 
