@@ -13,7 +13,6 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { stopAdminUpdateListener } from '@/modules/admin/admin-update.delivery';
 
 import { randomUUID } from 'node:crypto';
 
@@ -252,7 +251,6 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await stopAdminUpdateListener();
   if (!databaseReady) return;
   if (adminId) await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(tag).where(eq(tag.id, tagId));
