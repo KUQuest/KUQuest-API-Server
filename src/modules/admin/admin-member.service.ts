@@ -939,7 +939,7 @@ const memberHistoryAssignmentStatusChangedAt = () =>
           and "quest"."api_version" = 'v1'
         then ${memberHistoryQuestStatusChangedAt()}
         when "quest_assignment"."assignment_status" = 'ASSIGNMENT_INCOMPLETE'
-          and "quest"."quest_status" = 'QUEST_FAILED'
+          and "quest"."quest_status" in ('QUEST_FAILED', 'QUEST_COMPLETED')
         then ${memberHistoryQuestStatusChangedAt()}
         when "quest_assignment"."assignment_status" = 'ASSIGNMENT_CANCELLED'
           and "quest"."quest_status" = 'QUEST_CANCELLED'

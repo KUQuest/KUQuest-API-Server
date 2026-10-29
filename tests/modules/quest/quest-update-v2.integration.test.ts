@@ -995,6 +995,7 @@ describe('Quest v2 realtime updates', () => {
         startTime: new Date(Date.now() - 120_000),
         dueAt,
         failedAt,
+        moneyHoldStartedAt: failedAt,
       })
       .where(eq(quest.id, questId));
     await db
@@ -1069,6 +1070,61 @@ describe('Quest v2 realtime updates', () => {
     } finally {
       hirerSocket?.destroy();
       proofWorkerSocket.destroy();
+      await server.stop();
+    }
+  });
+
+  it('allows an incomplete Worker on a completed Quest with a money hold while their on-time Proof is pending', async () => {
+    const [, worker] = sessions;
+    if (!worker) throw new Error('Test sessions are missing');
+    const questId = await createAssignedQuest([worker.id]);
+    const dueAt = new Date(Date.now() - 60_000);
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.completed,
+        startTime: new Date(Date.now() - 120_000),
+        dueAt,
+        moneyHoldStartedAt: new Date(),
+      })
+      .where(eq(quest.id, questId));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.incomplete })
+      .where(eq(questAssignment.questId, questId));
+    await db.insert(questV2ProofSubmission).values({
+      questId,
+      workerId: worker.id,
+      submittedByUserId: worker.id,
+      submissionStatus: 'PROOF_PENDING',
+      sentAt: new Date(dueAt.getTime() - 1_000),
+      description: 'Submitted before the deadline',
+    });
+
+    const { server, client } = await connectToApp(questId, worker.cookie);
+    try {
+      expect(JSON.parse((await client.nextText())!)).toEqual({
+        type: 'SUBSCRIBED',
+        version: 1,
+        questId,
+      });
+      await db.update(quest).set({ moneyHoldStartedAt: null }).where(eq(quest.id, questId));
+      const deniedWithoutHold = await QuestWebSocketClient.connect(
+        server.server!.port!,
+        questId,
+        worker.cookie
+      )
+        .then(async (socket) => {
+          try {
+            return (await socket.nextFrame())?.opcode === 8;
+          } finally {
+            socket.destroy();
+          }
+        })
+        .catch(() => true);
+      expect(deniedWithoutHold).toBe(true);
+    } finally {
+      client.destroy();
       await server.stop();
     }
   });

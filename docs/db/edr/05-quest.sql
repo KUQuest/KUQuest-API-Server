@@ -87,6 +87,8 @@ CREATE TABLE quest (
   headcount    INTEGER NOT NULL DEFAULT 1 CHECK (headcount > 0),
   start_time   TIMESTAMPTZ NOT NULL,
   due_at       TIMESTAMPTZ,
+  failed_at    TIMESTAMPTZ,
+  money_hold_started_at TIMESTAMPTZ,
   proof_required BOOLEAN NOT NULL DEFAULT true,
   cancelled_at TIMESTAMPTZ,
   cancelled_by_user_id  UUID REFERENCES auth_user(id),
@@ -105,6 +107,12 @@ CREATE TABLE quest (
   CHECK (quest_status = 'QUEST_DRAFT' OR tag_id IS NOT NULL),
   CHECK (num_nonnulls(cancelled_by_user_id, cancelled_by_admin_id) <= 1),
   CHECK ((cancelled_at IS NULL) = (quest_status <> 'QUEST_CANCELLED')),
+  CHECK ((failed_at IS NOT NULL) = (quest_status = 'QUEST_FAILED')),
+  CHECK (CASE quest_status
+    WHEN 'QUEST_FAILED' THEN money_hold_started_at IS NOT DISTINCT FROM failed_at
+    WHEN 'QUEST_COMPLETED' THEN true
+    ELSE money_hold_started_at IS NULL
+  END),
   CHECK ((hidden_by_admin_id IS NULL) = (hidden_at IS NULL))
 );
 CREATE INDEX quest_hirer_id_idx ON quest (hirer_id);

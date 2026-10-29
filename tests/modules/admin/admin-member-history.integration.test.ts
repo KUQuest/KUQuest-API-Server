@@ -168,6 +168,7 @@ const createHistoryQuest = async ({
     proofRequired,
     startTime: new Date(createdAt.getTime() + 5_000),
     failedAt: questStatus === 'QUEST_FAILED' ? questStateEventAt : null,
+    moneyHoldStartedAt: questStatus === 'QUEST_FAILED' ? questStateEventAt : null,
     cancelledAt: questStatus === 'QUEST_CANCELLED' ? questStateEventAt : null,
     createdAt,
     updatedAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000),

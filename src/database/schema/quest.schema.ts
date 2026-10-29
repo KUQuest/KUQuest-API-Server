@@ -88,6 +88,7 @@ export const quest = pgTable(
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
     failedAt: time('failed_at'),
+    moneyHoldStartedAt: time('money_hold_started_at'),
     disputeWindowClosedNotifiedAt: time('dispute_window_closed_notified_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
@@ -143,6 +144,14 @@ export const quest = pgTable(
       sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`
     ),
     check(
+      'quest_money_hold_started_at_check',
+      sql`CASE ${table.questStatus}
+        WHEN 'QUEST_FAILED' THEN ${table.moneyHoldStartedAt} IS NOT DISTINCT FROM ${table.failedAt}
+        WHEN 'QUEST_COMPLETED' THEN true
+        ELSE ${table.moneyHoldStartedAt} IS NULL
+      END`
+    ),
+    check(
       'quest_participation_headcount_check',
       sql`(
         ${table.apiVersion} <> 'v2' AND
@@ -175,6 +184,7 @@ export const quest = pgTable(
     ),
     index('quest_hirer_id_idx').on(table.hirerId),
     index('quest_status_idx').on(table.questStatus),
+    index('quest_money_hold_started_at_idx').on(table.moneyHoldStartedAt),
     index('quest_mode_idx').on(table.mode),
     index('quest_tag_id_idx').on(table.tagId),
     index('quest_start_time_idx').on(table.startTime),

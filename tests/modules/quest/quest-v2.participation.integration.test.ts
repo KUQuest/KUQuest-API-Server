@@ -120,6 +120,7 @@ const assign = async (questId: string, status: AssignmentStatus = assignmentStat
 };
 
 const setQuestState = async (questId: string, status: QuestStatus) => {
+  const now = new Date();
   await db
     .update(quest)
     .set({
@@ -127,7 +128,7 @@ const setQuestState = async (questId: string, status: QuestStatus) => {
       // The quest_cancelled_at_check and quest_failed_at_check constraints pair each
       // terminal state with its timestamp.
       ...(status === questStatus.cancelled ? { cancelledAt: new Date() } : {}),
-      ...(status === questStatus.failed ? { failedAt: new Date() } : {}),
+      ...(status === questStatus.failed ? { failedAt: now, moneyHoldStartedAt: now } : {}),
     })
     .where(eq(quest.id, questId));
 };

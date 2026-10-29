@@ -669,7 +669,7 @@ export const questV2MoneyHoldSchema = t.Nullable(
     },
     {
       description:
-        'The 7-day hold on a failed Quest. Null unless the Quest is QUEST_FAILED. releasesAt is failedAt + 7 days and a Dispute Case does not move it; it stays the nominal time if the lifecycle worker runs late. heldSatang is the Hirer’s still-held Satang and is null for a Worker.',
+        'The 7-day money hold. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. releasesAt is the hold start + 7 days and a Dispute Case does not move it; it stays the nominal time if the lifecycle worker runs late. heldSatang is the Hirer’s still-held Satang and is null for a Worker.',
     }
   )
 );
@@ -690,7 +690,7 @@ export const questV2DisputeSchema = t.Nullable(
     },
     {
       description:
-        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
+        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
     }
   )
 );
