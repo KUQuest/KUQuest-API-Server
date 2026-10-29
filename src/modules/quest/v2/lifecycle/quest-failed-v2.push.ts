@@ -43,3 +43,25 @@ export const enqueueQuestFailedPush = async (
     });
   }
 };
+
+export const enqueueProofNotApprovedPush = async (
+  transaction: QuestTransaction,
+  input: { recipientMemberId: string; assignmentId: string; questId: string; now: Date }
+) => {
+  const transitionId = `quest-v2:PROOF_NOT_APPROVED:${input.assignmentId}`;
+  await enqueuePushDeliveryInTransaction(transaction, {
+    recipientMemberId: input.recipientMemberId,
+    eventKey: transitionId,
+    eventType: 'PROOF_NOT_APPROVED',
+    title: 'Proof not approved',
+    body: 'The Hirer did not approve your Proof Submission, so your Assignment ended with no Reward. You can open a Dispute Case within 1 day after the Quest ends.',
+    deepLink: `kuquest://quest/${input.questId}`,
+    data: {
+      type: 'PROOF_NOT_APPROVED',
+      questId: input.questId,
+      assignmentId: input.assignmentId,
+      transitionId,
+    },
+    now: input.now,
+  });
+};

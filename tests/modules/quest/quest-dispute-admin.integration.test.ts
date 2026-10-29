@@ -2,11 +2,17 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
+import {
+  createQuestV2ProofSubmission,
+  reviewQuestV2ProofSubmission,
+  submitQuestV2ProofSubmission,
+} from '@/modules/quest';
 import { createAdminDisputeCaseInTransaction } from '@/modules/quest/admin';
 import {
   readQuestDisputeSummary,
@@ -19,6 +25,7 @@ import {
   releaseFundingReservation,
   reserveSpending,
 } from '@/modules/wallet';
+import { workChatMembershipWriter } from '@/modules/work-chat';
 import { encodeCursor } from '@/shared/cursor';
 
 import {
@@ -32,7 +39,7 @@ import {
   readTestWallet,
 } from '../wallet/wallet-test-fixtures';
 
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { and, count, eq, inArray } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 
@@ -1220,6 +1227,156 @@ describe('Admin Dispute API', () => {
     ).rejects.toMatchObject({ code: 'DISPUTE_CASE_QUEST_NOT_FAILED' });
     expect(await readQuestDisputeSummary(completed.hirerId, completed.questId)).toBeNull();
     expect(await readQuestMoneyHold(completed.hirerId, completed.questId)).toBeNull();
+  });
+
+  it('lets a not-approved GROUP + FCFS Worker file and win a Dispute Case on the completed Quest', async () => {
+    if (!postgresAvailable) return;
+    const writer = spyOn(workChatMembershipWriter, 'applyQuestTransition').mockImplementation(
+      async () => ({ conversationId: 'dispute-group-fcfs', outcome: 'APPLIED' as const })
+    );
+    try {
+      const hirerId = await createMember('Hirer');
+      const workerA = await createMember('WorkerA');
+      const workerB = await createMember('WorkerB');
+      await fundTestWallet(hirerId, 5_000);
+      const questId = crypto.randomUUID();
+      const reservation = await db.transaction((transaction) =>
+        reserveSpending(transaction, {
+          ownerUserId: hirerId,
+          callerScope: 'quest',
+          callerReference: questId,
+          amountSatang: positiveSatang(2_000),
+        })
+      );
+      const tagId = crypto.randomUUID();
+      await db.insert(tag).values({ id: tagId, name: `Dispute tag ${tagId}` });
+      const now = new Date();
+      await db.insert(quest).values({
+        id: questId,
+        hirerId,
+        apiVersion: 'v2',
+        title: 'GROUP FCFS Dispute Quest',
+        condition: 'Complete the test task',
+        mode: 'NO_CANDIDATE',
+        participation: 'GROUP',
+        v2Mode: 'FIRST_COME_FIRST_SERVED',
+        v2Participation: 'GROUP',
+        questStatus: 'QUEST_IN_PROGRESS',
+        rewardSatang: 1_000,
+        questFundingTotalSatang: 1_000,
+        fundingReservationId: reservation.id,
+        policyRevisionId: reservation.policyRevisionId,
+        platformFeeBps: 0,
+        platformFeePerWorkerSatang: 0,
+        questEscrowSatang: 2_000,
+        tagId,
+        headcount: 2,
+        startTime: new Date(now.getTime() - 60 * 60 * 1000),
+        dueAt: new Date(now.getTime() + 60 * 60 * 1000),
+        proofRequired: true,
+      });
+      await db.insert(questAssignment).values(
+        [workerA, workerB].map((workerId, index) => ({
+          questId,
+          workerId,
+          assignmentStatus: 'ASSIGNMENT_ACTIVE',
+          createdAt: new Date(now.getTime() + index),
+        }))
+      );
+      const proofIds = await Promise.all(
+        [workerA, workerB].map(async (workerId) => {
+          const [proofFile] = await db
+            .insert(file)
+            .values({
+              bucket: 'dispute-group-fcfs-test',
+              objectKey: `${crypto.randomUUID()}.pdf`,
+              contentType: 'application/pdf',
+              sizeBytes: 100,
+              uploadedByUserId: workerId,
+            })
+            .returning({ id: file.id });
+          const draft = await createQuestV2ProofSubmission(
+            workerId,
+            questId,
+            { description: 'Submitted proof', fileIds: [proofFile!.id] },
+            `dispute-group-fcfs-draft-${workerId}`,
+            now
+          );
+          if ('outcome' in draft) throw new Error(`Proof Draft failed: ${draft.outcome}`);
+          const sent = await submitQuestV2ProofSubmission(
+            workerId,
+            questId,
+            draft.id,
+            `dispute-group-fcfs-send-${workerId}`,
+            now
+          );
+          if ('outcome' in sent) throw new Error(`Proof send failed: ${sent.outcome}`);
+          return sent.id;
+        })
+      );
+      const notApproved = await reviewQuestV2ProofSubmission(
+        hirerId,
+        questId,
+        proofIds[0]!,
+        'PROOF_NOT_APPROVED',
+        'The submitted work is incomplete',
+        `dispute-group-fcfs-a-${questId}`,
+        now
+      );
+      expect(notApproved).toMatchObject({ questStatus: 'QUEST_IN_PROGRESS' });
+      expect(await readQuestDisputeSummary(workerA, questId)).toBeNull();
+      const approved = await reviewQuestV2ProofSubmission(
+        hirerId,
+        questId,
+        proofIds[1]!,
+        'PROOF_APPROVED',
+        null,
+        `dispute-group-fcfs-b-${questId}`,
+        now
+      );
+      expect(approved).toMatchObject({ questStatus: 'QUEST_COMPLETED' });
+      const [completed] = await db
+        .select({ moneyHoldStartedAt: quest.moneyHoldStartedAt })
+        .from(quest)
+        .where(eq(quest.id, questId));
+      expect(completed?.moneyHoldStartedAt).toEqual(now);
+      expect(await readQuestDisputeSummary(workerA, questId)).toMatchObject({
+        canFile: true,
+        windowEndsAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+      });
+
+      const disputeCase = await db.transaction((transaction) =>
+        createAdminDisputeCaseInTransaction(transaction, {
+          questId,
+          filerUserId: workerA,
+          category: 'PROOF_REVIEW',
+          submittedDetail: 'The submitted Proof meets the Quest Condition.',
+        })
+      );
+      const response = await adminRequest(`/api/v1/admin/disputes/${disputeCase.id}/resolve`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': `dispute-group-fcfs-resolve-${disputeCase.id}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'DISPUTE_CASE_RESOLVED',
+          reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED',
+          workerId: workerA,
+          amountSatang: 1_000,
+        }),
+      });
+      expect(response.status).toBe(200);
+      expect((await readTestWallet(workerA)).earningsBalanceSatang).toBe(1_000);
+      expect((await readTestWallet(workerB)).earningsBalanceSatang).toBe(1_000);
+      expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+        status: 'SETTLED',
+        remainingSatang: 0,
+      });
+    } finally {
+      writer.mockRestore();
+    }
   });
 
   it('tells each viewer the self-file window and their own Case on a failed Quest', async () => {
