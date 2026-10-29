@@ -49,6 +49,7 @@ const openRealtimeSubscription = async <T>({
   accessDeniedReason,
   checkAccess,
   sameAccess,
+  accessEndsAt,
   subscribe,
 }: {
   socket: QuestRealtimeSocket;
@@ -58,6 +59,7 @@ const openRealtimeSubscription = async <T>({
   accessDeniedReason: string;
   checkAccess: () => Promise<T | undefined>;
   sameAccess: (initial: T, current: T) => boolean;
+  accessEndsAt?: (access: T) => Date | undefined;
   subscribe: (access: T) => () => void;
 }) => {
   logSocket(socket, 'open');
@@ -107,8 +109,20 @@ const openRealtimeSubscription = async <T>({
     },
     Math.max(0, expiresAt.getTime() - Date.now())
   );
+  const endsAt = accessEndsAt?.(access);
+  const accessEndTimer =
+    endsAt === undefined
+      ? undefined
+      : setTimeout(
+          () => {
+            socketCleanups.get(socket)?.();
+            socket.close(1000, 'Quest access ended');
+          },
+          Math.max(0, endsAt.getTime() - Date.now())
+        );
   socketCleanups.set(socket, () => {
     clearTimeout(expiryTimer);
+    clearTimeout(accessEndTimer);
     unsubscribe();
     socketCleanups.delete(socket);
   });
@@ -177,6 +191,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
         checkAccess: () => getQuestUpdateAccess(user.id, questId),
         sameAccess: (initial, current) =>
           initial.role === current.role && initial.mode === current.mode,
+        accessEndsAt: (access) => access.accessEndsAt,
         subscribe: () =>
           subscribeToQuestUpdates(questId, user.id, session.id, {
             send: (message) => {
@@ -199,7 +214,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       tags: ['Quest'],
       summary: 'Subscribe to read-only Quest updates',
       description:
-        'Subscribes the Hirer, an Active Worker, or a Prospective Worker with an open Candidate Inquiry Conversation to realtime Quest updates. Read Quest state from REST after SUBSCRIBED.',
+        'Subscribes the Hirer, an Active Worker, or a Prospective Worker with an open Candidate Inquiry Conversation to realtime Quest updates. An Incomplete Worker on a completed Quest also subscribes while the 7-day money hold is open; the server closes that socket with code 1000 when the hold ends. Read Quest state from REST after SUBSCRIBED.',
       operationId: 'subscribeQuestUpdates',
     },
   })
