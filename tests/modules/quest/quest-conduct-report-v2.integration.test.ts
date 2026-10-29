@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminConductReport } from '@/database/schema/admin.schema';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questAssignment,
@@ -12,6 +12,8 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
+import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { stopAdminUpdateListener } from '@/modules/admin/admin-update.delivery';
 
 import { randomUUID } from 'node:crypto';
 
@@ -40,10 +42,17 @@ const secondWorker = member('SecondWorker');
 const unrelated = member('Unrelated');
 const members = [hirer, worker, secondWorker, unrelated];
 const tagId = randomUUID();
+const adminEmail = `conduct-v2-admin-${randomUUID()}@example.com`;
+const adminPassword = 'ConductUpdatePass1!';
 const questIds: string[] = [];
 const hour = 60 * 60 * 1000;
 
 let databaseReady = false;
+let adminId = '';
+let adminCookie = '';
+
+const getCookieHeader = (response: Response): string =>
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const request = (
   method: string,
@@ -196,6 +205,31 @@ beforeAll(async () => {
   if (!databaseReady) return;
   await db.insert(authUser).values(members);
   await db.insert(tag).values({ id: tagId, name: `Conduct v2 tag ${tagId}` });
+
+  const adminAuth = createAdminAuth({
+    allowSignUp: true,
+    autoSignIn: false,
+    markEmailVerified: true,
+  });
+  const admin = await adminAuth.api.signUpEmail({
+    body: {
+      email: adminEmail,
+      password: adminPassword,
+      name: 'Conduct Admin',
+      firstName: 'Conduct',
+      lastName: 'Admin',
+    },
+  });
+  adminId = admin.user.id;
+  const login = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
+  if (login.status !== 200) throw new Error(`Admin sign-in failed: ${login.status}`);
+  adminCookie = getCookieHeader(login);
 });
 
 beforeEach(() => {
@@ -218,7 +252,9 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  await stopAdminUpdateListener();
   if (!databaseReady) return;
+  if (adminId) await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(
     inArray(
@@ -280,6 +316,43 @@ describe('Quest Conduct Report API v2 HTTP contract', () => {
 });
 
 describe('Quest Conduct Report API v2 behavior', () => {
+  it('sends an Admin invalidation when a Member creates a Conduct Report', async () => {
+    if (!databaseReady) return;
+    const questId = await createQuest();
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/admin/events', { headers: { cookie: adminCookie } })
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+
+    const reader = response.body!.getReader();
+    try {
+      const connected = await reader.read();
+      expect(new TextDecoder().decode(connected.value)).toContain(': connected');
+
+      const createdResponse = await file(hirer.id, questId, {
+        reportedMemberId: worker.id,
+        reason: 'CONDUCT_ABANDONED',
+        detail: 'Private report details',
+      });
+      expect(createdResponse.status).toBe(200);
+      const created = (await jsonBody(createdResponse)).data;
+      const frame = await reader.read();
+      expect(frame.done).toBe(false);
+      const text = new TextDecoder().decode(frame.value);
+      const dataLine = text.split('\n').find((line) => line.startsWith('data: '));
+      expect(dataLine).toBeDefined();
+      expect(JSON.parse(dataLine!.slice('data: '.length))).toEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'CONDUCT_REPORT',
+        subjectId: created?.id,
+      });
+      expect(text).not.toContain('Private report details');
+    } finally {
+      await reader.cancel();
+    }
+  });
+
   it('lets the Hirer report a Worker who missed the work and shows the filed status', async () => {
     if (!databaseReady) return;
     const questId = await createQuest();
