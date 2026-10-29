@@ -1,13 +1,39 @@
 import { app } from '@/app';
 import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
-import { authAdmin } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
+import {
+  createSealedLedgerTransaction,
+  ensureInitialMoneyPolicy,
+  ensureWallet,
+  positiveSatang,
+  signedSatang,
+} from '@/modules/wallet';
 import {
   notifyAdminResourceUpdated,
   stopAdminUpdateListener,
 } from '@/modules/admin/admin-update.delivery';
+import { parseAdminUpdateNotification } from '@/modules/admin/admin-update.schema';
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import {
+  createPayoutDestinationEncryption,
+  savePayoutDestination,
+} from '@/modules/payout-destination';
+import { initiatePayout, quotePayout } from '@/modules/payout';
+import {
+  createProviderEventEncryption,
+  initiateTopUp,
+  processTopUpProviderEvent,
+  quoteTopUp,
+  receiveTopUpProviderEvent,
+} from '@/modules/top-up';
+import type {
+  InboundPaymentProvider,
+  InboundPaymentRequest,
+  InboundPaymentResponse,
+} from '@/modules/top-up';
 
 import { eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
@@ -20,6 +46,28 @@ const adminEmails = [
 let databaseReady = false;
 const adminIds: string[] = [];
 const adminCookies: string[] = [];
+const providerEventEncryption = createProviderEventEncryption({
+  activeKeyVersion: 'v1',
+  keys: { v1: 'a'.repeat(32) },
+});
+const payoutDestinationEncryption = createPayoutDestinationEncryption({
+  activeKeyVersion: 'v1',
+  keys: { v1: 'p'.repeat(32) },
+});
+
+class AdminUpdatePaymentProvider implements InboundPaymentProvider {
+  async createPayment(input: InboundPaymentRequest): Promise<InboundPaymentResponse> {
+    return {
+      providerReference: `admin-update-pr-${crypto.randomUUID()}`,
+      providerStatus: 'REQUIRES_ACTION',
+      providerAmountSatang: input.paymentTotalSatang,
+      providerApiVersion: 'admin-update-test-v1',
+      providerChannelCode: 'QRPROMPTPAY',
+      qrPayload: 'admin-update-test-qr',
+      qrExpiresAt: input.expiresAt,
+    };
+  }
+}
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -50,6 +98,85 @@ const loginAdmin = async (email: string) => {
   return { id: account.user.id, cookie: getCookieHeader(response) };
 };
 
+const createPendingTopUp = async (userId: string) => {
+  const quote = await quoteTopUp({
+    principalUserId: userId,
+    creditSatang: positiveSatang(100),
+  });
+  const topUp = await initiateTopUp(
+    {
+      principalUserId: userId,
+      quoteId: quote.id,
+      idempotency: { key: `admin-update-${crypto.randomUUID()}` },
+    },
+    new AdminUpdatePaymentProvider()
+  );
+  const rawPayload = JSON.stringify({
+    event_id: `admin-update-event-${crypto.randomUUID()}`,
+    event: 'payment.capture',
+    data: {
+      reference_id: topUp.internalReference,
+      payment_request_id: topUp.providerReference,
+      status: 'SUCCEEDED',
+      request_amount: topUp.paymentTotalSatang / 100,
+      channel_code: 'QRPROMPTPAY',
+      updated: '2026-10-30T00:00:00.000Z',
+    },
+  });
+  const providerEvent = await receiveTopUpProviderEvent({
+    rawPayload,
+    callbackToken: 'admin-update-test-token',
+    webhookToken: 'admin-update-test-token',
+    encryption: providerEventEncryption,
+  });
+  return { topUp, providerEvent };
+};
+
+const preparePendingPayoutQuote = async (userId: string) => {
+  await savePayoutDestination(
+    {
+      principalUserId: userId,
+      givenName: 'Update',
+      surname: 'Member',
+      relationship: 'SELF',
+      bankCode: 'SCB',
+      accountNumber: '1234567890',
+      accountHolderName: 'Update Member',
+      routingType: 'BANK_ACCOUNT',
+      routingValue: '1234567890',
+    },
+    payoutDestinationEncryption
+  );
+
+  const walletAccounts = await db
+    .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
+    .from(walletLedgerAccount)
+    .innerJoin(walletWallet, eq(walletLedgerAccount.walletId, walletWallet.id))
+    .where(eq(walletWallet.userId, userId));
+  const [suspenseAccount] = await db
+    .select({ id: walletLedgerAccount.id })
+    .from(walletLedgerAccount)
+    .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
+  const earningsAccount = walletAccounts.find((account) => account.type === 'EARNINGS');
+  if (!earningsAccount || !suspenseAccount)
+    throw new Error('Wallet accounts were not provisioned.');
+
+  await createSealedLedgerTransaction({
+    businessReference: `admin-update-credit:${crypto.randomUUID()}`,
+    eventType: 'ADJUSTMENT',
+    postings: [
+      { accountId: earningsAccount.id, amountSatang: signedSatang(1_000) },
+      { accountId: suspenseAccount.id, amountSatang: signedSatang(-1_000) },
+    ],
+  });
+
+  const quote = await quotePayout({
+    principalUserId: userId,
+    receiptSatang: positiveSatang(100),
+  });
+  return quote;
+};
+
 const adminEventsRequest = (cookie = adminCookies[0]!, origin?: string) =>
   app.handle(
     new Request('http://localhost/api/v1/admin/events', {
@@ -78,8 +205,8 @@ const readWithTimeout = async (
   }
 };
 
-const readText = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-  const next = await readWithTimeout(reader, 'Timed out waiting for Admin SSE data.', 5_000);
+const readText = async (reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs = 5_000) => {
+  const next = await readWithTimeout(reader, 'Timed out waiting for Admin SSE data.', timeoutMs);
   if (next.done) throw new Error('Admin SSE stream closed before the expected event.');
   return new TextDecoder().decode(next.value);
 };
@@ -93,8 +220,8 @@ const expectStreamToClose = async (reader: ReadableStreamDefaultReader<Uint8Arra
   expect(result.done).toBe(true);
 };
 
-const readEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-  const frame = await readText(reader);
+const readEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>, timeoutMs = 5_000) => {
+  const frame = await readText(reader, timeoutMs);
   const data = frame.split('\n').find((line) => line.startsWith('data: '));
   if (!data) throw new Error(`Admin SSE frame did not contain event data: ${frame}`);
   return JSON.parse(data.slice('data: '.length)) as Record<string, unknown>;
@@ -121,7 +248,11 @@ beforeAll(async () => {
 afterAll(async () => {
   await stopAdminUpdateListener();
   if (!databaseReady) return;
-  if (adminIds.length > 0) await db.delete(authAdmin).where(inArray(authAdmin.id, adminIds));
+  if (adminIds.length > 0)
+    await db
+      .update(authAdmin)
+      .set({ disabledAt: new Date() })
+      .where(inArray(authAdmin.id, adminIds));
 });
 
 describe('Admin SSE updates', () => {
@@ -152,8 +283,14 @@ describe('Admin SSE updates', () => {
     expect(response.status).toBe(200);
     expect(operation?.operationId).toBe('subscribeAdminUpdates');
     expect(operation?.description).toContain('GET /api/v1/admin/reports/{reportId}');
-    expect(operation?.description).toContain('GET /api/v1/admin/overview');
-    expect(operation?.description).toContain('Other resource types need a documented read mapping');
+    expect(operation?.description).not.toContain('relatedSubjects');
+    expect(operation?.description).toContain('GET /api/v1/admin/members');
+    expect(operation?.description).toContain('GET /api/v1/admin/members/{id}');
+    expect(operation?.description).toContain('GET /api/v1/admin/wallets/{walletId}');
+    expect(operation?.description).toContain('GET /api/v1/admin/wallets/{walletId}/status-history');
+    expect(operation?.description).toContain('GET /api/v1/admin/payouts/{payoutId}/status-history');
+    expect(operation?.description).toContain('GET /api/v1/admin/top-ups/{topUpId}/status-history');
+    expect(operation?.description).toContain('GET /api/v1/admin/finance/overview');
     expect(operation?.security?.[0]).toHaveProperty('betterAuthAdminSession');
     expect(operation?.responses).toHaveProperty('401');
     expect(operation?.responses).toHaveProperty('403');
@@ -261,24 +398,184 @@ describe('Admin SSE updates', () => {
 
       const subjectId = crypto.randomUUID();
       await db.transaction((transaction) =>
-        notifyAdminResourceUpdated(transaction, 'CONDUCT_REPORT', subjectId)
+        notifyAdminResourceUpdated(transaction, 'TOP_UP', subjectId)
       );
 
       const events = await Promise.all([readEvent(childReader), readEvent(localReader)]);
       for (const event of events) {
         expect(event).toEqual({
           type: 'RESOURCE_UPDATED',
-          subjectType: 'CONDUCT_REPORT',
+          subjectType: 'TOP_UP',
           subjectId,
         });
         expect(JSON.stringify(event)).not.toContain(rolledBackId);
         expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+        expect(parseAdminUpdateNotification(JSON.stringify(event))).toEqual({
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'TOP_UP',
+          subjectId,
+        });
+        expect(
+          parseAdminUpdateNotification(JSON.stringify({ ...event, relatedSubjects: [] }))
+        ).toBeUndefined();
       }
     } finally {
       await Promise.all([childReader?.cancel(), localReader?.cancel()]);
       child.kill();
       await child.exited;
       await childOutput.cancel();
+    }
+  });
+
+  it('delivers separate MEMBER, Wallet, and Top-up invalidations for Admin and worker changes', async () => {
+    if (!databaseReady) return;
+
+    await ensureInitialMoneyPolicy();
+    const userId = crypto.randomUUID();
+    await db.insert(authUser).values({
+      id: userId,
+      email: `admin-update-member-${userId}@ku.th`,
+      firstName: 'Update',
+      lastName: 'Member',
+    });
+    const wallet = await ensureWallet(userId);
+    const { topUp, providerEvent } = await createPendingTopUp(userId);
+
+    const rollbackResponse = await adminEventsRequest(adminCookies[0]);
+    expect(rollbackResponse.status).toBe(200);
+    const rollbackReader = rollbackResponse.body!.getReader();
+    try {
+      expect(await readText(rollbackReader)).toContain(': connected');
+
+      await expect(
+        db.transaction(async (transaction) => {
+          await transaction
+            .update(walletWallet)
+            .set({ updatedAt: new Date() })
+            .where(eq(walletWallet.id, wallet.id));
+          throw new Error('force Wallet update rollback');
+        })
+      ).rejects.toThrow('force Wallet update rollback');
+      await expect(readEvent(rollbackReader, 50)).rejects.toThrow(
+        'Timed out waiting for Admin SSE data.'
+      );
+    } finally {
+      await rollbackReader.cancel();
+    }
+
+    const response = await adminEventsRequest(adminCookies[0]);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      expect(await readText(reader)).toContain(': connected');
+
+      const adminChange = await app.handle(
+        new Request(`http://localhost/api/v1/admin/wallets/${wallet.id}/status`, {
+          method: 'POST',
+          headers: {
+            cookie: adminCookies[0]!,
+            'content-type': 'application/json',
+            'idempotency-key': `admin-update-freeze-${crypto.randomUUID()}`,
+          },
+          body: JSON.stringify({ toStatus: 'FROZEN', reason: 'SSE integration test' }),
+        })
+      );
+      expect(adminChange.status).toBe(200);
+
+      const adminEvents = [await readEvent(reader), await readEvent(reader)];
+      expect(adminEvents).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'WALLET',
+        subjectId: wallet.id,
+      });
+      expect(adminEvents).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'MEMBER',
+        subjectId: userId,
+      });
+
+      const processed = await processTopUpProviderEvent(providerEvent.id);
+      expect(processed.processingStatus).toBe('PROCESSED');
+
+      const workerEvents = [
+        await readEvent(reader),
+        await readEvent(reader),
+        await readEvent(reader),
+      ];
+      expect(workerEvents).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'WALLET',
+        subjectId: wallet.id,
+      });
+      expect(workerEvents).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'TOP_UP',
+        subjectId: topUp.id,
+      });
+      expect(workerEvents).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'MEMBER',
+        subjectId: userId,
+      });
+      await expect(readEvent(reader, 50)).rejects.toThrow('Timed out waiting for Admin SSE data.');
+      for (const event of [...adminEvents, ...workerEvents]) {
+        expect(JSON.stringify(event)).not.toContain('admin-update-test-qr');
+        expect(JSON.stringify(event)).not.toContain('providerStatus');
+        expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  });
+
+  it('delivers a safe Payout invalidation for a Member request', async () => {
+    if (!databaseReady) return;
+
+    await ensureInitialMoneyPolicy();
+    const userId = crypto.randomUUID();
+    await db.insert(authUser).values({
+      id: userId,
+      email: `admin-update-payout-member-${userId}@ku.th`,
+      firstName: 'Update',
+      lastName: 'Member',
+    });
+    const wallet = await ensureWallet(userId);
+    const quote = await preparePendingPayoutQuote(userId);
+
+    const response = await adminEventsRequest(adminCookies[0]);
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    try {
+      expect(await readText(reader)).toContain(': connected');
+
+      const payout = await initiatePayout({
+        principalUserId: userId,
+        quoteId: quote.id,
+        idempotency: { key: `admin-update-payout-${crypto.randomUUID()}` },
+      });
+      const events = await Promise.all([readEvent(reader), readEvent(reader), readEvent(reader)]);
+
+      expect(events).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'PAYOUT',
+        subjectId: payout.id,
+      });
+      expect(events).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'WALLET',
+        subjectId: wallet.id,
+      });
+      expect(events).toContainEqual({
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'MEMBER',
+        subjectId: userId,
+      });
+      await expect(readEvent(reader, 50)).rejects.toThrow('Timed out waiting for Admin SSE data.');
+      for (const event of events) {
+        expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+      }
+    } finally {
+      await reader.cancel();
     }
   });
 

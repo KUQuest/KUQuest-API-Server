@@ -60,7 +60,11 @@ export const notifyAdminResourceUpdated = async (
   subjectType: AdminUpdateSubjectType,
   subjectId: string
 ) => {
-  const event: AdminUpdateNotification = { type: 'RESOURCE_UPDATED', subjectType, subjectId };
+  const event: AdminUpdateNotification = {
+    type: 'RESOURCE_UPDATED',
+    subjectType,
+    subjectId,
+  };
   await transaction.execute(sql`select pg_notify(${adminUpdateChannel}, ${JSON.stringify(event)})`);
 };
 
