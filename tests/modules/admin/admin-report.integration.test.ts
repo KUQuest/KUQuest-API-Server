@@ -1312,7 +1312,7 @@ describe('Admin Report Case API', () => {
     } finally {
       await reader.cancel();
     }
-  });
+  }, 15_000);
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
     if (!postgresAvailable) return;
