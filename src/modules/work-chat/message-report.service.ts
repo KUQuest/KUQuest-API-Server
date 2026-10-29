@@ -9,6 +9,7 @@ import {
 } from '@/database/schema/admin.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { chatConversation, chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
@@ -174,12 +175,14 @@ export const submitMessageReport = async (
     if (existing) return existing;
 
     let reportCase = await findOpenCase(transaction, input.messageId);
+    let reportCaseCreated = false;
     if (!reportCase) {
       const [created] = await transaction
         .insert(adminReportCase)
         .values({ messageId: input.messageId })
         .onConflictDoNothing()
         .returning({ id: adminReportCase.id, status: adminReportCase.status });
+      reportCaseCreated = created !== undefined;
       reportCase = created ?? (await findOpenCase(transaction, input.messageId));
     }
     if (!reportCase) throw new Error('Report Case was not created');
@@ -188,7 +191,7 @@ export const submitMessageReport = async (
       .insert(adminEvidenceReference)
       .values({ reportCaseId: reportCase.id, messageId: input.messageId })
       .onConflictDoNothing();
-    await transaction
+    const [createdEntry] = await transaction
       .insert(adminReporterEntry)
       .values({
         reportCaseId: reportCase.id,
@@ -197,7 +200,12 @@ export const submitMessageReport = async (
         reason: input.reason,
         detail: input.detail,
       })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: adminReporterEntry.id });
+
+    if (createdEntry || reportCaseCreated) {
+      await notifyAdminResourceUpdated(transaction, 'REPORT_CASE', reportCase.id);
+    }
 
     const entry = await selectOwnReport(
       transaction,

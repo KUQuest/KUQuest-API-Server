@@ -95,6 +95,7 @@ import {
   type AdminActionResult,
   type AdminActionTransaction,
 } from './admin-action.service';
+import { notifyAdminResourceUpdated } from './admin-update.delivery';
 import {
   formatConductReportDisplayId,
   formatDisplayIdSql,
@@ -1725,6 +1726,15 @@ export const decideAdminReportCase = async (
             );
           }
 
+          await notifyAdminResourceUpdated(database, 'REPORT_CASE', updated.id);
+          if (
+            current.reportedMemberId &&
+            (input.outcome === reportCaseStatus.hidden ||
+              input.outcome === reportCaseStatus.restored)
+          ) {
+            await notifyAdminResourceUpdated(database, 'MEMBER', current.reportedMemberId);
+          }
+
           return {
             resourceSummary: await commandSummaryInTransaction(database, updated),
             resourceVersion: updated.version,
@@ -1861,6 +1871,11 @@ const decideAdminConductReport = async (
               'CONDUCT_REPORT_NOT_FOUND',
               'Conduct Report could not be updated.'
             );
+          }
+
+          await notifyAdminResourceUpdated(database, 'CONDUCT_REPORT', updated.id);
+          if (input.outcome === conductReportStatus.upheld) {
+            await notifyAdminResourceUpdated(database, 'MEMBER', current.reportedMemberId);
           }
 
           return {

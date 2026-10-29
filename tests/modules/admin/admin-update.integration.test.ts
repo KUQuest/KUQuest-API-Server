@@ -3,6 +3,7 @@ import { env } from '@/config/env';
 import { db, sql } from '@/database/client';
 import { authAdmin } from '@/database/schema/auth.schema';
 import {
+  adminUpdateListenerApplicationName,
   notifyAdminResourceUpdated,
   stopAdminUpdateListener,
 } from '@/modules/admin/admin-update.delivery';
@@ -60,6 +61,22 @@ const adminEventsRequest = (cookie = adminCookies[0]!, origin?: string) =>
     })
   );
 
+type AdminSseReadResult = Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>;
+
+const pendingReads = new WeakMap<
+  ReadableStreamDefaultReader<Uint8Array>,
+  Promise<AdminSseReadResult>
+>();
+
+const readNextChunk = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  let pending = pendingReads.get(reader);
+  if (!pending) {
+    pending = reader.read().finally(() => pendingReads.delete(reader));
+    pendingReads.set(reader, pending);
+  }
+  return pending;
+};
+
 const readWithTimeout = async (
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMessage: string,
@@ -68,7 +85,7 @@ const readWithTimeout = async (
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      reader.read(),
+      readNextChunk(reader),
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
       }),
@@ -85,12 +102,16 @@ const readText = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
 };
 
 const expectStreamToClose = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
-  const result = await readWithTimeout(
-    reader,
-    'Timed out waiting for Admin SSE stream to close.',
-    10_000
-  );
-  expect(result.done).toBe(true);
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const result = await readWithTimeout(
+      reader,
+      'Timed out waiting for Admin SSE stream to close.',
+      deadline - Date.now()
+    );
+    if (result.done) return;
+  }
+  throw new Error('Timed out waiting for Admin SSE stream to close.');
 };
 
 const readEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
@@ -98,6 +119,53 @@ const readEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
   const data = frame.split('\n').find((line) => line.startsWith('data: '));
   if (!data) throw new Error(`Admin SSE frame did not contain event data: ${frame}`);
   return JSON.parse(data.slice('data: '.length)) as Record<string, unknown>;
+};
+
+const readEventFor = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  subjectType: string,
+  subjectId: string
+) => {
+  while (true) {
+    const event = await readEvent(reader);
+    if (event.subjectType === subjectType && event.subjectId === subjectId) return event;
+  }
+};
+
+const expectNoEventFor = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  subjectType: string,
+  subjectId: string,
+  timeoutMs = 250
+) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let result: AdminSseReadResult;
+    try {
+      result = await readWithTimeout(
+        reader,
+        'Timed out waiting for duplicate Admin SSE data.',
+        deadline - Date.now()
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'Timed out waiting for duplicate Admin SSE data.'
+      )
+        return;
+      throw error;
+    }
+    if (result.done) throw new Error('Admin SSE stream closed while checking for duplicates.');
+    const dataLine = new TextDecoder()
+      .decode(result.value)
+      .split('\n')
+      .find((line) => line.startsWith('data: '));
+    if (!dataLine) continue;
+    const event = JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+    if (event.subjectType === subjectType && event.subjectId === subjectId) {
+      throw new Error(`Received a duplicate Admin SSE event: ${JSON.stringify(event)}`);
+    }
+  }
 };
 
 beforeAll(async () => {
@@ -153,6 +221,8 @@ describe('Admin SSE updates', () => {
     expect(operation?.operationId).toBe('subscribeAdminUpdates');
     expect(operation?.description).toContain('GET /api/v1/admin/reports/{reportId}');
     expect(operation?.description).toContain('GET /api/v1/admin/overview');
+    expect(operation?.description).toContain('GET /api/v1/admin/members/{id}/penalty-history');
+    expect(operation?.description).toContain('GET /api/v1/admin/activity-log');
     expect(operation?.description).toContain('Other resource types need a documented read mapping');
     expect(operation?.security?.[0]).toHaveProperty('betterAuthAdminSession');
     expect(operation?.responses).toHaveProperty('401');
@@ -264,7 +334,10 @@ describe('Admin SSE updates', () => {
         notifyAdminResourceUpdated(transaction, 'CONDUCT_REPORT', subjectId)
       );
 
-      const events = await Promise.all([readEvent(childReader), readEvent(localReader)]);
+      const events = await Promise.all([
+        readEventFor(childReader, 'CONDUCT_REPORT', subjectId),
+        readEventFor(localReader, 'CONDUCT_REPORT', subjectId),
+      ]);
       for (const event of events) {
         expect(event).toEqual({
           type: 'RESOURCE_UPDATED',
@@ -274,6 +347,10 @@ describe('Admin SSE updates', () => {
         expect(JSON.stringify(event)).not.toContain(rolledBackId);
         expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
       }
+      await Promise.all([
+        expectNoEventFor(childReader, 'CONDUCT_REPORT', subjectId),
+        expectNoEventFor(localReader, 'CONDUCT_REPORT', subjectId),
+      ]);
     } finally {
       await Promise.all([childReader?.cancel(), localReader?.cancel()]);
       child.kill();
@@ -304,7 +381,7 @@ describe('Admin SSE updates', () => {
     }
   });
 
-  it('closes open streams after an unexpected PostgreSQL listener disconnect so clients can reconnect', async () => {
+  it('cleans listener callbacks after a PostgreSQL disconnect and repeated restarts', async () => {
     if (!databaseReady) return;
 
     const response = await adminEventsRequest(adminCookies[0]);
@@ -319,6 +396,7 @@ describe('Admin SSE updates', () => {
         from pg_stat_activity
         where datname = current_database()
           and pid <> pg_backend_pid()
+          and application_name = ${adminUpdateListenerApplicationName}
           and state = 'idle'
           and query = 'listen "kuquest_admin_updates"'
         limit 1
@@ -336,8 +414,61 @@ describe('Admin SSE updates', () => {
       const reconnectReader = reconnected.body!.getReader();
       try {
         expect(await readText(reconnectReader)).toContain(': connected');
+        await stopAdminUpdateListener();
+        const closed = await readWithTimeout(
+          reconnectReader,
+          'Timed out waiting for restarted Admin SSE stream to close.',
+          1_000
+        );
+        expect(closed.done).toBe(true);
       } finally {
         await reconnectReader.cancel();
+      }
+
+      const restarted = await adminEventsRequest(adminCookies[0]);
+      expect(restarted.status).toBe(200);
+      const restartedReader = restarted.body!.getReader();
+      try {
+        expect(await readText(restartedReader)).toContain(': connected');
+        const subjectId = crypto.randomUUID();
+        await db.transaction((transaction) =>
+          notifyAdminResourceUpdated(transaction, 'CONDUCT_REPORT', subjectId)
+        );
+        expect(await readEventFor(restartedReader, 'CONDUCT_REPORT', subjectId)).toEqual({
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'CONDUCT_REPORT',
+          subjectId,
+        });
+        await expectNoEventFor(restartedReader, 'CONDUCT_REPORT', subjectId);
+
+        await stopAdminUpdateListener();
+        const closed = await readWithTimeout(
+          restartedReader,
+          'Timed out waiting for restarted Admin SSE stream to close.',
+          1_000
+        );
+        expect(closed.done).toBe(true);
+      } finally {
+        await restartedReader.cancel();
+      }
+
+      const restartedAgain = await adminEventsRequest(adminCookies[0]);
+      expect(restartedAgain.status).toBe(200);
+      const restartedAgainReader = restartedAgain.body!.getReader();
+      try {
+        expect(await readText(restartedAgainReader)).toContain(': connected');
+        const subjectId = crypto.randomUUID();
+        await db.transaction((transaction) =>
+          notifyAdminResourceUpdated(transaction, 'CONDUCT_REPORT', subjectId)
+        );
+        expect(await readEventFor(restartedAgainReader, 'CONDUCT_REPORT', subjectId)).toEqual({
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'CONDUCT_REPORT',
+          subjectId,
+        });
+        await expectNoEventFor(restartedAgainReader, 'CONDUCT_REPORT', subjectId);
+      } finally {
+        await restartedAgainReader.cancel();
       }
     } finally {
       await reader.cancel();

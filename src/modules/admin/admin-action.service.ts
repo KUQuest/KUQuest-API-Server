@@ -21,6 +21,7 @@ import {
   type AdminActionReasonCatalog,
   type AdminActionSafeObject,
 } from './admin-action.policy';
+import { notifyAdminResourceUpdated } from './admin-update.delivery';
 
 export type AdminActionTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -425,6 +426,8 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
   if (!created) {
     throw new AdminActionError('ADMIN_ACTION_WRITE_FAILED', 'Admin Action could not be recorded.');
   }
+
+  await notifyAdminResourceUpdated(transaction, 'ADMIN_ACTIVITY_LOG', created.id);
 
   return {
     resourceSummary,
