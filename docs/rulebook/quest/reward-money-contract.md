@@ -25,10 +25,11 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 ## Settlement and failure rules
 
 - Except for `GROUP + CANDIDATE`, the system transfers a Worker Reward immediately when that Assignment becomes `ASSIGNMENT_COMPLETED`.
-- For approved or proof-free `GROUP + CANDIDATE` Team work, the Server transfers the complete Worker Reward pool for every published Quest `headcount` slot to the Team Leader. The Candidate Team's entered `headcount` does not reduce that pool, and no other Team Member receives a Quest Reward.
+- For approved or proof-free `GROUP + CANDIDATE` Team work, the complete Worker Reward pool for every published Quest `headcount` slot remains in Quest Escrow until allocation. The Team Leader has 24 hours after successful completion to assign each teammate an integer percentage in basis points (0.01% increments); the teammate shares may total at most 100%, and the Leader receives the remainder. If the Leader does not submit in time, the Server allocates the pool equally. The Candidate Team's entered `headcount` does not reduce the pool. Reward and fee satang are split deterministically using largest remainders and credited directly from Escrow to each member's Earnings Balance; this is not a Peer-to-Peer transfer.
 - If a Reward transfer fails, the Assignment remains `ASSIGNMENT_COMPLETED`, the transfer remains `REWARD_TRANSFER_PENDING`, the system retries, and Hirer/Worker are notified. Retries reuse the same payment record and cannot create duplicate payments.
 - **On `QUEST_FAILED`**:
   - Unpaid Worker-slot funding returns to the Hirer. Already transferred Rewards are not reclaimed.
   - That return is held for 7 days before the Hirer can spend it, so a Dispute Case still has funds to redirect (see `docs/rulebook/admin/admin-rulebook.md` §2 and `docs/adr/0024-hold-quest-failure-settlement-for-dispute-window.md`).
   - A failed Quest has no Platform Fee; the fee returns to the Hirer.
+- **On `QUEST_COMPLETED` with an `ASSIGNMENT_INCOMPLETE` Assignment** (`GROUP + FIRST_COME_FIRST_SERVED` only): Rewards of `ASSIGNMENT_COMPLETED` Workers are paid as usual. The funding of each `ASSIGNMENT_INCOMPLETE` slot, with its Platform Fee, returns to the Hirer and is held for 7 days, as for `QUEST_FAILED`.
 - **On cancellation**: Settlement follows the matrix in [Quest Lifecycle Contract](quest-lifecycle-contract.md). An `ASSIGNMENT_CANCELLED` Assignment receives no Reward.

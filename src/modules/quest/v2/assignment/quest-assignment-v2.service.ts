@@ -3,12 +3,16 @@ import {
   quest,
   questApiVersion,
   questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { isMemberRedFlaggedInTransaction } from '@/modules/admin/member-penalty';
 
-import { and, asc, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 
+import { loadMemberSummaries } from '../../shared/member-summary';
+import { hasOverlappingActiveWorkerAssignment } from '../../shared/worker-schedule-conflict.service';
 import {
   type QuestTransaction,
   defaultQuestWorkChatMembershipWriter,
@@ -53,7 +57,16 @@ type QuestV2AssignmentRow = {
   startedAt: Date | null;
   createdAt: Date;
   questState: QuestV2State;
+  teamRole: 'LEADER' | 'MEMBER' | null;
+  team: {
+    id: string;
+    name: string;
+    leaderId: string;
+    members: Array<{ id: string; displayName: string }>;
+  } | null;
 };
+
+type SelectedTeam = NonNullable<QuestV2AssignmentRow['team']>;
 
 export type QuestV2MyAssignmentRow = QuestV2AssignmentRow & {
   underfilled: QuestV2UnderfilledSummary | null;
@@ -68,7 +81,8 @@ type QuestV2AssignmentBusinessOutcomeCode =
   | 'not-found'
   | 'roster-frozen'
   | 'not-first-come-first-served'
-  | 'red-flagged';
+  | 'red-flagged'
+  | 'worker-schedule-conflict';
 
 type QuestV2AssignmentOutcomeCode = QuestV2AssignmentBusinessOutcomeCode | QuestCommandOutcomeCode;
 
@@ -120,6 +134,8 @@ const toQuestV2AssignmentRow = (
     ...assignment,
     state: assignment.state as QuestV2AssignmentState,
     questState,
+    teamRole: null,
+    team: null,
   };
 };
 
@@ -161,6 +177,8 @@ const assignmentFromSnapshot = (value: unknown): QuestV2AssignmentRow | undefine
     questState: snapshot.questState,
     startedAt,
     createdAt,
+    teamRole: null,
+    team: null,
   };
 };
 
@@ -174,6 +192,7 @@ const lockQuest = async (transaction: QuestTransaction, questId: string) => {
       headcount: quest.headcount,
       hiddenAt: quest.hiddenAt,
       startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -217,7 +236,71 @@ const listAssignments = async (
     .from(questAssignment)
     .where(eq(questAssignment.questId, questId))
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return rows.map((row) => toQuestV2AssignmentRow(row, questState));
+  return withSelectedTeam(
+    transaction,
+    rows.map((row) => toQuestV2AssignmentRow(row, questState))
+  );
+};
+
+const withSelectedTeam = async <T extends QuestV2AssignmentRow>(
+  transaction: QuestTransaction,
+  assignments: T[]
+): Promise<T[]> => {
+  const questIds = [...new Set(assignments.map(({ questId }) => questId))];
+  if (questIds.length === 0) return assignments;
+  const teamRows = await transaction
+    .select({
+      questId: questCandidateTeamV2.questId,
+      teamId: questCandidateTeamV2.id,
+      name: questCandidateTeamV2.name,
+      leaderId: questCandidateTeamV2.leaderId,
+      memberId: questCandidateTeamV2Member.memberId,
+    })
+    .from(questCandidateTeamV2)
+    .innerJoin(
+      questCandidateTeamV2Member,
+      eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+    )
+    .where(
+      and(
+        inArray(questCandidateTeamV2.questId, questIds),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .orderBy(asc(questCandidateTeamV2Member.joinedAt), asc(questCandidateTeamV2Member.memberId));
+  if (teamRows.length === 0) return assignments;
+  const memberOf = await loadMemberSummaries(teamRows.map(({ memberId }) => memberId));
+  const teams = new Map<string, SelectedTeam>();
+  for (const row of teamRows) {
+    let team = teams.get(row.questId);
+    if (!team) {
+      team = {
+        id: row.teamId,
+        name: row.name,
+        leaderId: row.leaderId,
+        members: [],
+      };
+      teams.set(row.questId, team);
+    }
+    team.members.push({
+      id: row.memberId,
+      displayName: memberOf(row.memberId).displayName,
+    });
+  }
+  return assignments.map((assignment) => {
+    const selectedTeam = teams.get(assignment.questId) ?? null;
+    const isTeamMember =
+      selectedTeam?.members.some(({ id }) => id === assignment.workerId) ?? false;
+    return {
+      ...assignment,
+      teamRole: isTeamMember
+        ? assignment.workerId === selectedTeam?.leaderId
+          ? 'LEADER'
+          : 'MEMBER'
+        : null,
+      team: isTeamMember ? selectedTeam : null,
+    };
+  });
 };
 
 const joinQuestV2InTransaction = async (
@@ -289,6 +372,16 @@ const joinQuestV2InTransaction = async (
       }
       if (await isMemberRedFlaggedInTransaction(transaction, userId, now)) {
         return { kind: 'rejected', rejection: 'red-flagged' };
+      }
+      if (
+        await hasOverlappingActiveWorkerAssignment(transaction, {
+          questId,
+          workerIds: [userId],
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      ) {
+        return { kind: 'rejected', rejection: 'worker-schedule-conflict' };
       }
 
       if (joinedCount >= current.headcount) return { kind: 'rejected', rejection: 'full' };
@@ -424,7 +517,12 @@ export const listQuestV2Assignments = async (
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
   if (assignments.length === 0) return { outcome: 'not-authorized' };
-  return assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState));
+  return db.transaction((transaction) =>
+    withSelectedTeam(
+      transaction,
+      assignments.map((assignment) => toQuestV2AssignmentRow(assignment, current.questState))
+    )
+  );
 };
 
 const assignmentStatusPredicateFor = (status: QuestV2AssignmentMineStatus) => {
@@ -478,8 +576,9 @@ export const listMyQuestV2Assignments = async (
       )
     )
     .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id));
-  return rows.map(({ headcount, underfilled, questState, ...assignment }) => ({
+  const items = rows.map(({ headcount, underfilled, questState, ...assignment }) => ({
     ...toQuestV2AssignmentRow(assignment, questState),
     underfilled: underfilled ? summarizeQuestV2Underfilled(underfilled, headcount) : null,
   }));
+  return db.transaction((transaction) => withSelectedTeam(transaction, items));
 };

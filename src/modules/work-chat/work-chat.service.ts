@@ -389,6 +389,7 @@ export type WorkConversation = {
   latestMessage: {
     id: string;
     kind: 'USER' | 'SYSTEM';
+    systemType: string | null;
     preview: string;
     createdAt: Date;
   } | null;
@@ -462,6 +463,7 @@ const loadConversationSummary = async (
       .select({
         id: chatMessage.id,
         kind: chatMessage.kind,
+        systemType: chatMessage.systemType,
         text: chatMessage.contentText,
         createdAt: chatMessage.createdAt,
       })
@@ -504,6 +506,7 @@ const loadConversationSummary = async (
       ? {
           id: latest.id,
           kind: latest.kind,
+          systemType: latest.systemType,
           preview: latest.text ?? '',
           createdAt: latest.createdAt,
         }

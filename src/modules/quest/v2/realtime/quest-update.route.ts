@@ -11,6 +11,7 @@ import {
   subscribeToHirerQuestUpdates,
   subscribeToQuestBoardUpdates,
   subscribeToQuestUpdates,
+  subscribeToWorkerAssignmentUpdates,
 } from './quest-update.delivery';
 import { questUpdateParamsSchema } from './quest-update.schema';
 import type { CandidateRosterScope, QuestUpdateAccess } from './quest-update.schema';
@@ -48,6 +49,7 @@ const openRealtimeSubscription = async <T>({
   accessDeniedReason,
   checkAccess,
   sameAccess,
+  accessEndsAt,
   subscribe,
 }: {
   socket: QuestRealtimeSocket;
@@ -57,6 +59,7 @@ const openRealtimeSubscription = async <T>({
   accessDeniedReason: string;
   checkAccess: () => Promise<T | undefined>;
   sameAccess: (initial: T, current: T) => boolean;
+  accessEndsAt?: (access: T) => Date | undefined;
   subscribe: (access: T) => () => void;
 }) => {
   logSocket(socket, 'open');
@@ -106,8 +109,20 @@ const openRealtimeSubscription = async <T>({
     },
     Math.max(0, expiresAt.getTime() - Date.now())
   );
+  const endsAt = accessEndsAt?.(access);
+  const accessEndTimer =
+    endsAt === undefined
+      ? undefined
+      : setTimeout(
+          () => {
+            socketCleanups.get(socket)?.();
+            socket.close(1000, 'Quest access ended');
+          },
+          Math.max(0, endsAt.getTime() - Date.now())
+        );
   socketCleanups.set(socket, () => {
     clearTimeout(expiryTimer);
+    clearTimeout(accessEndTimer);
     unsubscribe();
     socketCleanups.delete(socket);
   });
@@ -176,6 +191,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
         checkAccess: () => getQuestUpdateAccess(user.id, questId),
         sameAccess: (initial, current) =>
           initial.role === current.role && initial.mode === current.mode,
+        accessEndsAt: (access) => access.accessEndsAt,
         subscribe: () =>
           subscribeToQuestUpdates(questId, user.id, session.id, {
             send: (message) => {
@@ -198,7 +214,7 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       tags: ['Quest'],
       summary: 'Subscribe to read-only Quest updates',
       description:
-        'Subscribes the Hirer, an Active Worker, or a Prospective Worker with an open Candidate Inquiry Conversation to realtime Quest updates. Read Quest state from REST after SUBSCRIBED.',
+        'Subscribes the Hirer, an Active Worker, or a Prospective Worker with an open Candidate Inquiry Conversation to realtime Quest updates. An Incomplete Worker on a completed Quest also subscribes while the 7-day money hold is open; the server closes that socket with code 1000 when the hold ends. Read Quest state from REST after SUBSCRIBED.',
       operationId: 'subscribeQuestUpdates',
     },
   })
@@ -276,6 +292,43 @@ export const questV2RealtimeRoute = new Elysia({ name: 'quest-v2-realtime-route'
       description:
         'Sends SUBSCRIBED, then HIRER_QUEST_UPDATED for owned v2 Quest creation, publication, lifecycle, application, and Candidate Team changes. UNDERFILLED_DECISION_PENDING also carries `expiresAt`, the server decision deadline. Read Quest state from REST after each update.',
       operationId: 'subscribeHirerQuestUpdates',
+    },
+  })
+  .ws(`${API_V2_PREFIX}/me/worker-assignments/events`, {
+    async open(ws) {
+      const { user, session } = ws.data.session;
+      await openRealtimeSubscription<string>({
+        socket: ws,
+        origin: ws.data.questOrigin,
+        subscribedMessage: { type: 'SUBSCRIBED', version: 1 },
+        expiresAt: session.expiresAt,
+        accessDeniedReason: 'Worker Assignment access not allowed',
+        checkAccess: async () => user.id,
+        sameAccess: (initial, current) => initial === current,
+        subscribe: () =>
+          subscribeToWorkerAssignmentUpdates(user.id, session.id, {
+            send: (message) => {
+              ws.send(message);
+              logSocket(ws, 'send', { type: 'WORKER_ASSIGNMENTS_INVALIDATED' });
+            },
+            close: (code, reason) => ws.close(code, reason),
+          }),
+      });
+    },
+    message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
+      ws.close(1008, 'Worker Assignment stream is read-only');
+    },
+    close(ws, code) {
+      socketCleanups.get(ws)?.();
+      logSocket(ws, 'close', { code });
+    },
+    detail: {
+      tags: ['Quest'],
+      summary: 'Subscribe to Worker Assignment updates',
+      description:
+        'Subscribes an authenticated Member to invalidations for Work Chat and Assignment changes addressed to that Member. Read Assignment state from REST after SUBSCRIBED and each invalidation.',
+      operationId: 'subscribeWorkerAssignmentUpdates',
     },
   })
   .onStop(() => stopQuestUpdateListener());

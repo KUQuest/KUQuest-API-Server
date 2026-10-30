@@ -95,6 +95,7 @@ import {
   type AdminActionResult,
   type AdminActionTransaction,
 } from './admin-action.service';
+import { notifyAdminResourceUpdated } from './admin-update.delivery';
 import {
   formatConductReportDisplayId,
   formatDisplayIdSql,
@@ -103,8 +104,14 @@ import {
 import {
   reportAdminActionCatalog,
   conductReportDismissReasonCodes,
+  conductReportUpholdReasonCodes,
   type ConductReportDismissReasonCode,
+  type ConductReportUpholdReasonCode,
+  type ReportCaseDismissReasonCode,
+  type ReportCaseHideReasonCode,
+  type ReportCaseRestoreReasonCode,
 } from './admin-report.policy';
+import { getAdminMemberModerationContext } from './admin-member-moderation-context.service';
 
 export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
@@ -161,6 +168,7 @@ type ReportDatabase = typeof db | AdminActionTransaction;
 
 type MemberSummary = {
   id: string;
+  displayId: string;
   email: string;
   firstName: string;
   lastName: string;
@@ -169,6 +177,7 @@ type MemberSummary = {
 
 type QuestSummary = {
   id: string;
+  displayId: string;
   title: string;
   questStatus: QuestStatus;
   mode: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
@@ -196,13 +205,16 @@ type ReportCaseSummaryRow = ReportCaseListRow & {
   sortCreatedAt: string;
 };
 
-type ReportCaseCommandRow = ReportCaseListRow & { reportedMemberId: string | null };
+type ReportCaseCommandRow = ReportCaseListRow & {
+  reportedMemberId: string | null;
+  sortCreatedAt: string;
+};
 
 type AdminReportKind = 'REPORT_CASE' | 'CONDUCT_REPORT';
 type ConductReportMember = Pick<
   typeof authUser.$inferSelect,
   'id' | 'email' | 'firstName' | 'lastName' | 'studentId'
->;
+> & { displayId: string };
 type ConductReportQuest = Pick<
   typeof quest.$inferSelect,
   | 'id'
@@ -240,6 +252,7 @@ type ReporterRow = {
   detail: string | null;
   createdAt: Date;
   reporterId: string;
+  reporterDisplayId: string;
   reporterEmail: string;
   reporterFirstName: string;
   reporterLastName: string;
@@ -305,6 +318,7 @@ const reporterRowsFor = async (
       detail: adminReporterEntry.detail,
       createdAt: adminReporterEntry.createdAt,
       reporterId: authUser.id,
+      reporterDisplayId: formatDisplayIdSql('member', authUser.publicSequence),
       reporterEmail: authUser.email,
       reporterFirstName: authUser.firstName,
       reporterLastName: authUser.lastName,
@@ -344,6 +358,7 @@ const reportCaseSummaryQuery = (database: ReportDatabase) =>
       type: chatMessage.kind,
       reportedMember: {
         id: authUser.id,
+        displayId: formatDisplayIdSql('member', authUser.publicSequence),
         email: authUser.email,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
@@ -351,6 +366,7 @@ const reportCaseSummaryQuery = (database: ReportDatabase) =>
       },
       quest: {
         id: quest.id,
+        displayId: formatDisplayIdSql('quest', quest.publicSequence),
         title: quest.title,
         questStatus: quest.questStatus,
         apiVersion: quest.apiVersion,
@@ -394,6 +410,7 @@ const summaryFrom = (
   quest: row.quest
     ? {
         id: row.quest.id,
+        displayId: row.quest.displayId,
         title: row.quest.title,
         questStatus: row.quest.questStatus,
         mode: questV2ModeFromStorage(row.quest),
@@ -412,6 +429,7 @@ const summaryFrom = (
       reporterMemberId: entry.reporterMemberId,
       reporter: {
         id: entry.reporterId,
+        displayId: entry.reporterDisplayId,
         email: entry.reporterEmail,
         firstName: entry.reporterFirstName,
         lastName: entry.reporterLastName,
@@ -470,6 +488,7 @@ const readReportCaseById = async (
       conversationId: chatMessage.conversationId,
       questId: chatConversation.questId,
       reportedMemberId: chatMembership.memberId,
+      sortCreatedAt: sql<string>`to_char(${adminReportCase.createdAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
     })
     .from(adminReportCase)
     .innerJoin(chatMessage, eq(chatMessage.id, adminReportCase.messageId))
@@ -499,6 +518,7 @@ const selectConductReportRows = (database: ReportDatabase) =>
       report: adminConductReport,
       filer: {
         id: conductReportFilerUser.id,
+        displayId: formatDisplayIdSql('member', conductReportFilerUser.publicSequence),
         email: conductReportFilerUser.email,
         firstName: conductReportFilerUser.firstName,
         lastName: conductReportFilerUser.lastName,
@@ -506,6 +526,7 @@ const selectConductReportRows = (database: ReportDatabase) =>
       },
       reportedMember: {
         id: conductReportReportedUser.id,
+        displayId: formatDisplayIdSql('member', conductReportReportedUser.publicSequence),
         email: conductReportReportedUser.email,
         firstName: conductReportReportedUser.firstName,
         lastName: conductReportReportedUser.lastName,
@@ -532,6 +553,7 @@ const selectConductReportRows = (database: ReportDatabase) =>
       },
       hirer: {
         id: conductReportHirerUser.id,
+        displayId: formatDisplayIdSql('member', conductReportHirerUser.publicSequence),
         email: conductReportHirerUser.email,
         firstName: conductReportHirerUser.firstName,
         lastName: conductReportHirerUser.lastName,
@@ -568,6 +590,7 @@ const conductReportSummaryFrom = (row: ConductReportListRow): ConductReportSumma
     proofRequired: row.quest.proofRequired,
     startTime: row.quest.startTime.toISOString(),
     dueAt: serializeDate(row.quest.dueAt),
+    failedAt: serializeDate(row.quest.failedAt),
     createdAt: row.quest.createdAt.toISOString(),
     updatedAt: row.quest.updatedAt.toISOString(),
     hirer: row.hirer,
@@ -779,7 +802,9 @@ export type ListAdminReportsInput = {
   q?: string;
   kind?: AdminReportKind;
   status?: AdminReportStatus;
+  statusMode?: AdminReportListQuery['statusMode'];
   memberId?: string;
+  submittedByMemberId?: string;
   questId?: string;
   limit?: number;
   cursor?: CursorPayload;
@@ -790,7 +815,9 @@ export const listAdminReports = async ({
   q,
   kind,
   status,
+  statusMode = 'OPEN_QUEUE',
   memberId,
+  submittedByMemberId,
   questId,
   limit = 20,
   cursor,
@@ -824,18 +851,33 @@ export const listAdminReports = async ({
             )
         )
       : undefined,
+    submittedByMemberId
+      ? exists(
+          db
+            .select({ id: adminReporterEntry.id })
+            .from(adminReporterEntry)
+            .where(
+              and(
+                eq(adminReporterEntry.reportCaseId, adminReportCase.id),
+                eq(adminReporterEntry.reporterMemberId, submittedByMemberId)
+              )
+            )
+        )
+      : undefined,
     questId ? eq(chatConversation.questId, questId) : undefined,
     reportCaseSearch
   );
   const conductReportCommonWhere = and(
     memberId ? eq(adminConductReport.reportedMemberId, memberId) : undefined,
+    submittedByMemberId ? eq(adminConductReport.filerUserId, submittedByMemberId) : undefined,
     questId ? eq(adminConductReport.questId, questId) : undefined,
     conductReportSearch
   );
+  const isOpenQueueWithoutStatusFilter = status === undefined && statusMode === 'OPEN_QUEUE';
   const reportCaseWhere = and(
     reportCaseStatusValue
       ? eq(adminReportCase.status, reportCaseStatusValue)
-      : status === undefined
+      : isOpenQueueWithoutStatusFilter
         ? inArray(adminReportCase.status, [reportCaseStatus.pending, reportCaseStatus.hidden])
         : undefined,
     reportCaseCommonWhere
@@ -843,7 +885,7 @@ export const listAdminReports = async ({
   const conductReportWhere = and(
     conductReportStatusValue
       ? eq(adminConductReport.status, conductReportStatusValue)
-      : status === undefined
+      : isOpenQueueWithoutStatusFilter
         ? eq(adminConductReport.status, conductReportStatus.pending)
         : undefined,
     conductReportCommonWhere
@@ -902,7 +944,7 @@ export const listAdminReports = async ({
               new CursorInputError('INVALID_CURSOR', 'Conduct Report cursor is invalid.'),
           })
         : Promise.resolve({ rows: [] as ConductReportListRow[], hasNext: false }),
-      hasReportCases
+      includeReportCases
         ? db
             .select({ status: adminReportCase.status, count: count() })
             .from(adminReportCase)
@@ -911,10 +953,10 @@ export const listAdminReports = async ({
             .leftJoin(chatMembership, eq(chatMembership.id, chatMessage.senderMembershipId))
             .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
             .leftJoin(quest, eq(quest.id, chatConversation.questId))
-            .where(reportCaseCommonWhere)
+            .where(reportCaseWhere)
             .groupBy(adminReportCase.status)
         : Promise.resolve([] as Array<{ status: ReportCaseStatus; count: number }>),
-      hasConductReports
+      includeConductReports
         ? db
             .select({ status: adminConductReport.status, count: count() })
             .from(adminConductReport)
@@ -928,7 +970,7 @@ export const listAdminReports = async ({
               eq(conductReportReportedUser.id, adminConductReport.reportedMemberId)
             )
             .innerJoin(conductReportHirerUser, eq(conductReportHirerUser.id, quest.hirerId))
-            .where(conductReportCommonWhere)
+            .where(conductReportWhere)
             .groupBy(adminConductReport.status)
         : Promise.resolve([] as Array<{ status: ConductReportStatus; count: number }>),
     ]);
@@ -967,9 +1009,16 @@ export const listAdminReports = async ({
   const totalCount =
     status !== undefined
       ? countsByStatus[status]
-      : (hasReportCases
-          ? countsByStatus[reportCaseStatus.pending] + countsByStatus[reportCaseStatus.hidden]
-          : 0) + (hasConductReports ? countsByStatus[conductReportStatus.pending] : 0);
+      : statusMode === 'FULL_HISTORY'
+        ? (hasReportCases
+            ? reportCaseStatuses.reduce((total, value) => total + countsByStatus[value], 0)
+            : 0) +
+          (hasConductReports
+            ? conductReportStatuses.reduce((total, value) => total + countsByStatus[value], 0)
+            : 0)
+        : (hasReportCases
+            ? countsByStatus[reportCaseStatus.pending] + countsByStatus[reportCaseStatus.hidden]
+            : 0) + (hasConductReports ? countsByStatus[conductReportStatus.pending] : 0);
 
   return {
     items,
@@ -1084,6 +1133,7 @@ const conductReportProofRowFor = async (
         teamId: questV2ProofSubmission.teamId,
         submittedBy: {
           id: conductReportProofSubmitter.id,
+          displayId: formatDisplayIdSql('member', conductReportProofSubmitter.publicSequence),
           email: conductReportProofSubmitter.email,
           firstName: conductReportProofSubmitter.firstName,
           lastName: conductReportProofSubmitter.lastName,
@@ -1126,6 +1176,7 @@ const conductReportProofRowFor = async (
       teamId: proofSubmission.teamId,
       submittedBy: {
         id: conductReportProofSubmitter.id,
+        displayId: formatDisplayIdSql('member', conductReportProofSubmitter.publicSequence),
         email: conductReportProofSubmitter.email,
         firstName: conductReportProofSubmitter.firstName,
         lastName: conductReportProofSubmitter.lastName,
@@ -1221,6 +1272,7 @@ const permittedConductReportConversations = async (
       id: chatConversation.id,
       candidate: {
         id: conductReportEvidenceCandidate.id,
+        displayId: formatDisplayIdSql('member', conductReportEvidenceCandidate.publicSequence),
         email: conductReportEvidenceCandidate.email,
         firstName: conductReportEvidenceCandidate.firstName,
         lastName: conductReportEvidenceCandidate.lastName,
@@ -1343,7 +1395,11 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
     if (!summary) {
       throw new AdminReportError('REPORT_CASE_NOT_FOUND', 'Report resource does not exist.');
     }
-    return summary;
+    const moderationContext = await getAdminMemberModerationContext(
+      reportCaseRow.reportedMemberId,
+      reportCaseRow.sortCreatedAt
+    );
+    return { ...summary, ...moderationContext };
   }
 
   const [conductReportRow] = await selectConductReportRows(db)
@@ -1358,6 +1414,7 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
       assignment: questAssignment,
       worker: {
         id: conductReportAssignmentWorker.id,
+        displayId: formatDisplayIdSql('member', conductReportAssignmentWorker.publicSequence),
         email: conductReportAssignmentWorker.email,
         firstName: conductReportAssignmentWorker.firstName,
         lastName: conductReportAssignmentWorker.lastName,
@@ -1405,19 +1462,15 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
 
     const outcome = conductReportRow.report.status;
     if (outcome === conductReportStatus.upheld) {
-      const isDismissalReason = conductReportDismissReasonCodes.includes(
-        decisionReason as ConductReportDismissReasonCode
+      const isUpholdReason = conductReportUpholdReasonCodes.includes(
+        decisionReason as ConductReportUpholdReasonCode
       );
-      if (
-        decisionReason !== conductReportRow.report.reason &&
-        (conductReportReasons.includes(decisionReason as ConductReportReason) || isDismissalReason)
-      ) {
-        throw new Error('Conduct Report upheld decision reason must match the report reason.');
+      if (decisionReason !== conductReportRow.report.reason && !isUpholdReason) {
+        throw new Error('Conduct Report upheld decision reason is invalid.');
       }
       decision = {
         outcome,
-        reason:
-          decisionReason === conductReportRow.report.reason ? conductReportRow.report.reason : null,
+        reason: decisionReason as ConductReportReason | ConductReportUpholdReasonCode,
         resolvedAt: resolvedAt.toISOString(),
         admin,
       };
@@ -1444,8 +1497,13 @@ export const getAdminReport = async (reportId: string): Promise<AdminReportDetai
   }
 
   const summary = conductReportSummaryFrom(conductReportRow);
+  const moderationContext = await getAdminMemberModerationContext(
+    conductReportRow.report.reportedMemberId,
+    conductReportRow.sortCreatedAt
+  );
   const detail: ConductReportDetail = {
     ...summary,
+    ...moderationContext,
     assignment: {
       id: assignmentRow.assignment.id,
       worker: assignmentRow.worker,
@@ -1560,11 +1618,12 @@ type AdminReportCommandInput = {
   reportId: string;
   expectedVersion: number;
   requestKey: string;
+  decisionReasonText?: string;
 };
 
 export type DecideAdminReportCaseInput = AdminReportCommandInput & {
-  reasonCode?: string;
   outcome: ReportCaseOutcome;
+  reasonCode: ReportCaseDismissReasonCode | ReportCaseHideReasonCode | ReportCaseRestoreReasonCode;
   now?: Date;
 };
 
@@ -1590,6 +1649,7 @@ export const decideAdminReportCase = async (
     resourceId: input.reportId,
     requestKey: input.requestKey,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: { outcome: input.outcome },
     metadata: { outcome: input.outcome },
     expectedVersion: input.expectedVersion,
@@ -1666,6 +1726,15 @@ export const decideAdminReportCase = async (
             );
           }
 
+          await notifyAdminResourceUpdated(database, 'REPORT_CASE', updated.id);
+          if (
+            current.reportedMemberId &&
+            (input.outcome === reportCaseStatus.hidden ||
+              input.outcome === reportCaseStatus.restored)
+          ) {
+            await notifyAdminResourceUpdated(database, 'MEMBER', current.reportedMemberId);
+          }
+
           return {
             resourceSummary: await commandSummaryInTransaction(database, updated),
             resourceVersion: updated.version,
@@ -1684,22 +1753,24 @@ type DecideAdminConductReportInput =
       outcome: typeof conductReportStatus.dismissed;
       decisionReasonCode: ConductReportDismissReasonCode;
     })
-  | (AdminReportCommandInput & { outcome: typeof conductReportStatus.upheld });
+  | (AdminReportCommandInput & {
+      outcome: typeof conductReportStatus.upheld;
+      decisionReasonCode: ConductReportUpholdReasonCode;
+    });
 
 const decideAdminConductReport = async (
   input: DecideAdminConductReportInput
 ): Promise<AdminActionResult<ConductReportCommandSummary>> => {
   const now = new Date();
   const [report] = await db
-    .select({ reason: adminConductReport.reason })
+    .select({ id: adminConductReport.id })
     .from(adminConductReport)
     .where(eq(adminConductReport.id, input.reportId))
     .limit(1);
   if (!report) {
     throw new AdminReportError('CONDUCT_REPORT_NOT_FOUND', 'Conduct Report does not exist.');
   }
-  const reasonCode =
-    input.outcome === conductReportStatus.dismissed ? input.decisionReasonCode : report.reason;
+  const reasonCode = input.decisionReasonCode;
 
   return adminActionService.executeCommand<ConductReportCommandSummary>({
     adminId: input.adminId,
@@ -1711,6 +1782,7 @@ const decideAdminConductReport = async (
     resourceId: input.reportId,
     requestKey: input.requestKey,
     reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: { outcome: input.outcome },
     metadata: { outcome: input.outcome },
     expectedVersion: input.expectedVersion,
@@ -1774,10 +1846,7 @@ const decideAdminConductReport = async (
             .update(adminConductReport)
             .set({
               status: input.outcome,
-              decisionReason:
-                input.outcome === conductReportStatus.dismissed
-                  ? input.decisionReasonCode
-                  : current.reason,
+              decisionReason: input.decisionReasonCode,
               resolvedByAdminId: input.adminId,
               resolvedAt: now,
               version: sql`${adminConductReport.version} + 1`,
@@ -1804,6 +1873,11 @@ const decideAdminConductReport = async (
             );
           }
 
+          await notifyAdminResourceUpdated(database, 'CONDUCT_REPORT', updated.id);
+          if (input.outcome === conductReportStatus.upheld) {
+            await notifyAdminResourceUpdated(database, 'MEMBER', current.reportedMemberId);
+          }
+
           return {
             resourceSummary: {
               kind: 'CONDUCT_REPORT',
@@ -1825,12 +1899,20 @@ const decideAdminConductReport = async (
 
 export type DecideAdminReportInput = AdminReportCommandInput &
   (
-    | { outcome: ReportCaseOutcome; reasonCode?: string; now?: Date }
+    | {
+        outcome: ReportCaseOutcome;
+        reasonCode:
+          ReportCaseDismissReasonCode | ReportCaseHideReasonCode | ReportCaseRestoreReasonCode;
+        now?: Date;
+      }
     | {
         outcome: typeof conductReportStatus.dismissed;
         decisionReasonCode: ConductReportDismissReasonCode;
       }
-    | { outcome: typeof conductReportStatus.upheld }
+    | {
+        outcome: typeof conductReportStatus.upheld;
+        decisionReasonCode: ConductReportUpholdReasonCode;
+      }
   );
 
 export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummary> & {
@@ -1841,23 +1923,16 @@ export type DecideAdminReportResult = AdminActionResult<AdminReportCommandSummar
 export const decideAdminReport = async (
   input: DecideAdminReportInput
 ): Promise<DecideAdminReportResult> => {
-  if (
-    input.outcome === conductReportStatus.dismissed ||
-    input.outcome === conductReportStatus.upheld
-  ) {
+  if (input.outcome === conductReportStatus.dismissed) {
+    const result = await decideAdminConductReport(input);
+    return { ...result, outcome: input.outcome };
+  }
+  if (input.outcome === conductReportStatus.upheld) {
     const result = await decideAdminConductReport(input);
     return { ...result, outcome: input.outcome };
   }
 
-  const result = await decideAdminReportCase({
-    adminId: input.adminId,
-    reportId: input.reportId,
-    expectedVersion: input.expectedVersion,
-    requestKey: input.requestKey,
-    now: input.now,
-    reasonCode: input.reasonCode,
-    outcome: input.outcome,
-  });
+  const result = await decideAdminReportCase(input);
   return { ...result, outcome: input.outcome };
 };
 

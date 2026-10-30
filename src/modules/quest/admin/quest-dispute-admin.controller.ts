@@ -16,6 +16,7 @@ import {
   getAdminDisputeEvidence,
   listAdminDisputeCases,
   resolveAdminDisputeCase,
+  submitDisputeCaseResponse,
   summaryFromRecord,
 } from './quest-dispute-admin.service';
 import type {
@@ -29,6 +30,8 @@ import type {
   adminDisputeListResponseSchema,
   adminDisputeParamsSchema,
   adminDisputeResolveBodySchema,
+  questDisputeFilingBodySchema,
+  questDisputeResponseBodySchema,
 } from './quest-dispute-admin.schema';
 
 type AdminDisputeParams = Static<typeof adminDisputeParamsSchema>;
@@ -41,6 +44,8 @@ type AdminDisputeCommandResponse = Static<typeof adminDisputeCommandResponseSche
 type AdminDisputeOpenBody = Static<typeof adminDisputeOpenBodySchema>;
 type AdminDisputeOpenParams = Static<typeof adminDisputeOpenParamsSchema>;
 type AdminDisputeOpenResponse = Static<typeof adminDisputeOpenResponseSchema>['data'];
+type QuestDisputeFilingBody = Static<typeof questDisputeFilingBodySchema>;
+type QuestDisputeResponseBody = Static<typeof questDisputeResponseBodySchema>;
 
 const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResponse => {
   if (error instanceof CursorInputError) {
@@ -54,6 +59,7 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
       error.code === 'DISPUTE_CASE_AMOUNT_REQUIRED'
     )
       set.status = 400;
+    else if (error.code === 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED') set.status = 403;
     else set.status = 409;
     return apiError(error.code, error.message);
   }
@@ -123,6 +129,9 @@ export const createAdminDisputeController = async ({
     const created = await createAdminDisputeCase({
       questId: params.questId,
       filerUserId: body.workerId,
+      category: body.category,
+      submittedDetail: body.submittedDetail,
+      filerStatement: body.filerStatement,
       openedByAdminId: admin.id,
     });
     return apiSuccess(summaryFromRecord(created));
@@ -132,18 +141,44 @@ export const createAdminDisputeController = async ({
 };
 
 export const fileAdminDisputeCaseController = async ({
+  body,
   params,
   session,
   set,
 }: AuthedContext & {
+  body: QuestDisputeFilingBody;
   params: AdminDisputeOpenParams;
 }): Promise<ApiResponse<AdminDisputeOpenResponse>> => {
   try {
     const created = await createAdminDisputeCase({
       questId: params.questId,
       filerUserId: session.user.id,
+      category: body.category,
+      submittedDetail: body.submittedDetail,
+      filerStatement: body.filerStatement,
     });
     return apiSuccess(summaryFromRecord(created));
+  } catch (error) {
+    return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeOpenResponse>;
+  }
+};
+
+export const respondToQuestDisputeController = async ({
+  body,
+  params,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestDisputeResponseBody;
+  params: AdminDisputeParams;
+}): Promise<ApiResponse<AdminDisputeOpenResponse>> => {
+  try {
+    const result = await submitDisputeCaseResponse({
+      disputeCaseId: params.disputeCaseId,
+      respondentUserId: session.user.id,
+      respondentStatement: body.respondentStatement,
+    });
+    return apiSuccess(result);
   } catch (error) {
     return mapAdminDisputeError(set, error) as ApiResponse<AdminDisputeOpenResponse>;
   }
@@ -207,9 +242,10 @@ export const resolveAdminDisputeController = async ({
       expectedVersion: revision.value,
       requestKey: request.headers.get('idempotency-key') ?? '',
       reasonCode: body.reasonCode,
+      decisionReasonText: body.decisionReasonText,
       outcome: body.outcome,
-      workerId: body.workerId,
-      amountSatang: body.amountSatang,
+      workerId: 'workerId' in body ? body.workerId : undefined,
+      amountSatang: 'amountSatang' in body ? body.amountSatang : undefined,
     });
     if (result.resourceVersion === null) {
       set.status = 500;

@@ -14,6 +14,7 @@ import {
   questTeamInvitation,
   questTeamMember,
 } from '@/database/schema/quest.schema';
+import { notifyAdminQuestUpdated } from '@/modules/quest/shared';
 
 import { and, asc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 
@@ -22,6 +23,7 @@ import {
   type QuestTransaction,
 } from '../../shared/work-chat/quest-work-chat.port';
 import { applyQuestStateTransition } from '../../shared/transition/quest-transition.service';
+import { hasOverlappingActiveWorkerAssignment } from '../../shared/worker-schedule-conflict.service';
 import type {
   AcceptedWorker,
   WorkChatMembershipWriter,
@@ -138,6 +140,8 @@ const lockQuest = async (tx: Tx, questId: string) => {
       questStatus: quest.questStatus,
       headcount: quest.headcount,
       hiddenAt: quest.hiddenAt,
+      startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v1)))
@@ -178,6 +182,7 @@ export const createApplication = async (
       .insert(questApplication)
       .values({ questId, workerId, reworkLimit: data.reworkLimit ?? 0, appliedAt: now })
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(row);
   });
 
@@ -267,6 +272,7 @@ export const updateApplication = async (
       .set({ reworkLimit: data.reworkLimit })
       .where(eq(questApplication.id, applicationId))
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(updated);
   });
 
@@ -303,6 +309,7 @@ export const withdrawApplication = async (
       .set({ applicationStatus: applicationStatus.withdrawn })
       .where(eq(questApplication.id, applicationId))
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(updated);
   });
 
@@ -382,6 +389,7 @@ export const createTeam = async (
       })
       .returning(teamFields);
     await tx.insert(questTeamMember).values({ teamId: team.id, userId: leaderId, joinedAt: now });
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, team);
   });
 
@@ -471,6 +479,7 @@ export const updateTeam = async (
       })
       .where(eq(questTeam.id, teamId))
       .returning(teamFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, updated);
   });
 
@@ -528,6 +537,7 @@ export const leaveTeam = async (
     await tx
       .delete(questTeamMember)
       .where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, userId)));
+    await notifyAdminQuestUpdated(tx, questId);
     const remaining = members.filter((member) => member.userId !== userId);
     if (remaining.length === 0) {
       await revokePendingTeamInvitations(tx, teamId, now);
@@ -573,6 +583,7 @@ export const removeTeamMember = async (
     await tx
       .delete(questTeamMember)
       .where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, memberId)));
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, row);
   });
 
@@ -614,6 +625,7 @@ export const submitTeam = async (
       .set({ teamStatus: teamStatus.submitted })
       .where(and(eq(questTeam.id, teamId), eq(questTeam.teamStatus, teamStatus.forming)))
       .returning(teamFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, updated);
   });
 
@@ -842,6 +854,7 @@ const respondToInvitation = async (
       .set({ invitationStatus: response, respondedAt: now })
       .where(eq(questTeamInvitation.id, invitationId))
       .returning(invitationFields);
+    await notifyAdminQuestUpdated(tx, identity.questId);
     return invitationResult(updated);
   });
 
@@ -891,6 +904,7 @@ type SelectionOutcomeCode =
   | 'not-selectable'
   | 'headcount-mismatch'
   | 'already-assigned'
+  | 'worker-schedule-conflict'
   | 'idempotency-key-required'
   | 'idempotency-key-reused'
   | 'idempotency-unavailable';
@@ -1113,6 +1127,15 @@ export const selectCandidate = async (
       roster.push(selected.workerId);
       if (assignmentRows.some((assignment) => assignment.workerId === selected.workerId))
         return discardCommand('already-assigned');
+      if (
+        await hasOverlappingActiveWorkerAssignment(tx, {
+          questId,
+          workerIds: roster,
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      )
+        return discardCommand('worker-schedule-conflict');
       await tx
         .update(questApplication)
         .set({ applicationStatus: applicationStatus.selected })
@@ -1152,6 +1175,15 @@ export const selectCandidate = async (
         )
       )
         return discardCommand('already-assigned');
+      if (
+        await hasOverlappingActiveWorkerAssignment(tx, {
+          questId,
+          workerIds: roster,
+          startTime: current.startTime,
+          dueAt: current.dueAt,
+        })
+      )
+        return discardCommand('worker-schedule-conflict');
       await tx
         .update(questTeam)
         .set({ teamStatus: teamStatus.selected })

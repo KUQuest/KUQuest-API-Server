@@ -1,9 +1,10 @@
-import { authGuard, memberBanGuard } from '@/modules/auth';
+import { authGuard, getTrustedOrigins, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
 
+import { logSocket } from '@/shared/request-log';
 import {
   convertEarningsController,
   getOwnWallet,
@@ -17,6 +18,14 @@ import {
   walletActivitiesResponseSchema,
   walletResponseSchema,
 } from './wallet.schema';
+import {
+  ensureWalletUpdateListener,
+  stopWalletUpdateListener,
+  subscribeToWalletUpdates,
+} from './wallet-update.delivery';
+
+const socketCleanups = new WeakMap<object, () => void>();
+const trustedOrigins = getTrustedOrigins(true);
 
 export const walletRoute = new Elysia({
   name: 'wallet-route',
@@ -24,6 +33,48 @@ export const walletRoute = new Elysia({
 })
   .use(authGuard)
   .use(memberBanGuard)
+  .ws('/events', {
+    async open(ws) {
+      const { user, session } = ws.data.session;
+      logSocket(ws, 'open');
+      const origin = ws.data.request.headers.get('origin');
+      if (origin !== null && !trustedOrigins.includes(origin)) {
+        ws.close(4403, 'Origin not allowed');
+        return;
+      }
+      try {
+        await ensureWalletUpdateListener();
+        const unsubscribe = subscribeToWalletUpdates(user.id, session.id, session.expiresAt, {
+          send: (message) => {
+            ws.send(message);
+            logSocket(ws, 'send', { type: 'WALLET_UPDATE' });
+          },
+          close: (code, reason) => ws.close(code, reason),
+        });
+        socketCleanups.set(ws, unsubscribe);
+        ws.send(JSON.stringify({ type: 'SUBSCRIBED', version: 1 }));
+        logSocket(ws, 'subscribed');
+      } catch {
+        ws.close(1013, 'Wallet update service unavailable');
+      }
+    },
+    message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
+      ws.close(1008, 'Wallet update stream is read-only');
+    },
+    close(ws, code) {
+      socketCleanups.get(ws)?.();
+      socketCleanups.delete(ws);
+      logSocket(ws, 'close', { code });
+    },
+    detail: {
+      tags: ['Wallet'],
+      summary: 'Subscribe to Wallet and Top-up updates',
+      description:
+        'Subscribes the authenticated Member to Wallet activity and Top-up status invalidations. Read Wallet balances, activities, and Top-up status from REST after each update.',
+      operationId: 'subscribeWalletUpdates',
+    },
+  })
   .get('', getOwnWallet, {
     response: responses(walletResponseSchema, 401, 404, 409),
     detail: {
@@ -58,4 +109,5 @@ export const walletRoute = new Elysia({
       operationId: 'listWalletActivities',
       security: betterAuthSecurity,
     },
-  });
+  })
+  .onStop(() => stopWalletUpdateListener());

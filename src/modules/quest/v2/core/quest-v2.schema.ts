@@ -669,7 +669,7 @@ export const questV2MoneyHoldSchema = t.Nullable(
     },
     {
       description:
-        'The 7-day hold on a failed Quest. Null unless the Quest is QUEST_FAILED. releasesAt is failedAt + 7 days and a Dispute Case does not move it; it stays the nominal time if the lifecycle worker runs late. heldSatang is the Hirer’s still-held Satang and is null for a Worker.',
+        'The 7-day money hold. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. releasesAt is the hold start + 7 days and a Dispute Case does not move it; it stays the nominal time if the lifecycle worker runs late. heldSatang is the Hirer’s still-held Satang and is null for a Worker.',
     }
   )
 );
@@ -690,10 +690,25 @@ export const questV2DisputeSchema = t.Nullable(
     },
     {
       description:
-        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
+        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
     }
   )
 );
+
+export const questV2PendingEditRequestSchema = t.Nullable(
+  t.Object(
+    {
+      requestId: t.String({ format: 'uuid' }),
+      expiresAt: t.String({ format: 'date-time' }),
+    },
+    {
+      description:
+        'The Quest Edit Request that waits for the caller. Null unless an EDIT_REQUEST_PENDING request has not expired and the caller is the Hirer or an Active Worker who must respond to it. Read the request with getQuestV2EditRequest.',
+    }
+  )
+);
+
+export type QuestV2PendingEditRequest = Static<typeof questV2PendingEditRequestSchema>;
 
 const questV2CanonicalQuestOpenApiSchema = t.Object({
   ...questV2CanonicalQuestSchema.properties,
@@ -718,6 +733,7 @@ const questV2DetailOpenApiSchema = t.Object({
   images: t.Array(questV2ImageSchema),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 const questV2DetailResponseOpenApiSchema = t.Object({
@@ -922,18 +938,45 @@ export const questV2ParticipationDetailSchema = t.Object({
   assignment: t.Object({
     status: questV2AssignmentStateSchema,
     startedAt: t.Nullable(t.String({ format: 'date-time' })),
+    teamRole: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('MEMBER')])),
+    team: t.Nullable(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        name: t.String(),
+        leaderId: t.String({ format: 'uuid' }),
+        members: t.Array(
+          t.Object({
+            id: t.String({ format: 'uuid' }),
+            displayName: t.String(),
+          })
+        ),
+      })
+    ),
   }),
   startedWorkerCount: t.Integer({
     minimum: 0,
     maximum: 20,
     description:
-      'How many Active Assignments on this Quest have a Start Work time. Pair it with activeWorkerCount to show GROUP progress without a roster read; no Worker identity is exposed.',
+      'How many Active Assignments on this Quest have a Start Work time. Pair it with activeWorkerCount to show GROUP progress; this count names no Worker.',
   }),
+  workers: t.Nullable(
+    t.Array(
+      t.Object({
+        id: t.String({ format: 'uuid' }),
+        displayName: t.String(),
+      }),
+      {
+        description:
+          'GROUP + FIRST_COME_FIRST_SERVED only: every Worker whose Assignment was not cancelled, the caller included, in acceptance order. It stays complete after settlement, so a finished Quest still names the Workers who worked it. null for every other Quest shape.',
+      }
+    )
+  ),
   capabilities: t.Object({
     canViewOnly: t.Boolean(),
   }),
   dispute: t.Optional(questV2DisputeSchema),
   moneyHold: t.Optional(questV2MoneyHoldSchema),
+  pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
 });
 
 export const questV2ParticipationDetailResponseSchema = t.Object({
@@ -1043,6 +1086,7 @@ export const questV2DetailSchema = t.Composite([
     images: t.Array(questV2ImageSchema),
     dispute: t.Optional(questV2DisputeSchema),
     moneyHold: t.Optional(questV2MoneyHoldSchema),
+    pendingEditRequest: t.Optional(questV2PendingEditRequestSchema),
   }),
 ]);
 

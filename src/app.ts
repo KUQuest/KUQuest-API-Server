@@ -9,7 +9,11 @@ import {
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
-import { adminDisputeRoute, questDisputeRoute } from '@/modules/quest/admin';
+import {
+  adminDisputeRoute,
+  disputeCaseResponseRoute,
+  questDisputeRoute,
+} from '@/modules/quest/admin';
 import { questSettlementRoute } from '@/modules/quest';
 import {
   adminActivityLogRoute,
@@ -18,11 +22,14 @@ import {
   adminOverviewRoute,
   adminReportRoute,
   adminSearchRoute,
+  adminUpdateRoute,
 } from '@/modules/admin';
 import {
   questAssignmentV2Route,
   questCandidateV2Route,
+  questConductReportV2Route,
   questCandidateTeamV2Route,
+  questV2RewardAllocationRoute,
   questProofV2Route,
   questReviewV2Route,
   questV2RealtimeRoute,
@@ -85,13 +92,16 @@ export const createApp = () => {
     .use(questProofRoute)
     .use(questReviewRoute)
     .use(questDisputeRoute)
+    .use(disputeCaseResponseRoute)
     .use(questSettlementRoute)
     .use(adminDisputeRoute)
     .use(questAssignmentV2Route)
     .use(questCandidateV2Route)
     .use(questCandidateTeamV2Route)
+    .use(questV2RewardAllocationRoute)
     .use(questProofV2Route)
     .use(questReviewV2Route)
+    .use(questConductReportV2Route)
     .use(questV2RealtimeRoute)
     .use(questV2Route)
     .use(questRoute)
@@ -102,6 +112,7 @@ export const createApp = () => {
     .use(adminMemberRoute)
     .use(adminReportRoute)
     .use(adminSearchRoute)
+    .use(adminUpdateRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)

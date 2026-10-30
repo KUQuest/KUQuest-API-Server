@@ -302,6 +302,9 @@ the work passed review.
 - The Quest becomes `QUEST_COMPLETED` when no Active Worker remains.
 - A Group Quest can remain `QUEST_IN_PROGRESS` while another Active Worker
   remains.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, when an earlier Worker was not
+  approved, the completed Quest holds that Worker's slot funding for 7 days.
+  `moneyHold` and `dispute` are then non-null on the `QUEST_COMPLETED` Quest.
 - Approval of a valid pending Proof after the Quest already failed keeps the
   Quest `QUEST_FAILED` while settling the approved Worker according to policy.
 
@@ -310,7 +313,19 @@ the work passed review.
 `PROOF_NOT_APPROVED`:
 
 - Makes the relevant Assignment `ASSIGNMENT_INCOMPLETE`.
-- Makes the Quest `QUEST_FAILED` immediately.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, leaves the Quest `QUEST_IN_PROGRESS`
+  while another Worker is still Active. The other Workers can still send Proof
+  until `dueAt`. When the last Active Worker has a result, the Quest becomes
+  `QUEST_COMPLETED` if one Worker is `ASSIGNMENT_COMPLETED`, otherwise
+  `QUEST_FAILED`. While the Quest goes on, the affected Worker gets one
+  `PROOF_NOT_APPROVED` Push. When the Quest becomes `QUEST_COMPLETED`, each
+  `ASSIGNMENT_INCOMPLETE` Worker gets one `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`
+  Push, and `QUEST_COMPLETED` and `DISPUTE_WINDOW_OPENED` reach the Hirer, the
+  Workers who were Active, and every `ASSIGNMENT_INCOMPLETE` Worker.
+- Hirer cancellation of a running `GROUP + FIRST_COME_FIRST_SERVED` Quest with
+  an `ASSIGNMENT_INCOMPLETE` Worker answers `409 QUEST_SETTLEMENT_NOT_ALLOWED`.
+  Admin termination of that Quest answers `409 QUEST_ACTION_NOT_ALLOWED`.
+- In every other mode, makes the Quest `QUEST_FAILED` immediately.
 - Gives that Worker no Quest Reward.
 - Creates exactly one Admin Review Item.
 - Does not reopen the Quest.

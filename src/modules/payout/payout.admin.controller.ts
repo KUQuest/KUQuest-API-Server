@@ -142,12 +142,14 @@ const runAdminPayoutCommand = async (
   adminId: string,
   payoutId: string,
   reasonCode: string,
+  decisionReasonText: string | undefined,
   execute: (input: {
     adminId: string;
     payoutId: string;
     idempotencyKey: string;
     expectedVersion: number;
     reasonCode: string;
+    decisionReasonText?: string;
   }) => ReturnType<typeof approvePayout>
 ): Promise<ApiResponse> => {
   const revision = readResourceVersion(request);
@@ -162,6 +164,7 @@ const runAdminPayoutCommand = async (
       idempotencyKey: request.headers.get('idempotency-key') ?? '',
       expectedVersion: revision.value,
       reasonCode,
+      decisionReasonText,
     });
     if (result.resourceVersion === null) {
       set.status = 500;
@@ -195,6 +198,7 @@ export const listAdminPayoutsController = async ({
     return apiSuccess({
       items: result.items.map(serializePayout),
       nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
+      totalCount: result.totalCount,
     });
   } catch (error) {
     return mapAdminError(set, error);
@@ -242,6 +246,7 @@ export const approvePayoutController = async ({
     admin.id,
     params.payoutId,
     body.reasonCode,
+    body.decisionReasonText,
     approvePayout
   );
 };
@@ -257,7 +262,15 @@ export const cancelPayoutController = async ({
   params: AdminPayoutParams;
   request: Request;
 }): Promise<ApiResponse> =>
-  runAdminPayoutCommand(set, request, admin.id, params.payoutId, body.reasonCode, cancelPayout);
+  runAdminPayoutCommand(
+    set,
+    request,
+    admin.id,
+    params.payoutId,
+    body.reasonCode,
+    body.decisionReasonText,
+    cancelPayout
+  );
 
 export const reconcilePayoutAdminController = async ({
   params,

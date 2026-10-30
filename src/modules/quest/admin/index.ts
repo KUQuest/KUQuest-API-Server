@@ -1,6 +1,6 @@
 export { adminQuestRoute } from './quest-admin.route';
 export { adminDisputeRoute } from './quest-dispute-admin.route';
-export { questDisputeRoute } from './quest-dispute.route';
+export { disputeCaseResponseRoute, questDisputeRoute } from './quest-dispute.route';
 export {
   createAdminDisputeController,
   fileAdminDisputeCaseController,
@@ -8,6 +8,7 @@ export {
   getAdminDisputeEvidenceController,
   listAdminDisputesController,
   resolveAdminDisputeController,
+  respondToQuestDisputeController,
 } from './quest-dispute-admin.controller';
 export {
   getAdminQuestDetailController,
@@ -23,6 +24,7 @@ export {
   getAdminDisputeEvidence,
   listAdminDisputeCases,
   resolveAdminDisputeCase,
+  submitDisputeCaseResponse,
   summaryFromRecord,
 } from './quest-dispute-admin.service';
 export {
@@ -53,6 +55,8 @@ export {
   adminDisputeParamsSchema,
   adminDisputeResolveBodySchema,
   adminDisputeSummarySchema,
+  questDisputeFilingBodySchema,
+  questDisputeResponseBodySchema,
 } from './quest-dispute-admin.schema';
 export {
   adminQuestCommandHeadersSchema,

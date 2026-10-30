@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { profileCertificate } from '@/database/schema/profile.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
 import type { Static } from 'elysia';
@@ -56,12 +57,17 @@ export const findCertificate = async (userId: string, certificateId: string) => 
 };
 
 export const createCertificate = async (userId: string, data: CertificateInput) => {
-  const [created] = await db
-    .insert(profileCertificate)
-    .values({ ...data, userId })
-    .returning({ id: profileCertificate.id });
+  const createdId = await db.transaction(async (transaction) => {
+    const [created] = await transaction
+      .insert(profileCertificate)
+      .values({ ...data, userId })
+      .returning({ id: profileCertificate.id });
 
-  return findCertificate(userId, created.id);
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return created.id;
+  });
+
+  return findCertificate(userId, createdId);
 };
 
 export function updateCertificate(
@@ -90,15 +96,20 @@ export async function updateCertificate(
     return { outcome: 'conflict' };
   }
 
-  const [updated] = await db
-    .update(profileCertificate)
-    .set({ ...data, updatedAt: new Date(), version: sql`${profileCertificate.version} + 1` })
-    .where(
-      expectedVersion === undefined
-        ? ownedBy(userId, certificateId)
-        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
-    )
-    .returning({ id: profileCertificate.id });
+  const [updated] = await db.transaction(async (transaction) => {
+    const [row] = await transaction
+      .update(profileCertificate)
+      .set({ ...data, updatedAt: new Date(), version: sql`${profileCertificate.version} + 1` })
+      .where(
+        expectedVersion === undefined
+          ? ownedBy(userId, certificateId)
+          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
+      )
+      .returning({ id: profileCertificate.id });
+
+    if (row) await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return [row];
+  });
 
   if (!updated) return expectedVersion === undefined ? undefined : { outcome: 'conflict' as const };
 
@@ -129,14 +140,19 @@ export async function deleteCertificate(
     return { outcome: 'conflict' as const };
   }
 
-  const [certificate] = await db
-    .delete(profileCertificate)
-    .where(
-      expectedVersion === undefined
-        ? ownedBy(userId, certificateId)
-        : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
-    )
-    .returning({ id: profileCertificate.id });
+  const [certificate] = await db.transaction(async (transaction) => {
+    const [row] = await transaction
+      .delete(profileCertificate)
+      .where(
+        expectedVersion === undefined
+          ? ownedBy(userId, certificateId)
+          : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
+      )
+      .returning({ id: profileCertificate.id });
+
+    if (row) await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    return [row];
+  });
 
   return certificate
     ? { id: certificate.id, version: current.version + 1 }
@@ -206,6 +222,8 @@ export async function replaceCertificateImage(
           ? ownedBy(userId, certificateId)
           : and(ownedBy(userId, certificateId), eq(profileCertificate.version, expectedVersion))
       );
+
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
 
     return {
       ...createdFile,
@@ -277,6 +295,7 @@ export const deleteCertificateImage = async (
       .update(file)
       .set({ deletedAt: new Date() })
       .where(eq(file.id, certificate.fileId));
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
 
     return {
       version: certificate.version + 1,

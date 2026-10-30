@@ -525,7 +525,12 @@ export const rejectQuestV2CandidateApplication = async (
   });
 
 type QuestV2CandidateSelectionBusinessOutcomeCode =
-  'already-assigned' | 'application-not-found' | 'not-allowed' | 'not-open' | 'not-selectable';
+  | 'already-assigned'
+  | 'application-not-found'
+  | 'not-allowed'
+  | 'not-open'
+  | 'not-selectable'
+  | 'worker-schedule-conflict';
 
 type QuestV2CandidateSelectionOutcomeCode =
   QuestV2CandidateSelectionBusinessOutcomeCode | 'not-found' | QuestCommandOutcomeCode;

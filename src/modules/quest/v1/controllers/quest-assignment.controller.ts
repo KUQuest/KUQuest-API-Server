@@ -70,6 +70,13 @@ export const joinNoCandidateQuestController = async ({
         'The Worker is already assigned to this Quest'
       );
     }
+    if (result.outcome === 'worker-schedule-conflict') {
+      return conflict(
+        set,
+        'WORKER_SCHEDULE_CONFLICT',
+        'The Worker has an active Assignment with overlapping scheduled work time'
+      );
+    }
     if (result.outcome === 'idempotency-key-reused') {
       return conflict(
         set,

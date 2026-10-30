@@ -323,6 +323,13 @@ const mapSelectionError = (set: AuthedContext['set'], outcome: SelectionError) =
   if (outcome.outcome === 'headcount-mismatch') {
     return conflict(set, 'TEAM_HEADCOUNT_MISMATCH', 'The submitted Candidate Team is not full');
   }
+  if (outcome.outcome === 'worker-schedule-conflict') {
+    return conflict(
+      set,
+      'WORKER_SCHEDULE_CONFLICT',
+      'A selected Candidate has an active Worker Assignment with overlapping scheduled work time'
+    );
+  }
   return mapQuestCommandOutcome(set, outcome.outcome);
 };
 

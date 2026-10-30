@@ -11,6 +11,7 @@ import {
   type QuestCommandWork,
 } from '../command/quest-command.service';
 import type { QuestWorkChatMembershipTransition } from '../work-chat/quest-work-chat.contract';
+import { hasOverlappingActiveWorkerAssignment } from '../worker-schedule-conflict.service';
 import {
   questV2AssignmentStates,
   questV2Mode,
@@ -40,6 +41,7 @@ export type SelectionQuest = {
   v2Participation: string | null;
   questState: string;
   startTime: Date;
+  dueAt: Date | null;
 };
 
 /** Per-caller answers for the three gates whose codes have drifted between SINGLE and GROUP. */
@@ -191,6 +193,7 @@ export const lockQuest = async (transaction: QuestTransaction, questId: string) 
       hiddenAt: quest.hiddenAt,
       headcount: quest.headcount,
       startTime: quest.startTime,
+      dueAt: quest.dueAt,
     })
     .from(quest)
     .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
@@ -257,6 +260,16 @@ export const runQuestV2Selection = async <C extends string>(
           existingAssignments.some((assignment) => resource.workerIds.includes(assignment.workerId))
         ) {
           return { kind: 'rejected', rejection: 'already-assigned' as C };
+        }
+        if (
+          await hasOverlappingActiveWorkerAssignment(transaction, {
+            questId: input.questId,
+            workerIds: resource.workerIds,
+            startTime: current.startTime,
+            dueAt: current.dueAt,
+          })
+        ) {
+          return { kind: 'rejected', rejection: 'worker-schedule-conflict' as C };
         }
 
         await resource.flipCandidateRecords(transaction);

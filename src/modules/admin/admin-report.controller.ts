@@ -47,7 +47,8 @@ const mapAdminReportError = (set: AdminContext['set'], error: unknown): ApiRespo
     else if (
       error.code === 'ADMIN_ACTION_INVALID_VERSION' ||
       error.code === 'ADMIN_ACTION_REASON_REQUIRED' ||
-      error.code === 'ADMIN_ACTION_INVALID_REASON_CODE'
+      error.code === 'ADMIN_ACTION_INVALID_REASON_CODE' ||
+      error.code === 'ADMIN_ACTION_INVALID_DECISION_REASON_TEXT'
     )
       set.status = 400;
     else if (
@@ -75,7 +76,9 @@ export const listAdminReportsController = async ({
       q: query.q,
       kind: query.kind,
       status: query.status,
+      statusMode: query.statusMode,
       memberId: query.memberId,
+      submittedByMemberId: query.submittedByMemberId,
       questId: query.questId,
       limit: parsePageLimit(query.limit),
       cursor: decodeCursor(query.cursor),
@@ -136,13 +139,20 @@ export const decideAdminReportController = async ({
             ...command,
             outcome: 'CONDUCT_REPORT_DISMISSED',
             decisionReasonCode: body.decisionReasonCode,
+            decisionReasonText: body.decisionReasonText,
           })
         : body.outcome === 'CONDUCT_REPORT_UPHELD'
-          ? await decideAdminReport({ ...command, outcome: 'CONDUCT_REPORT_UPHELD' })
+          ? await decideAdminReport({
+              ...command,
+              outcome: 'CONDUCT_REPORT_UPHELD',
+              decisionReasonCode: body.decisionReasonCode,
+              decisionReasonText: body.decisionReasonText,
+            })
           : await decideAdminReport({
               ...command,
               outcome: body.outcome,
               reasonCode: body.reasonCode,
+              decisionReasonText: body.decisionReasonText,
             });
     if (result.resourceVersion === null) {
       set.status = 500;

@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { quest, questApiVersion, questAssignment, review } from '@/database/schema/quest.schema';
 import { recordReviewAveragePenaltyInTransaction } from '@/modules/admin/member-penalty';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { and, eq } from 'drizzle-orm';
 
@@ -322,6 +323,7 @@ export const createQuestV2Review = async (
           rating: created.rating,
           now,
         });
+        await notifyAdminResourceUpdated(transaction, 'MEMBER', created.revieweeId);
 
         return {
           kind: 'success',
@@ -411,6 +413,7 @@ export const updateQuestV2Review = async (
           .where(eq(review.id, reviewId))
           .returning(reviewFields);
         if (!updated) return { kind: 'rejected', rejection: 'conflict' };
+        await notifyAdminResourceUpdated(transaction, 'MEMBER', updated.revieweeId);
 
         return {
           kind: 'success',

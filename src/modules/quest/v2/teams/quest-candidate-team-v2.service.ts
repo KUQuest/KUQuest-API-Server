@@ -173,22 +173,24 @@ export type QuestV2CandidateTeamFileAccess = {
   urlExpiresAt: string;
 };
 
-type SelectionOutcomeCode = Extract<
-  TeamCommandOutcomeCode,
-  | 'already-assigned'
-  | 'idempotency-in-progress'
-  | 'idempotency-key-reused'
-  | 'idempotency-unavailable'
-  | 'invalid-idempotency-key'
-  | 'not-authorized'
-  | 'not-candidate'
-  | 'not-found'
-  | 'not-group'
-  | 'not-open'
-  | 'not-selectable'
-  | 'team-not-found'
-  | 'headcount-mismatch'
->;
+type SelectionOutcomeCode =
+  | Extract<
+      TeamCommandOutcomeCode,
+      | 'already-assigned'
+      | 'idempotency-in-progress'
+      | 'idempotency-key-reused'
+      | 'idempotency-unavailable'
+      | 'invalid-idempotency-key'
+      | 'not-authorized'
+      | 'not-candidate'
+      | 'not-found'
+      | 'not-group'
+      | 'not-open'
+      | 'not-selectable'
+      | 'team-not-found'
+      | 'headcount-mismatch'
+    >
+  | 'worker-schedule-conflict';
 
 export type QuestV2CandidateTeamSelectionOutcome =
   SelectionSuccess | { outcome: SelectionOutcomeCode };
@@ -497,7 +499,8 @@ const validateSubmissionFiles = async (
   memberId: string,
   fileIds: string[]
 ): Promise<boolean> => {
-  if (fileIds.length === 0 || new Set(fileIds).size !== fileIds.length) return false;
+  if (fileIds.length === 0) return true;
+  if (new Set(fileIds).size !== fileIds.length) return false;
   const rows = await transaction
     .select({
       id: file.id,
@@ -690,6 +693,9 @@ export const listQuestV2CandidateTeams = async (
       and(
         eq(questCandidateTeamV2.questId, questId),
         ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.questState === 'QUEST_OPEN'
+          ? []
+          : [eq(questCandidateTeamV2.state, 'TEAM_SELECTED')]),
         ...(current.hirerId === memberId
           ? []
           : [
@@ -734,6 +740,9 @@ export const getQuestV2CandidateTeam = async (
         eq(questCandidateTeamV2.id, teamId),
         eq(questCandidateTeamV2.questId, questId),
         ne(questCandidateTeamV2.state, 'TEAM_DISBANDED'),
+        ...(current.questState === 'QUEST_OPEN'
+          ? []
+          : [eq(questCandidateTeamV2.state, 'TEAM_SELECTED')]),
         ...(current.hirerId === memberId
           ? []
           : [
@@ -1416,11 +1425,12 @@ export const submitQuestV2CandidateTeam = async (
   now = new Date()
 ): Promise<QuestV2CandidateTeamOutcome> => {
   const text = input.text.trim();
+  const fileIds = input.fileIds ?? [];
   const requestHash = await sha256Json({
     authenticatedMemberId: leaderId,
     operation: questV2CandidateTeamSubmitOperationScope,
     path: '/api/v2/quests/:questId/teams/:teamId/submit',
-    body: { questId, teamId, text, fileIds: input.fileIds },
+    body: { questId, teamId, text, fileIds },
   });
 
   return db.transaction(async (transaction) => {
@@ -1471,17 +1481,19 @@ export const submitQuestV2CandidateTeam = async (
         if (!text || text.length > 1000) {
           return { kind: 'rejected', rejection: 'submission-invalid' };
         }
-        if (!(await validateSubmissionFiles(transaction, leaderId, input.fileIds))) {
+        if (!(await validateSubmissionFiles(transaction, leaderId, fileIds))) {
           return { kind: 'rejected', rejection: 'submission-files-invalid' };
         }
 
-        const [usedFile] = await transaction
-          .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
-          .from(questCandidateTeamV2SubmissionFile)
-          .where(inArray(questCandidateTeamV2SubmissionFile.fileId, input.fileIds))
-          .limit(1);
-        if (usedFile) {
-          return { kind: 'rejected', rejection: 'submission-files-invalid' };
+        if (fileIds.length > 0) {
+          const [usedFile] = await transaction
+            .select({ fileId: questCandidateTeamV2SubmissionFile.fileId })
+            .from(questCandidateTeamV2SubmissionFile)
+            .where(inArray(questCandidateTeamV2SubmissionFile.fileId, fileIds))
+            .limit(1);
+          if (usedFile) {
+            return { kind: 'rejected', rejection: 'submission-files-invalid' };
+          }
         }
 
         const [updatedTeam] = await transaction
@@ -1499,11 +1511,13 @@ export const submitQuestV2CandidateTeam = async (
           .returning(teamFields);
         if (!updatedTeam) throw new Error('Candidate Team submission update returned no row');
 
-        await transaction
-          .insert(questCandidateTeamV2SubmissionFile)
-          .values(
-            input.fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
-          );
+        if (fileIds.length > 0) {
+          await transaction
+            .insert(questCandidateTeamV2SubmissionFile)
+            .values(
+              fileIds.map((fileId, position) => ({ teamId, fileId, position, attachedAt: now }))
+            );
+        }
         await notifyCandidateRosterUpdate(transaction, questId, { kind: 'TEAM', teamId });
 
         const result = await readTeam(transaction, updatedTeam);
@@ -1649,7 +1663,8 @@ type SelectionBusinessOutcomeCode =
   | 'not-group'
   | 'not-open'
   | 'not-selectable'
-  | 'team-not-found';
+  | 'team-not-found'
+  | 'worker-schedule-conflict';
 
 export const selectQuestV2CandidateTeam = async (
   hirerId: string,
@@ -1697,7 +1712,10 @@ export const selectQuestV2CandidateTeam = async (
         return { kind: 'rejected', rejection: 'headcount-mismatch' };
       }
       const submissionFileIds = await teamSubmissionFileIds(transaction, teamId);
-      if (!(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))) {
+      if (
+        submissionFileIds.length > 0 &&
+        !(await validateSubmissionFiles(transaction, team.leaderId, submissionFileIds))
+      ) {
         return { kind: 'rejected', rejection: 'not-selectable' };
       }
 

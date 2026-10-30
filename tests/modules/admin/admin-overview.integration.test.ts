@@ -129,6 +129,7 @@ const seedQuest = async (questStatus: AdminOverviewQuestState, hidden = false): 
     startTime: new Date(now.getTime() - 60_000),
     dueAt: now,
     failedAt: questStatus === 'QUEST_FAILED' ? now : null,
+    moneyHoldStartedAt: questStatus === 'QUEST_FAILED' ? now : null,
     cancelledAt: questStatus === 'QUEST_CANCELLED' ? now : null,
     hiddenAt: hidden ? now : null,
     hiddenByAdminId: hidden ? adminId : null,

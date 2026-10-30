@@ -1,6 +1,6 @@
 import { createApp } from '@/app';
 import { db, sql } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   adminEvidenceReference,
   adminReportCase,
@@ -11,6 +11,7 @@ import { quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { chatConversation, chatMembership, chatMessage } from '@/database/schema/work-chat.schema';
 import { auth } from '@/modules/auth';
+import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 
 import { randomUUID } from 'node:crypto';
 
@@ -36,6 +37,13 @@ const fixtureQuestIds: string[] = [];
 const fixtureMessageIds: string[] = [];
 let postgresAvailable = false;
 let reportApp: { handle: (request: Request) => Promise<Response> };
+let adminId = '';
+let adminCookie = '';
+const adminEmail = `message-report-admin-${randomUUID()}@example.com`;
+const adminPassword = 'MessageReportUpdate1!';
+
+const cookieHeaderFor = (response: Response): string =>
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
 
 const authenticate = () =>
   spyOn(auth.api, 'getSession').mockImplementation((async ({ headers }: { headers: Headers }) => {
@@ -54,6 +62,87 @@ const request = (method: string, path: string, memberId?: string, body?: Record<
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
   );
+
+const adminEventsRequest = () =>
+  reportApp.handle(
+    new Request('http://localhost/api/v1/admin/events', {
+      headers: { cookie: adminCookie },
+    })
+  );
+
+const readAdminSseFrame = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const frame = await Promise.race([
+    reader.read(),
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('Timed out waiting for Admin SSE data.')), 5_000);
+    }),
+  ]).finally(() => {
+    if (timeout !== undefined) clearTimeout(timeout);
+  });
+  if (frame.done) throw new Error('Admin SSE stream closed before the expected frame.');
+  return new TextDecoder().decode(frame.value);
+};
+
+const readAdminSseEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  while (true) {
+    const frame = await readAdminSseFrame(reader);
+    const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+    if (dataLine) return JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+  }
+};
+
+type AdminSseEventKey = { subjectType: string; subjectId: string };
+
+const adminSseEventKey = (event: Record<string, unknown>) =>
+  `${String(event.subjectType)}:${String(event.subjectId)}`;
+
+const createAdminSseEventReader = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  let pendingEvent: Promise<Record<string, unknown>> | undefined;
+
+  const nextEvent = async (timeoutMs = 5_000) => {
+    const pending = (pendingEvent ??= readAdminSseEvent(reader).finally(() => {
+      pendingEvent = undefined;
+    }));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  };
+
+  const expectEvents = async (expected: Record<string, unknown>[]) => {
+    const expectedKeys = new Set(expected.map(adminSseEventKey));
+    const deadline = Date.now() + 5_000;
+    const actual: Record<string, unknown>[] = [];
+    while (actual.length < expected.length) {
+      const event = await nextEvent(Math.max(0, deadline - Date.now()));
+      if (!event) throw new Error('Timed out waiting for expected Admin SSE events.');
+      if (expectedKeys.has(adminSseEventKey(event))) actual.push(event);
+    }
+    expect(actual).toEqual(expected);
+  };
+
+  const expectNoEventsFor = async (keys: AdminSseEventKey[], timeoutMs = 500) => {
+    const expectedKeys = new Set(keys.map((key) => `${key.subjectType}:${key.subjectId}`));
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const event = await nextEvent(deadline - Date.now());
+      if (!event) return;
+      if (expectedKeys.has(adminSseEventKey(event))) {
+        throw new Error(`Received an unexpected Admin SSE event: ${JSON.stringify(event)}`);
+      }
+    }
+  };
+
+  return { expectEvents, expectNoEventsFor };
+};
 
 const createVisibleWorkConversation = async () => {
   const questId = randomUUID();
@@ -278,6 +367,7 @@ beforeAll(async () => {
   }
 
   postgresAvailable = true;
+  reportApp = createApp();
   await db.insert(authUser).values([
     { id: senderId, email: `${senderId}@ku.th`, firstName: 'Report', lastName: 'Sender' },
     {
@@ -295,6 +385,31 @@ beforeAll(async () => {
     { id: outsiderId, email: `${outsiderId}@ku.th`, firstName: 'Other', lastName: 'Member' },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Message report ${tagId}` });
+
+  const adminAuth = createAdminAuth({
+    allowSignUp: true,
+    autoSignIn: false,
+    markEmailVerified: true,
+  });
+  const admin = await adminAuth.api.signUpEmail({
+    body: {
+      email: adminEmail,
+      password: adminPassword,
+      name: 'Message Report Admin',
+      firstName: 'Message Report',
+      lastName: 'Admin',
+    },
+  });
+  adminId = admin.user.id;
+  const login = await reportApp.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
+  if (login.status !== 200) throw new Error(`Admin sign-in failed: ${login.status}`);
+  adminCookie = cookieHeaderFor(login);
 });
 
 beforeEach(() => {
@@ -309,6 +424,7 @@ afterEach(async () => {
 afterAll(async () => {
   await cleanFixtures();
   if (!postgresAvailable) return;
+  if (adminId) await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db
     .delete(authUser)
@@ -344,6 +460,68 @@ describe('Student Message Report API', () => {
     expect(document.paths['/api/v1/chat/reports']?.post?.security).toEqual([
       { betterAuthSession: [] },
     ]);
+  });
+
+  it('invalidates the Report Case for each new Reporter Entry, but not a replay', async () => {
+    if (!postgresAvailable) return;
+    authenticate();
+    const { visibleMessageId } = await createVisibleWorkConversation();
+    const response = await adminEventsRequest();
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const eventStream = createAdminSseEventReader(reader);
+
+    try {
+      expect(await readAdminSseFrame(reader)).toContain(': connected');
+
+      const first = await request('POST', '/api/v1/chat/reports', formerReporterId, {
+        messageId: visibleMessageId,
+        reason: 'REPORT_SPAM',
+      });
+      expect(first.status).toBe(200);
+      const [reportCase] = await db
+        .select({ id: adminReportCase.id })
+        .from(adminReportCase)
+        .where(eq(adminReportCase.messageId, visibleMessageId));
+      if (!reportCase) throw new Error('Report Case was not created.');
+
+      const firstEvent = {
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'REPORT_CASE',
+        subjectId: reportCase.id,
+      };
+      await eventStream.expectEvents([firstEvent]);
+      await eventStream.expectNoEventsFor([
+        { subjectType: 'REPORT_CASE', subjectId: reportCase.id },
+      ]);
+
+      const second = await request('POST', '/api/v1/chat/reports', currentReporterId, {
+        messageId: visibleMessageId,
+        reason: 'REPORT_DANGER_OR_THREAT',
+      });
+      expect(second.status).toBe(200);
+      const secondEvent = {
+        type: 'RESOURCE_UPDATED',
+        subjectType: 'REPORT_CASE',
+        subjectId: reportCase.id,
+      };
+      await eventStream.expectEvents([secondEvent]);
+      await eventStream.expectNoEventsFor([
+        { subjectType: 'REPORT_CASE', subjectId: reportCase.id },
+      ]);
+
+      const replay = await request('POST', '/api/v1/chat/reports', formerReporterId, {
+        messageId: visibleMessageId,
+        reason: 'REPORT_OTHER',
+        detail: 'A retry must not emit another invalidation.',
+      });
+      expect(replay.status).toBe(200);
+      await eventStream.expectNoEventsFor([
+        { subjectType: 'REPORT_CASE', subjectId: reportCase.id },
+      ]);
+    } finally {
+      await reader.cancel();
+    }
   });
 
   it('uses Message visibility, groups reporters, replays duplicates, and protects own status', async () => {

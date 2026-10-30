@@ -149,6 +149,12 @@ export const selectCandidateController = async ({
         'ASSIGNMENT_ALREADY_EXISTS',
         'A selected Worker is already assigned to this Quest'
       );
+    if (result.outcome === 'worker-schedule-conflict')
+      return conflict(
+        set,
+        'WORKER_SCHEDULE_CONFLICT',
+        'A selected Candidate has an active Worker Assignment with overlapping scheduled work time'
+      );
     if (result.outcome === 'idempotency-key-reused')
       return conflict(
         set,

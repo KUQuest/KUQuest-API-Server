@@ -210,6 +210,12 @@ Hirer selects the Team, the Team Leader becomes a Worker. The Team Leader
 starts and submits or confirms the Team's required work.
 _Avoid_: treating a Team Leader as the Hirer or as a leader of a FCFS Group.
 
+**Team Reward Allocation**:
+A post-completion percentage split of a successful `GROUP + CANDIDATE` Quest's
+Worker Reward pool. The Team Leader assigns teammate shares within 24 hours and
+receives the remainder; the Server equally splits the pool if the deadline passes.
+_Avoid_: Peer-to-Peer transfers or treating the full pool as the Leader's personal reward.
+
 **First Come, First Served (FCFS)**:
 A Quest selection mode where an eligible Worker joins directly. It replaces the
 legacy `NO_CANDIDATE` name, which describes an absence instead of the selection

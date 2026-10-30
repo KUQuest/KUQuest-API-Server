@@ -3,17 +3,15 @@ import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { recordReviewAveragePenaltyInTransaction } from '@/modules/admin/member-penalty';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
+import { and, count, eq, sql } from 'drizzle-orm';
 
-import {
-  assignmentStatus,
-  questStatus,
-  terminalQuestStatuses,
-} from '../../shared/contracts/quest.contract';
+import { assignmentStatus, questStatus } from '../../shared/contracts/quest.contract';
+import { validReceivedReviewFilter } from '../../shared/rating-review.service';
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 
 type ReviewInput = { revieweeId?: string; rating: number; comment?: string };
@@ -172,6 +170,7 @@ export const createReview = async (
         rating: created.rating,
         now,
       });
+      await notifyAdminResourceUpdated(tx, 'MEMBER', created.revieweeId);
       return created;
     }
 
@@ -223,52 +222,16 @@ export const updateReview = async (
       })
       .where(eq(review.id, reviewId))
       .returning(reviewFields);
+    if (updated) await notifyAdminResourceUpdated(tx, 'MEMBER', updated.revieweeId);
     return updated ?? { outcome: 'conflict' };
   });
-
-const validReviewPredicate = (memberId: string) =>
-  or(
-    and(
-      eq(review.revieweeId, memberId),
-      eq(review.reviewerId, quest.hirerId),
-      exists(
-        db
-          .select({ id: questAssignment.id })
-          .from(questAssignment)
-          .where(
-            and(
-              eq(questAssignment.questId, review.questId),
-              eq(questAssignment.workerId, review.revieweeId)
-            )
-          )
-      )
-    ),
-    and(
-      eq(review.revieweeId, memberId),
-      eq(review.revieweeId, quest.hirerId),
-      exists(
-        db
-          .select({ id: questAssignment.id })
-          .from(questAssignment)
-          .where(
-            and(
-              eq(questAssignment.questId, review.questId),
-              eq(questAssignment.workerId, review.reviewerId)
-            )
-          )
-      )
-    )
-  );
 
 /** Return only Reviews backed by a terminal Quest and Assignment relationship. */
 export const listReviews = async (
   memberId: string,
   options: { rating?: number; limit?: number; cursor?: CursorPayload } = {}
 ) => {
-  const conditions = [
-    inArray(quest.questStatus, terminalQuestStatuses),
-    validReviewPredicate(memberId),
-  ];
+  const conditions = [validReceivedReviewFilter(memberId)];
   if (options.rating !== undefined) conditions.push(eq(review.rating, options.rating));
   const page = await readKeysetPage({
     anchor: { time: review.createdAt, id: review.id },
@@ -304,10 +267,7 @@ export const listReviews = async (
 };
 
 export const countReviews = async (memberId: string, rating?: number) => {
-  const conditions = [
-    inArray(quest.questStatus, terminalQuestStatuses),
-    validReviewPredicate(memberId),
-  ];
+  const conditions = [validReceivedReviewFilter(memberId)];
   if (rating !== undefined) conditions.push(eq(review.rating, rating));
   const [row] = await db
     .select({ total: count(review.id) })
@@ -322,7 +282,7 @@ export const getReceivedRatings = async (memberId: string): Promise<number[]> =>
     .select({ rating: review.rating })
     .from(review)
     .innerJoin(quest, eq(review.questId, quest.id))
-    .where(and(inArray(quest.questStatus, terminalQuestStatuses), validReviewPredicate(memberId)));
+    .where(validReceivedReviewFilter(memberId));
   return rows.map(({ rating }) => rating);
 };
 

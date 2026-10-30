@@ -53,12 +53,16 @@ type QuestBoardSubscription = QuestSubscriptionIdentity & {
 type HirerQuestSubscription = QuestSubscriptionIdentity & {
   stream: 'HIRER_QUESTS';
 };
+type WorkerAssignmentsSubscription = QuestSubscriptionIdentity & {
+  stream: 'WORKER_ASSIGNMENTS';
+};
 
 type QuestRealtimeSubscription =
   | (QuestUpdateSubscription & { stream: 'QUEST' })
   | CandidateRosterSubscription
   | QuestBoardSubscription
-  | HirerQuestSubscription;
+  | HirerQuestSubscription
+  | WorkerAssignmentsSubscription;
 
 const subscriptions = new Map<string, QuestRealtimeSubscription>();
 let listenerStart: Promise<void> | undefined;
@@ -136,6 +140,28 @@ const deliverQuestUpdate = async (event: QuestUpdateNotification) => {
   });
   const recipients = new Set(event.recipientMemberIds);
   const finalRecipients = new Set(event.closeMemberIds ?? []);
+
+  const workerAssignmentSubscriptions = [...subscriptions.entries()].filter(
+    ([, subscription]) =>
+      subscription.stream === 'WORKER_ASSIGNMENTS' &&
+      (recipients.has(subscription.memberId) || finalRecipients.has(subscription.memberId))
+  );
+  await Promise.all(
+    workerAssignmentSubscriptions.map(async ([id, subscription]) => {
+      if (await closeSubscriptionIfMemberIsBanned(id, subscription)) return;
+      if (!(await sessionIsCurrent(subscription))) {
+        closeSubscription(id, subscription, 4401, 'Session expired');
+        return;
+      }
+      try {
+        subscription.socket.send(
+          JSON.stringify({ type: 'WORKER_ASSIGNMENTS_INVALIDATED', version: 1 })
+        );
+      } catch {
+        closeSubscription(id, subscription, 1011, 'Delivery failed');
+      }
+    })
+  );
 
   for (const [id, subscription] of subscriptions) {
     if (subscription.stream !== 'QUEST' || subscription.questId !== event.questId) continue;
@@ -433,6 +459,12 @@ export const subscribeToHirerQuestUpdates = (
   sessionId: string,
   socket: QuestUpdateSocket
 ) => subscribe({ stream: 'HIRER_QUESTS', memberId, sessionId, socket });
+
+export const subscribeToWorkerAssignmentUpdates = (
+  memberId: string,
+  sessionId: string,
+  socket: QuestUpdateSocket
+) => subscribe({ stream: 'WORKER_ASSIGNMENTS', memberId, sessionId, socket });
 
 export const ensureQuestUpdateListener = async () => {
   if (!listenerStart) {

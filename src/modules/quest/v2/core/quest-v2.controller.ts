@@ -35,6 +35,7 @@ import {
 import {
   createQuestV2EditRequest,
   getQuestV2EditRequest,
+  readPendingQuestV2EditRequestSummary,
   respondToQuestV2EditRequest,
   type QuestV2EditRequestOutcome,
 } from './quest-v2-edit.service';
@@ -605,6 +606,7 @@ export const getQuestV2DetailController = async ({
     images,
     dispute: await serializeDispute(session.user.id, params.questId),
     moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+    pendingEditRequest: await readPendingQuestV2EditRequestSummary(session.user.id, params.questId),
   });
 };
 
@@ -662,6 +664,7 @@ export const getQuestV2ParticipationDetailController = async ({
     images,
     dispute: await serializeDispute(session.user.id, params.questId),
     moneyHold: await serializeMoneyHold(session.user.id, params.questId),
+    pendingEditRequest: await readPendingQuestV2EditRequestSummary(session.user.id, params.questId),
   });
 };
 

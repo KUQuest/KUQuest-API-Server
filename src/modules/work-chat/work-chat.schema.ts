@@ -14,6 +14,7 @@ const conversationSchema = t.Object({
     t.Object({
       id: t.String({ format: 'uuid' }),
       kind: t.Union([t.Literal('USER'), t.Literal('SYSTEM')]),
+      systemType: t.Union([t.String(), t.Null()]),
       preview: t.String(),
       createdAt: t.String({ format: 'date-time' }),
     })

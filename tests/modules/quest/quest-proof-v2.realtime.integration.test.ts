@@ -619,6 +619,38 @@ describe('Quest Proof v2 realtime source updates', () => {
           changeType: 'QUEST_COMPLETED',
         });
       }
+      for (const socket of sockets) {
+        expect(await socket.nextText(250)).toBeUndefined();
+      }
+      const allocationRead = await fetch(`${origin}/api/v2/quests/${questId}/reward-allocation`, {
+        headers: { cookie: leader.cookie },
+      });
+      expect(allocationRead.status).toBe(200);
+      expect((await allocationRead.json()).data).toMatchObject({
+        status: 'PENDING',
+        leaderId: leader.id,
+        totalRewardSatang: 2_000,
+        viewerIsLeader: true,
+      });
+      const allocationSubmit = await fetch(`${origin}/api/v2/quests/${questId}/reward-allocation`, {
+        method: 'POST',
+        headers: {
+          cookie: leader.cookie,
+          'content-type': 'application/json',
+          'idempotency-key': `proof-live-allocation-${randomUUID()}`,
+        },
+        body: JSON.stringify({
+          teammateShares: [{ memberId: teammate.id, percentageBasisPoints: 4_000 }],
+        }),
+      });
+      expect(allocationSubmit.status).toBe(200);
+      expect((await allocationSubmit.json()).data).toMatchObject({
+        status: 'SUBMITTED',
+        totalRewardSatang: 2_000,
+      });
+      for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('TEAM_REWARD_ALLOCATED');
+      }
       for (const socket of sockets.slice(1)) {
         expect((await socket.nextFrame())?.opcode).toBe(8);
       }
@@ -631,17 +663,16 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(participation.data.state).toBe('QUEST_COMPLETED');
       expect(participation.data.workerSettlement).toMatchObject({
         status: 'PAID',
-        amountSatang: 2000,
+        amountSatang: 1_200,
       });
       expect(participation.data.workerSettlement.settledAt).toBeString();
       const teammateRead = await fetch(`${origin}/api/v2/quests/${questId}/participation`, {
         headers: { cookie: teammate.cookie },
       });
       expect(teammateRead.status).toBe(200);
-      expect((await teammateRead.json()).data.workerSettlement).toEqual({
-        status: 'NO_PAYMENT',
-        amountSatang: 0,
-        settledAt: null,
+      expect((await teammateRead.json()).data.workerSettlement).toMatchObject({
+        status: 'PAID',
+        amountSatang: 800,
       });
     } finally {
       for (const socket of sockets) socket.destroy();

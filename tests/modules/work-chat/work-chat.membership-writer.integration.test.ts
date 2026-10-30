@@ -150,25 +150,7 @@ describe('WorkChatMembershipWriter', () => {
       .where(eq(chatMessage.conversationId, created.conversationId));
     expect(memberships).toHaveLength(3);
     expect(memberships.filter(({ role }) => role === 'WORKER')).toHaveLength(2);
-    expect(messages).toHaveLength(3);
-    expect(new Set(messages.map(({ eventId }) => eventId)).size).toBe(3);
-    expect(
-      messages.every(
-        ({ kind, senderMembershipId, eventId, systemType, systemPayload }) =>
-          kind === 'SYSTEM' &&
-          senderMembershipId === null &&
-          eventId !== null &&
-          systemType === 'ACCEPTED_PARTICIPANT_JOINED' &&
-          systemPayload !== null &&
-          typeof systemPayload.action === 'object'
-      )
-    ).toBe(true);
-    expect(
-      messages.find(({ systemPayload }) => systemPayload?.memberId === workerIds[0])?.systemPayload
-    ).toMatchObject({
-      memberDisplayName: 'Chat Worker 0',
-      action: { type: 'OPEN_WORK_CONVERSATION' },
-    });
+    expect(messages).toHaveLength(0);
   });
 
   it('rejects an Assignment whose Worker does not match the transition', async () => {
@@ -299,7 +281,7 @@ describe('WorkChatMembershipWriter', () => {
     expect(updatedConversation?.questStatus).toBe('QUEST_COMPLETED');
     expect(departed?.leftAt?.toISOString()).toBe('2030-01-01T11:00:00.000Z');
     expect(stillCurrent?.leftAt).toBeNull();
-    expect(messages).toHaveLength(5);
+    expect(messages).toHaveLength(1);
     await expect(
       db
         .delete(quest)

@@ -11,6 +11,7 @@ import {
   normalizeIdentifier,
   normalizeReasonCatalog,
   normalizeReasonCode,
+  normalizeDecisionReasonText,
   normalizeRequestKey,
   normalizeRequestValue,
   normalizeResourceId,
@@ -20,6 +21,7 @@ import {
   type AdminActionReasonCatalog,
   type AdminActionSafeObject,
 } from './admin-action.policy';
+import { notifyAdminResourceUpdated } from './admin-update.delivery';
 
 export type AdminActionTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -71,6 +73,7 @@ type AdminActionBaseInput = {
   resourceId: string;
   requestKey: string;
   reasonCode?: string;
+  decisionReasonText?: string;
   request?: unknown;
   metadata?: unknown;
 };
@@ -123,6 +126,7 @@ type NormalizedActionInput = {
   resourceId: string;
   requestKey: string;
   reasonCode: string | undefined;
+  decisionReasonText: string | undefined;
   expectedVersion: number | null;
   expectedTimestamp: Date | null;
   metadata: AdminActionSafeObject;
@@ -206,6 +210,13 @@ const normalizeInput = async (
   const resourceId = normalizeResourceId(input.resourceId);
   const requestKey = normalizeRequestKey(input.requestKey);
   const rule = actionRuleFor(catalog, action, kind);
+  const decisionReasonText = normalizeDecisionReasonText(input.decisionReasonText);
+  if (kind === 'EVIDENCE_ACCESS' && decisionReasonText !== undefined) {
+    throw new AdminActionError(
+      'ADMIN_ACTION_INVALID_DECISION_REASON_TEXT',
+      'Admin decision text is only valid for command actions.'
+    );
+  }
   const reasonCode = normalizeReasonCode(rule, input.reasonCode);
   const expectedVersion =
     input.expectedVersion === undefined
@@ -235,6 +246,7 @@ const normalizeInput = async (
     requestKey,
     reasonCatalogVersion: catalog.version,
     reasonCode: reasonCode ?? null,
+    ...(decisionReasonText === undefined ? {} : { decisionReasonText }),
     expectedVersion,
     expectedTimestamp: expectedTimestamp?.toISOString() ?? null,
     request,
@@ -248,6 +260,7 @@ const normalizeInput = async (
     resourceId,
     requestKey,
     reasonCode,
+    decisionReasonText,
     expectedVersion,
     expectedTimestamp,
     metadata,
@@ -400,6 +413,7 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
       requestHash: input.requestHash,
       reasonCatalogVersion: catalog.version,
       reasonCode: input.reasonCode,
+      decisionReasonText: input.decisionReasonText,
       expectedVersion: input.expectedVersion,
       expectedTimestamp: input.expectedTimestamp,
       resultVersion: resourceVersion,
@@ -412,6 +426,8 @@ const runAdminActionInTransaction = async <T extends AdminActionSafeObject>(
   if (!created) {
     throw new AdminActionError('ADMIN_ACTION_WRITE_FAILED', 'Admin Action could not be recorded.');
   }
+
+  await notifyAdminResourceUpdated(transaction, 'ADMIN_ACTIVITY_LOG', created.id);
 
   return {
     resourceSummary,

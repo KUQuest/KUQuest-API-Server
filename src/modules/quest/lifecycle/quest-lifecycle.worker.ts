@@ -8,6 +8,7 @@ import {
   questEditRequest,
   questTeam,
   questTeamInvitation,
+  questV2TeamRewardAllocation,
 } from '@/database/schema/quest.schema';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
@@ -20,6 +21,7 @@ import {
   questParticipation,
   questStatus,
 } from '../shared/contracts/quest.contract';
+import { isMoneyHoldOpen, moneyHoldDurationMs } from '../shared';
 import { disputeSelfFileWindowMs } from '../admin/quest-dispute-admin.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import { readQuestEscrow, releaseQuestEscrow } from '../shared/escrow/quest-escrow.service';
@@ -40,6 +42,7 @@ import {
   failDueAtQuestV2Proofs,
   retryQuestV2ProofUploadCleanup,
 } from '../v2/proof';
+import { settleDueQuestV2RewardAllocation } from '../v2/reward-allocation';
 import {
   cleanupQuestV2ImageObjects,
   recoverQuestV2ImageUploadManifests,
@@ -87,7 +90,8 @@ export type QuestLifecycleWorkerError = {
     | 'quest-image-cleanup'
     | 'quest-proof-upload-cleanup'
     | 'work-chat-attachment-cleanup'
-    | 'provider-event-payload-purge';
+    | 'provider-event-payload-purge'
+    | 'team-reward-allocation-timeout';
   id?: string;
   cause: unknown;
 };
@@ -101,6 +105,7 @@ export type QuestLifecycleWorkerResult = {
   closedDisputeWindowQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
+  autoAllocatedTeamRewardQuestIds: string[];
   autoApprovedProofIds: string[];
   errors: QuestLifecycleWorkerError[];
 };
@@ -353,38 +358,44 @@ const dueQuestIds = async (now: Date, limit: number) =>
     .orderBy(asc(quest.dueAt), asc(quest.id))
     .limit(limit);
 
-const dueFailedQuestIds = async (now: Date, limit: number) =>
+const dueMoneyHoldReleaseIds = async (now: Date, limit: number) =>
   db
     .select({ id: quest.id })
     .from(quest)
-    .where(
-      and(
-        eq(quest.questStatus, questStatus.failed),
-        lte(quest.failedAt, new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000))
-      )
-    )
-    .orderBy(asc(quest.failedAt), asc(quest.id))
+    .where(lte(quest.moneyHoldStartedAt, new Date(now.getTime() - moneyHoldDurationMs)))
+    .orderBy(asc(quest.moneyHoldStartedAt), asc(quest.id))
     .limit(limit);
 
-const releaseFailedQuestReservation = async (questId: string, now: Date): Promise<boolean> =>
+const dueTeamRewardAllocationQuestIds = async (now: Date, limit: number) =>
+  db
+    .select({ questId: questV2TeamRewardAllocation.questId })
+    .from(questV2TeamRewardAllocation)
+    .where(
+      and(
+        eq(questV2TeamRewardAllocation.status, 'PENDING'),
+        lte(questV2TeamRewardAllocation.deadlineAt, now)
+      )
+    )
+    .orderBy(asc(questV2TeamRewardAllocation.deadlineAt), asc(questV2TeamRewardAllocation.questId))
+    .limit(limit);
+
+const releaseMoneyHold = async (questId: string, now: Date): Promise<boolean> =>
   db.transaction(async (transaction) => {
     const [current] = await transaction
       .select({
         id: quest.id,
         hirerId: quest.hirerId,
         fundingReservationId: quest.fundingReservationId,
-        failedAt: quest.failedAt,
-        questStatus: quest.questStatus,
+        moneyHoldStartedAt: quest.moneyHoldStartedAt,
       })
       .from(quest)
       .where(eq(quest.id, questId))
       .for('update');
     if (
       !current ||
-      current.questStatus !== questStatus.failed ||
+      !isMoneyHoldOpen(current) ||
       !current.fundingReservationId ||
-      !current.failedAt ||
-      current.failedAt.getTime() > now.getTime() - 7 * 24 * 60 * 60 * 1000
+      current.moneyHoldStartedAt.getTime() > now.getTime() - moneyHoldDurationMs
     )
       return false;
     // The Quest row lock above serializes the worker runs. This status read makes the
@@ -410,31 +421,25 @@ const dueDisputeWindowCloseIds = async (now: Date, limit: number) =>
     .where(
       and(
         eq(quest.apiVersion, questApiVersion.v2),
-        eq(quest.questStatus, questStatus.failed),
         isNull(quest.disputeWindowClosedNotifiedAt),
-        lte(quest.failedAt, new Date(now.getTime() - disputeSelfFileWindowMs))
+        lte(quest.moneyHoldStartedAt, new Date(now.getTime() - disputeSelfFileWindowMs))
       )
     )
-    .orderBy(asc(quest.failedAt), asc(quest.id))
+    .orderBy(asc(quest.moneyHoldStartedAt), asc(quest.id))
     .limit(limit);
 
 /** Tells the Hirer and every Worker once that the self-file Dispute window ended. */
 const closeDisputeWindow = async (questId: string, now: Date): Promise<boolean> =>
   db.transaction(async (transaction) => {
     const [current] = await transaction
-      .select({ hirerId: quest.hirerId, failedAt: quest.failedAt })
+      .select({ hirerId: quest.hirerId, moneyHoldStartedAt: quest.moneyHoldStartedAt })
       .from(quest)
-      .where(
-        and(
-          eq(quest.id, questId),
-          eq(quest.questStatus, questStatus.failed),
-          isNull(quest.disputeWindowClosedNotifiedAt)
-        )
-      )
+      .where(and(eq(quest.id, questId), isNull(quest.disputeWindowClosedNotifiedAt)))
       .for('update');
     if (
-      !current?.failedAt ||
-      current.failedAt.getTime() > now.getTime() - disputeSelfFileWindowMs
+      !current ||
+      !isMoneyHoldOpen(current) ||
+      current.moneyHoldStartedAt.getTime() > now.getTime() - disputeSelfFileWindowMs
     ) {
       return false;
     }
@@ -629,9 +634,20 @@ export const runQuestLifecycleWorker = async (
   }
 
   const releasedFailedQuestIds = await processIds(
-    (await dueFailedQuestIds(now, limit)).map(({ id }) => id),
+    (await dueMoneyHoldReleaseIds(now, limit)).map(({ id }) => id),
     'failure-hold-release',
-    (id) => releaseFailedQuestReservation(id, now),
+    (id) => releaseMoneyHold(id, now),
+    errors,
+    options.onError
+  );
+
+  const autoAllocatedTeamRewardQuestIds = await processIds(
+    (await dueTeamRewardAllocationQuestIds(now, limit)).map(({ questId }) => questId),
+    'team-reward-allocation-timeout',
+    async (id) => {
+      const result = await settleDueQuestV2RewardAllocation(id, now);
+      return !('outcome' in result);
+    },
     errors,
     options.onError
   );
@@ -697,6 +713,7 @@ export const runQuestLifecycleWorker = async (
     closedDisputeWindowQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
+    autoAllocatedTeamRewardQuestIds,
     autoApprovedProofIds,
     errors,
   };

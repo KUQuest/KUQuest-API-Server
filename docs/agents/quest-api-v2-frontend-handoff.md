@@ -254,6 +254,7 @@ Use this table:
 | Quest is assigned                               | Assignment, Work Chat, explicit Start Work  |
 | Quest is in progress                            | Proof Submission or completion confirmation |
 | Quest is terminal                               | Rating Review                               |
+| Quest is assigned through 1 day after terminal  | Conduct Report                              |
 
 Do not apply a SINGLE rule to a GROUP Quest.
 Do not apply a FIRST_COME_FIRST_SERVED rule to a CANDIDATE Quest.
@@ -441,16 +442,18 @@ The event contains no Quest or Candidate data.
 
 Failure and Dispute change types fire once per transition:
 
-| changeType              | When it fires                                                                                                                                                    | Who gets it                     |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                         | Hirer and the submitting Worker |
-| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                               | Hirer and the submitting Worker |
-| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure.                                                      | Hirer and the Workers           |
-| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. The 1-day self-file window starts.                                                                           | Hirer and the Workers           |
-| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees `failedAt + 1 day` has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time. | Hirer and the Workers           |
-| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                              | The filer only                  |
+| changeType              | When it fires                                                                                                                                                                                                                                                                                   | Who gets it                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                                                                                                                                                        | Hirer and the submitting Worker |
+| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                                                                                                                                                              | Hirer and the submitting Worker |
+| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure. In GROUP + FIRST_COME_FIRST_SERVED, a not-approved Proof fails the Quest only when no Worker completed and no Worker is still Active.                                               | Hirer and the Workers           |
+| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. A GROUP + FIRST_COME_FIRST_SERVED Quest that completes with a not-approved Worker also sends it right after `QUEST_COMPLETED`, to the Hirer, the Workers who were Active, and every not-approved Worker. The 1-day self-file window starts. | Hirer and the Workers           |
+| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees that the hold start + 1 day has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time.                                                                                                                       | Hirer and the Workers           |
+| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                                                                                                                                                             | The filer only                  |
 
 A Worker whose Assignment ended with the failure and who has no Proof left to review gets the socket closed after `QUEST_FAILED`, so that Worker may miss `DISPUTE_WINDOW_OPENED`. Read the Quest after reconnect and use `dispute` from REST.
+
+When a GROUP + FIRST_COME_FIRST_SERVED Quest completes with a not-approved Worker, the not-approved Workers keep the Quest socket while the money hold is open. The Workers who completed get the socket closed after `DISPUTE_WINDOW_OPENED`, so they receive it.
 
 Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
 after each event, and after reconnect. Continue paging as needed. REST is
@@ -1086,6 +1089,7 @@ assignment and capabilities:
     "headcount": 1,
     "activeWorkerCount": 1,
     "startedWorkerCount": 1,
+    "workers": null,
     "assignment": {
       "status": "ASSIGNMENT_ACTIVE",
       "startedAt": "2026-09-30T02:00:00.000Z"
@@ -1110,7 +1114,15 @@ Quest schedule fields such as startTime and dueAt, not this one.
 startedWorkerCount counts the Active Assignments that have a Start Work time. Use it with
 activeWorkerCount to show GROUP progress (for example "2 of 3 started"). It names no one.
 
-dispute and moneyHold are null unless the Quest is QUEST_FAILED. See section 13.2.
+workers is null except on GROUP + FIRST_COME_FIRST_SERVED Quests. There it lists
+`{ "id", "displayName" }` for every Worker whose Assignment was not cancelled,
+the caller included, in acceptance order. Completed and incomplete Workers stay
+in the list, so a finished Quest still names everyone who worked it. Use it for
+the Group FCFS roster instead of the Work Conversation participants, which drop
+each Worker who finishes before the others.
+
+dispute and moneyHold are null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED
+with a not-approved GROUP + FIRST_COME_FIRST_SERVED Worker. See section 13.3.
 The same two fields are on GET /api/v2/quests/:questId for the Hirer.
 
 capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
@@ -1251,7 +1263,7 @@ Other callers receive a masked 404 QUEST_NOT_FOUND.
 
 GROUP Quests (confirmed against the code):
 
-1. A Worker does **not** receive all Active Assignments. Other Workers' rows stay private. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress.
+1. A Worker does **not** receive other Workers' Assignment rows here. Use `activeWorkerCount` and `startedWorkerCount` from GET /api/v2/quests/:questId/participation to show roster progress. On GROUP + FIRST_COME_FIRST_SERVED Quests, read the names from that response's `workers` (every Worker whose Assignment was not cancelled, in acceptance order, also after settlement).
 2. `member.displayName` is present on every row. It is never empty; a Member with no name reads `Former member`.
 3. `startedAt` is returned to a Worker on their own row. It is null until that Worker uses Start Work.
 
@@ -1796,8 +1808,9 @@ joinCode and joinCodeExpiresAt.
 
 ### 9.10 Upload a private Candidate Team file
 
-Upload each private file before submitting the Team. Keep each returned fileId
-and send those UUIDs in the subsequent Team submission fileIds array.
+When the Team Leader wants to include files, upload each private file before
+submitting the Team. Keep each returned fileId and send those UUIDs in the
+subsequent Team submission fileIds array.
 
 Request:
 
@@ -1846,8 +1859,8 @@ Errors:
 
 ### 9.11 Submit a Candidate Team
 
-Upload the private files first, then submit the returned fileIds. Do not use
-Chat Attachment IDs.
+Upload private files first when the Team Leader wants to include them, then
+submit the returned fileIds. Files are optional. Do not use Chat Attachment IDs.
 
 Request:
 
@@ -1866,10 +1879,10 @@ Content-Type: application/json
 
 Fields:
 
-| Field   | Type       | Required | Rule                                                                          |
-| ------- | ---------- | -------- | ----------------------------------------------------------------------------- |
-| text    | string     | yes      | Non-blank submission text                                                     |
-| fileIds | UUID array | yes      | Returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
+| Field   | Type       | Required | Rule                                                                                   |
+| ------- | ---------- | -------- | -------------------------------------------------------------------------------------- |
+| text    | string     | yes      | Non-blank submission text                                                              |
+| fileIds | UUID array | no       | Optional returned private file IDs owned by Team Leader; allowed types; maximum 10 MiB |
 
 The Team Leader can submit only when the Team is full.
 Submission changes the Team to TEAM_SUBMITTED.
@@ -1885,6 +1898,7 @@ Submission response:
 }
 ```
 
+Omit fileIds or send an empty array when the Team has no files.
 Do not send a Chat Attachment ID as fileIds.
 Do not guess an ID conversion.
 
@@ -1983,6 +1997,37 @@ Errors:
 - 401 unauthorized
 - 404 `TEAM_FILE_NOT_FOUND`
 - 503 `TEAM_FILE_LINK_UNAVAILABLE`
+
+### 9.14 Read the Team Leader after selection
+
+After the Hirer selects a Candidate Team the Quest leaves `QUEST_OPEN`, and
+`GET /api/v2/quests/{questId}/teams` stays unavailable to Workers. Read the
+Team Leader from the Assignment instead. These fields are on
+`GET /api/v2/quests/{questId}/participation` (`data.assignment`),
+`GET /api/v2/quests/{questId}/assignments` (`items[]`), and
+`GET /api/v2/assignments/mine` (`items[]`):
+
+```json
+{
+  "teamRole": "LEADER",
+  "team": {
+    "id": "team-uuid",
+    "name": "Team A",
+    "leaderId": "member-uuid",
+    "members": [{ "id": "member-uuid", "displayName": "Somchai J." }]
+  }
+}
+```
+
+- `teamRole` is `LEADER`, `MEMBER`, or `null`.
+- `teamRole` and `team` are `null` for every Quest that is not `GROUP` +
+  `CANDIDATE`, and for a Worker outside the selected Team.
+- The fields stay readable in `QUEST_ASSIGNED`, `QUEST_IN_PROGRESS`, and after a
+  Hirer cancellation.
+- Only the Team Leader starts work, submits Proof, and confirms completion. A
+  Team Member who calls Start Work gets `START_WORK_NOT_REQUIRED`.
+- If the Team Leader leaves before selection, the earliest joined remaining
+  Member becomes Team Leader. If no Member remains, the Team disbands.
 
 ## 10. Start Work and Work Chat
 
@@ -2663,8 +2708,13 @@ Success status: HTTP 200.
 ```
 
 Approval settles the relevant money and can complete the Quest.
-Non-approval changes the Quest to QUEST_FAILED and creates the relevant admin
-review item.
+Non-approval makes the Assignment ASSIGNMENT_INCOMPLETE and creates the relevant
+admin review item. In GROUP + FIRST_COME_FIRST_SERVED, `questStatus` stays
+QUEST_IN_PROGRESS while another Worker is Active, and the other Workers can
+still send Proof until `dueAt`. When the last Active Worker has a result, the
+Quest becomes QUEST_COMPLETED if one Worker is ASSIGNMENT_COMPLETED, otherwise
+QUEST_FAILED. In every other mode, non-approval changes the Quest to
+QUEST_FAILED.
 The system can auto-approve a pending Proof after 24 hours.
 
 Errors include:
@@ -2809,11 +2859,11 @@ Hirer only. It is read-only: no Idempotency-Key, no ledger write, no event, no s
 
 `platformFeeSatang` is the Platform Fee the Platform keeps; it is 0 when the fee is part of the refund. `computedAt` is a UTC instant. `previewVersion` is an opaque token of the Quest facts behind the amounts. Money can move between preview and confirm, so treat the amounts as a preview and send the token back on `POST /cancel`.
 
-Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, or an Assigned Quest with a pending Quest Edit Request or no active Worker, as `POST /cancel` refuses).
+Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, an Assigned Quest with a pending Quest Edit Request or no active Worker, or a GROUP + FIRST_COME_FIRST_SERVED Quest in progress with a not-approved Worker, as `POST /cancel` refuses). Admin termination of that running Quest answers 409 QUEST_ACTION_NOT_ALLOWED.
 
 ### 13.3 Dispute window and money hold after failure
 
-`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED.
+`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with a not-approved GROUP + FIRST_COME_FIRST_SERVED Worker. The hold starts when the Quest becomes QUEST_FAILED or QUEST_COMPLETED; the not-approved decision alone opens no window.
 
 ```json
 {
@@ -2830,12 +2880,14 @@ Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST
 }
 ```
 
-- `dispute.windowEndsAt` is `failedAt + 1 day`; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
+- `dispute.windowEndsAt` is the hold start + 1 day; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
 - `dispute.myCase` is `{ id, displayId, status, createdAt }` or null. It is the viewer's own case only.
 - GROUP rule: each Member (the Hirer and every assigned Worker) can file one Dispute Case per Quest and sees only their own `myCase`.
 - File with `POST /api/v1/quests/:questId/disputes` and read your case with `GET /api/v1/quests/:questId/disputes/mine`. Filing after the window answers 409 `DISPUTE_CASE_WINDOW_EXPIRED`. (The existing code is used; there is no separate `DISPUTE_WINDOW_CLOSED` error.) Filing again returns the Member's existing case.
-- `moneyHold.releasesAt` is `failedAt + 7 days`. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
+- `moneyHold.releasesAt` is the hold start + 7 days. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
 - `moneyHold.heldSatang` is what the Hirer's Funding Reservation still holds. It is null for a Worker, who has no view of the Hirer's reservation; a Worker sees only `releasesAt` and `status`.
+
+A GROUP + FIRST_COME_FIRST_SERVED Worker whose Proof is not approved while the Quest goes on gets one data-only Push with `type` `PROOF_NOT_APPROVED`, `questId`, and `assignmentId`. A later failure of the Quest sends that Worker the `QUEST_FAILED` Push too. When the Quest completes instead, each not-approved Worker gets one data-only Push with `type` `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`, `questId`, and `assignmentId`, because the 1-day Dispute window opens then. Its `eventKey` is `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:<assignmentId>` and its deep link is `kuquest://quest/<questId>`. The Worker whose Proof was the last one not approved gets only this Push, not `PROOF_NOT_APPROVED`. Completed Workers get neither Push.
 
 Push (B7): the Server sends no iOS push (APNs) in this release. That is an infrastructure and product decision. Use the realtime events in section 5.2 and in-app banners on iOS.
 
@@ -2952,6 +3004,69 @@ Errors:
 - 409 REVIEW_WINDOW_EXPIRED
 - 400 INVALID_RATING
 - 400 INVALID_COMMENT
+- idempotency errors
+
+### 14.3 Conduct Report
+
+A Conduct Report is not a Rating Review. It asks an Admin to review how one Member behaved on the Quest. Filing moves no money, changes no Quest or Assignment state, and sends no notification. The reported Member never learns who filed. An Admin decides CONDUCT_REPORT_UPHELD or CONDUCT_REPORT_DISMISSED later.
+
+Read what the caller can file and what the caller filed:
+
+```http
+GET /api/v2/quests/:questId/conduct-reports
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "windowEndsAt": "2026-10-09T10:00:00.000Z",
+    "reportable": [{ "memberId": "worker-uuid", "reason": "CONDUCT_ABANDONED" }],
+    "items": []
+  }
+}
+```
+
+- Show a report action only for a pair in `reportable`. The Server decides it; do not rebuild the rules on the client.
+- `items` are the caller's own Conduct Reports: `{ id, displayId, questId, reportedMemberId, reason, detail, status, createdAt }`. `displayId` reads `CND-000123`. `status` is CONDUCT_REPORT_PENDING, CONDUCT_REPORT_UPHELD, or CONDUCT_REPORT_DISMISSED.
+- `windowEndsAt` is 1 day after the Quest became Terminal. It is null while the Quest is not Terminal.
+- Only the Hirer and Members with an Assignment can read; others get 404 QUEST_NOT_FOUND.
+
+Rules the Server applies to `reportable`:
+
+| Filer → Reported | reason               | When                                                                                                                                                                 |
+| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hirer → Worker   | CONDUCT_ABANDONED    | After `dueAt`, the Worker sent no Proof Submission and made no proof-free confirmation. A cancelled Assignment is excluded. GROUP + CANDIDATE: the Team Leader only. |
+| Worker → Hirer   | CONDUCT_OUT_OF_SCOPE | Any Worker with an Assignment.                                                                                                                                       |
+| Worker → Worker  | CONDUCT_NO_SHOW      | GROUP + FIRST_COME_FIRST_SERVED only, against another Worker as for CONDUCT_ABANDONED.                                                                               |
+
+The window opens at QUEST_ASSIGNED and closes at `windowEndsAt`. Each Member can be reported once per Quest, by any filer.
+
+File a Conduct Report:
+
+```http
+POST /api/v2/quests/:questId/conduct-reports
+Idempotency-Key: conduct-report-client-action-id
+Content-Type: application/json
+```
+
+```json
+{
+  "reportedMemberId": "worker-uuid",
+  "reason": "CONDUCT_ABANDONED",
+  "detail": "No work arrived before the deadline."
+}
+```
+
+`detail` is optional, 1 to 1000 characters, not blank. Success is HTTP 200 with one item in the `items` shape.
+
+Errors:
+
+- 404 QUEST_NOT_FOUND
+- 403 CONDUCT_REPORT_NOT_ALLOWED
+- 409 CONDUCT_REPORT_WINDOW_CLOSED
+- 409 CONDUCT_REPORT_ALREADY_EXISTS
+- 400 INVALID_DETAIL
 - idempotency errors
 
 ## 15. Candidate Inquiry Conversation
@@ -3121,7 +3236,7 @@ EDIT_REQUEST_FAILED.
 
 ## 17. Complete endpoint catalog
 
-The current Quest v2 route set has 46 endpoints:
+The current Quest v2 route set has 48 endpoints:
 
 |   # | Method | Path                                                                | Main actor                 |
 | --: | ------ | ------------------------------------------------------------------- | -------------------------- |
@@ -3172,6 +3287,8 @@ The current Quest v2 route set has 46 endpoints:
 |  44 | POST   | /api/v2/quests/:questId/completion-confirmation                     | Worker                     |
 |  45 | POST   | /api/v2/quests/:questId/reviews                                     | Hirer or Worker            |
 |  46 | PATCH  | /api/v2/quests/:questId/reviews/:reviewId                           | review author              |
+|  47 | GET    | /api/v2/quests/:questId/conduct-reports                             | Hirer or Assignment holder |
+|  48 | POST   | /api/v2/quests/:questId/conduct-reports                             | Hirer or Assignment holder |
 
 ## 18. Error handling checklist
 

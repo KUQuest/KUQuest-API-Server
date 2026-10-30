@@ -7,6 +7,9 @@ import {
   questApiVersion,
   questCandidateApplicationV2,
   questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  questV2TeamRewardAllocation,
+  questV2TeamRewardAllocationMember,
   questCommand,
   questConditionItem,
   questImage,
@@ -15,6 +18,7 @@ import {
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { chatConversation } from '@/database/schema/work-chat.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import {
   isRedFlagActive,
   isMemberRedFlagged,
@@ -26,6 +30,8 @@ import {
   notifyQuestBoardInvalidated,
   notifyQuestUpdate,
 } from '@/modules/quest/v2/realtime';
+import { notifyAdminQuestAndMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
+import { loadMemberSummaries } from '../../shared/member-summary';
 import {
   getEffectiveFundingReservationPolicy,
   readRecipientFundingSettlement,
@@ -323,12 +329,23 @@ export type QuestV2PublicDetail = {
 };
 
 export type QuestV2ParticipationDetail = QuestV2PublicDetail & {
-  assignment: { status: AssignmentStatus; startedAt: string | null };
+  assignment: {
+    status: AssignmentStatus;
+    startedAt: string | null;
+    teamRole: 'LEADER' | 'MEMBER' | null;
+    team: {
+      id: string;
+      name: string;
+      leaderId: string;
+      members: Array<{ id: string; displayName: string }>;
+    } | null;
+  };
   workerSettlement: {
     status: 'PAID' | 'PENDING' | 'NO_PAYMENT';
     amountSatang: number | null;
     settledAt: string | null;
   } | null;
+  workers: Array<{ id: string; displayName: string }> | null;
   startedWorkerCount: number;
   capabilities: { canViewOnly: boolean };
 };
@@ -1363,6 +1380,8 @@ const addQuestV2ImagesInTransaction = async (
     });
   }
 
+  await notifyAdminQuestUpdated(transaction, context.questId);
+
   const imageReferences = await selectQuestV2Images(transaction, context.questId);
   const response = materializeQuestV2ImageResponse(imageReferences);
   const completed = await completeQuestCommand({
@@ -1847,6 +1866,7 @@ const deleteQuestV2ImageInTransaction = async (
         deletedAt: now,
         positionOffset: maxQuestV2Images,
       });
+      await notifyAdminQuestUpdated(transaction, context.questId);
 
       const images = await selectQuestV2Images(transaction, context.questId);
       const response = materializeQuestV2ImageResponse(images);
@@ -2307,6 +2327,8 @@ const createQuestInTransaction = async (
       if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
       const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
       await notifyHirerQuestCreated(transaction, createdQuest.id);
+      await notifyAdminQuestUpdated(transaction, createdQuest.id);
+      await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
 
       return {
         kind: 'success',
@@ -2608,6 +2630,7 @@ const editQuestV2InTransaction = async (
         editedAt: now,
         editedByUserId: userId,
       });
+      await notifyAdminQuestAndMembersUpdated(transaction, questId);
       if (current.questStatus === questStatus.open) {
         await notifyQuestUpdate(transaction, {
           questId,
@@ -3072,9 +3095,6 @@ export const getQuestV2ParticipationDetail = async (
       assignmentStatus: questAssignment.assignmentStatus,
       assignmentStartedAt: questAssignment.startedAt,
       fundingReservationId: quest.fundingReservationId,
-      selectedTeamLeaderId: sql<
-        string | null
-      >`(select ${questCandidateTeamV2.leaderId} from ${questCandidateTeamV2} where ${questCandidateTeamV2.questId} = ${quest.id} and ${questCandidateTeamV2.state} = 'TEAM_SELECTED' limit 1)`,
       startedWorkerCount: startedWorkerCountExpression,
     })
     .from(quest)
@@ -3105,12 +3125,88 @@ export const getQuestV2ParticipationDetail = async (
     throw new Error(`Quest ${questId} has incomplete v2 Participation Detail data`);
   }
 
-  const [conditionItems, locations, images] = await Promise.all([
+  const groupFirstCome =
+    participationRow.v2Mode === 'FIRST_COME_FIRST_SERVED' &&
+    participationRow.v2Participation === 'GROUP';
+  const [conditionItems, locations, images, selectedTeamRows, groupWorkerRows] = await Promise.all([
     selectConditionItems(db, questId),
     selectLocations(db, questId),
     selectQuestV2Images(db, questId),
+    participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP'
+      ? db
+          .select({
+            id: questCandidateTeamV2.id,
+            name: questCandidateTeamV2.name,
+            leaderId: questCandidateTeamV2.leaderId,
+            memberId: questCandidateTeamV2Member.memberId,
+          })
+          .from(questCandidateTeamV2)
+          .innerJoin(
+            questCandidateTeamV2Member,
+            eq(questCandidateTeamV2Member.teamId, questCandidateTeamV2.id)
+          )
+          .where(
+            and(
+              eq(questCandidateTeamV2.questId, questId),
+              eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+            )
+          )
+          .orderBy(
+            asc(questCandidateTeamV2Member.joinedAt),
+            asc(questCandidateTeamV2Member.memberId)
+          )
+      : Promise.resolve([]),
+    // Every Worker who held a place on the Quest, in acceptance order. Settlement closes an
+    // early finisher's Work Chat membership, so the chat roster cannot name them afterwards.
+    groupFirstCome
+      ? db
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(
+            and(
+              eq(questAssignment.questId, questId),
+              ne(questAssignment.assignmentStatus, assignmentStatus.cancelled)
+            )
+          )
+          .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+      : Promise.resolve([]),
   ]);
   if (conditionItems.length === 0) throw new Error(`Quest ${questId} has no Condition Items`);
+
+  let selectedTeam: {
+    id: string;
+    name: string;
+    leaderId: string;
+    members: Array<{ id: string; displayName: string }>;
+  } | null = null;
+  if (selectedTeamRows.length > 0) {
+    const memberOf = await loadMemberSummaries(selectedTeamRows.map(({ memberId }) => memberId));
+    selectedTeam = {
+      id: selectedTeamRows[0].id,
+      name: selectedTeamRows[0].name,
+      leaderId: selectedTeamRows[0].leaderId,
+      members: selectedTeamRows.map(({ memberId }) => ({
+        id: memberId,
+        displayName: memberOf(memberId).displayName,
+      })),
+    };
+  }
+
+  let workers: QuestV2ParticipationDetail['workers'] = null;
+  if (groupFirstCome) {
+    const memberOf = await loadMemberSummaries(groupWorkerRows.map(({ workerId }) => workerId));
+    workers = groupWorkerRows.map(({ workerId }) => ({
+      id: workerId,
+      displayName: memberOf(workerId).displayName,
+    }));
+  }
+
+  const teamRole =
+    selectedTeam && selectedTeam.members.some(({ id }) => id === userId)
+      ? userId === selectedTeam.leaderId
+        ? 'LEADER'
+        : 'MEMBER'
+      : null;
 
   let workerSettlement: QuestV2ParticipationDetail['workerSettlement'] = null;
   if (participationRow.assignmentStatus !== 'ASSIGNMENT_ACTIVE') {
@@ -3124,12 +3220,43 @@ export const getQuestV2ParticipationDetail = async (
         settledAt: paid.settledAt.toISOString(),
       };
     } else {
-      const receivesTeamReward =
-        participationRow.v2Mode !== 'CANDIDATE' ||
-        participationRow.v2Participation !== 'GROUP' ||
-        row.selectedTeamLeaderId === userId;
+      const [teamAllocation] =
+        participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP'
+          ? await db
+              .select({
+                status: questV2TeamRewardAllocation.status,
+                rewardSatang: questV2TeamRewardAllocationMember.rewardSatang,
+              })
+              .from(questV2TeamRewardAllocation)
+              .leftJoin(
+                questV2TeamRewardAllocationMember,
+                and(
+                  eq(
+                    questV2TeamRewardAllocationMember.allocationId,
+                    questV2TeamRewardAllocation.id
+                  ),
+                  eq(questV2TeamRewardAllocationMember.memberId, userId)
+                )
+              )
+              .innerJoin(
+                questCandidateTeamV2Member,
+                eq(questCandidateTeamV2Member.teamId, questV2TeamRewardAllocation.teamId)
+              )
+              .where(
+                and(
+                  eq(questV2TeamRewardAllocation.questId, questId),
+                  eq(questCandidateTeamV2Member.memberId, userId)
+                )
+              )
+              .limit(1)
+          : [];
+      const candidateTeamAllocation =
+        participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP';
       const pending =
-        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' && receivesTeamReward;
+        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' &&
+        (candidateTeamAllocation
+          ? teamAllocation?.status === 'PENDING' || (teamAllocation?.rewardSatang ?? 0) > 0
+          : true);
       workerSettlement = {
         status: pending ? 'PENDING' : 'NO_PAYMENT',
         amountSatang: pending ? null : 0,
@@ -3166,8 +3293,11 @@ export const getQuestV2ParticipationDetail = async (
     assignment: {
       status: participationRow.assignmentStatus,
       startedAt: participationRow.assignmentStartedAt?.toISOString() ?? null,
+      teamRole,
+      team: teamRole ? selectedTeam : null,
     },
     startedWorkerCount: Number(row.startedWorkerCount),
+    workers,
     capabilities: {
       canViewOnly: isTerminalQuestStatus(participationRow.questStatus),
     },

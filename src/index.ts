@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { env, validateRuntimeEnv } from '@/config/env';
+import { ensureAdminUpdateListener } from '@/modules/admin';
 import { startMemberBanWalletFreezeScheduler } from '@/modules/admin/member-penalty';
 import { startPayoutScheduler } from '@/modules/payout';
 import { startPushScheduler } from '@/modules/push';
@@ -9,6 +10,7 @@ import { startQuestLifecycleScheduler, runQuestLifecycleWorker } from '@/modules
 validateRuntimeEnv();
 
 await ensureInitialMoneyPolicy();
+await ensureAdminUpdateListener();
 
 app.listen({
   hostname: env.host,

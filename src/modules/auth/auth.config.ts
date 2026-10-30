@@ -1,6 +1,7 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import * as schema from '@/database/schema/auth.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import { readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
 import { createWallet } from '@/modules/wallet/wallet.service';
 
@@ -96,19 +97,18 @@ export const createStudentAuth = ({
     },
     trustedOrigins: getTrustedOrigins(true),
     databaseHooks: {
-      ...(provisionWalletOnCreate
-        ? {
-            user: {
-              create: {
-                after: async (user) => {
-                  if (user && 'id' in user && typeof user.id === 'string') {
-                    await createWallet(user.id);
-                  }
-                },
-              },
-            },
-          }
-        : {}),
+      user: {
+        create: {
+          after: async (user) => {
+            if (user && 'id' in user && typeof user.id === 'string') {
+              if (provisionWalletOnCreate) await createWallet(user.id);
+              await db.transaction((transaction) =>
+                notifyAdminResourceUpdated(transaction, 'MEMBER', user.id)
+              );
+            }
+          },
+        },
+      },
       session: {
         create: {
           before: async (session) => {

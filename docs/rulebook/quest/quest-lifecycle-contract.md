@@ -20,7 +20,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - An eligible Prospective Worker joins only by accepting the current Join Code, until the Team reaches its entered Team `headcount`. A Candidate may belong to one Team for one Quest.
 - A Join Code is valid for 24 hours. The Team Leader may regenerate it; the prior code becomes invalid.
 - A forming Member may leave. The Team Leader may remove another Member. If the Team Leader leaves, leadership transfers to the earliest joined remaining Member. If the last Member leaves, the Team disbands.
-- At the entered Team `headcount`, the Team Leader explicitly submits the Team to the Hirer. The submission must contain text and at least one file. Each file follows the type and size rules for a Work Conversation Attachment. A submitted Team is immutable and its Join Code is invalid.
+- At the entered Team `headcount`, the Team Leader explicitly submits the Team to the Hirer. The submission must contain text and may contain files. Each file follows the type and size rules for a Work Conversation Attachment. A submitted Team is immutable and its Join Code is invalid.
 - A submitted Team cannot withdraw.
 - Hirer selection creates the accepted Assignment roster and rejects every other Candidate application and submitted Team in the same transaction.
 - A Candidate Quest still `QUEST_OPEN` at `startTime` cancels.
@@ -46,7 +46,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 2. No Hirer choice cancels the Quest.
 3. To proceed, every current Active Worker has 10 minutes to consent.
 4. The consent view shows the exact new Quest Reward and `dueAt`.
-5. A decline or timeout cancels the Quest.
+5. A decline or timeout cancels the Quest. Workers recorded in the consent roster retain read access to their own response and the cancellation result after their Assignment ends. Unrelated Members cannot read the process.
 6. All consent changes the Quest from `QUEST_OPEN` to `QUEST_ASSIGNED`.
 7. Every current Active Worker must still press Start Work by `dueAt`.
 8. The Quest changes to `QUEST_IN_PROGRESS` after every required Start Work action.
@@ -59,12 +59,14 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 - The Hirer approves or does not approve each submitted Proof Submission.
 - If the Hirer has not decided 24 hours after a Proof Submission is sent, the Server records `PROOF_APPROVED`.
 - Approved or proof-free Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
-- For approved or proof-free Team work in a `GROUP + CANDIDATE` Quest, the Team Leader receives the complete Worker Reward pool for every published Quest `headcount` slot. Other Team Member Assignments receive no Quest Reward.
+- Approved or proof-free `GROUP + CANDIDATE` Team work opens a 24-hour Team Reward Allocation window after the Quest becomes `QUEST_COMPLETED`. The Team Leader assigns each teammate a percentage; the Leader receives the remainder. Teammate percentages cannot exceed 100% in total. If no allocation is submitted before the deadline, the Server applies an equal split. Every member's Assignment is completed when the work succeeds; payment waits for the allocation and then goes directly from Quest Escrow to each member's Earnings Balance.
 - Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
 - A missing required Team Proof Submission or Team confirmation makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, Hirer non-approval makes only the affected Assignment `ASSIGNMENT_INCOMPLETE`. The Quest keeps its State until every Worker has a final result (see [Quest Mode Matrix Contract](quest-mode-matrix-contract.md)). All other Quest modes keep the rule in the next bullet.
 - Hirer non-approval, a missing required submission, a missing proof-free confirmation, or a missing Start Work action at `dueAt` makes the Quest `QUEST_FAILED`.
 - Failure gives the affected Assignment `ASSIGNMENT_INCOMPLETE`. No Rework or second Proof Submission exists.
-- In a `GROUP` Quest, an Assignment that completed before another Assignment fails keeps its Quest Reward. The Quest remains `QUEST_FAILED`.
+- In a `GROUP` Quest, an Assignment that completed before another Assignment fails keeps its Quest Reward. When the Quest becomes `QUEST_FAILED`, it remains `QUEST_FAILED`.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, a Quest with at least one `ASSIGNMENT_COMPLETED` Assignment and one `ASSIGNMENT_INCOMPLETE` Assignment ends as `QUEST_COMPLETED` when the Hirer did not approve only some Proof Submissions.
 
 ## Cancellation settlement
 
@@ -72,7 +74,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `QUEST_OPEN`                | Refund the Hirer 100% of Quest Escrow.                                                                                                                                |
 | `QUEST_ASSIGNED`            | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
-| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool only to the Team Leader. The Hirer receives no refund.      |
+| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool to the Team Leader. The Hirer receives no refund.           |
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 

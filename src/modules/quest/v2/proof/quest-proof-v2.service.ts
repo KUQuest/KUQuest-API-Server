@@ -24,6 +24,11 @@ import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
 
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import {
+  enqueueProofNotApprovedPush,
+  enqueueQuestCompletedDisputeWindowPush,
+  enqueueQuestFailedPush,
+} from '../lifecycle/quest-failed-v2.push';
+import {
   completeQuestCommand,
   findOpenQuestCommandPayloads,
   openQuestCommand,
@@ -32,10 +37,10 @@ import {
   type QuestCommandOutcomeCode,
   type QuestCommandWork,
 } from '../../shared/command/quest-command.service';
-import { createAdminDisputeCaseInTransaction } from '../../admin';
 
 import {
   failQuestV2InTransaction,
+  markAssignmentIncompleteV2InTransaction,
   settleApprovedQuestV2ProofInTransaction,
   settleProofFreeQuestV2InTransaction,
 } from '../../settlement';
@@ -541,6 +546,26 @@ const activeAssignmentWorkerIds = async (
     );
   return assignments.map(({ workerId }) => workerId);
 };
+
+const assignmentsWithStatus = (
+  transaction: QuestTransaction,
+  questId: string,
+  statuses: ('ASSIGNMENT_ACTIVE' | 'ASSIGNMENT_INCOMPLETE')[]
+) =>
+  transaction
+    .select({ assignmentId: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(
+      and(eq(questAssignment.questId, questId), inArray(questAssignment.assignmentStatus, statuses))
+    );
+
+const failureRecipientWorkerIds = async (transaction: QuestTransaction, questId: string) =>
+  (
+    await assignmentsWithStatus(transaction, questId, [
+      'ASSIGNMENT_ACTIVE',
+      'ASSIGNMENT_INCOMPLETE',
+    ])
+  ).map(({ workerId }) => workerId);
 
 const failedQuestPendingProofParticipantIds = async (
   transaction: QuestTransaction,
@@ -1873,6 +1898,7 @@ export const confirmQuestV2Completion = async (
           throw new Error('Quest API v2 Completion Confirmation insert returned no row');
         const activeWorkerIds = await activeAssignmentWorkerIds(transaction, questId);
         let questStatus: QuestV2State = currentQuestState;
+        let allocationPending = false;
         const groupFcfs =
           current.v2Mode === questV2Mode.firstComeFirstServed &&
           current.v2Participation === questV2Participation.group;
@@ -1885,9 +1911,12 @@ export const confirmQuestV2Completion = async (
             checks.owner.workerId!,
             memberId
           );
-          if (settlement) questStatus = 'QUEST_COMPLETED';
+          if (settlement) {
+            questStatus = 'QUEST_COMPLETED';
+            allocationPending = settlement.allocationPending === true;
+          }
         } else if (await allCompletionObligationsConfirmed(transaction, current, questId)) {
-          await settleProofFreeQuestV2InTransaction(
+          const settlement = await settleProofFreeQuestV2InTransaction(
             transaction,
             questId,
             `quest-v2-completion:${questId}`,
@@ -1896,6 +1925,7 @@ export const confirmQuestV2Completion = async (
             memberId
           );
           questStatus = 'QUEST_COMPLETED';
+          allocationPending = settlement?.allocationPending === true;
         }
         const participants = await proofParticipantIds(transaction, checks.owner);
         const closeMemberIds =
@@ -1913,7 +1943,7 @@ export const confirmQuestV2Completion = async (
             questId,
             'QUEST_COMPLETED',
             [current.hirerId, ...activeWorkerIds],
-            activeWorkerIds
+            allocationPending ? [] : activeWorkerIds
           );
         }
         return {
@@ -2174,6 +2204,9 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
 
       const activeWorkerIds = await activeAssignmentWorkerIds(transaction, input.questId);
       let questStatus: QuestV2State = current.questState as QuestV2State;
+      let allocationPending = false;
+      let holdsRemainder = false;
+      let changedAssignmentIds: string[] = [];
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
           transaction,
@@ -2184,6 +2217,9 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
         );
         questStatus = settlement.questStatus as QuestV2State;
+        allocationPending = settlement.allocationPending;
+        holdsRemainder = settlement.holdsRemainder;
+        changedAssignmentIds = settlement.completedAssignmentIds;
         await recordAssignmentAudits(
           transaction,
           input.actor,
@@ -2193,34 +2229,47 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         );
         await recordAudit(transaction, {
           ...auditActorFor(input.actor),
-          action: 'QUEST_REWARD_SETTLED',
+          action: settlement.allocationPending
+            ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+            : 'QUEST_REWARD_SETTLED',
           resourceType: 'QUEST_REWARD',
           resourceId: input.questId,
           oldValue: { state: 'QUEST_REWARD_HELD' },
           newValue: {
-            state: 'QUEST_REWARD_SETTLED',
+            state: settlement.allocationPending
+              ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+              : 'QUEST_REWARD_SETTLED',
             paidSatang: settlement.paidSatang,
             assignmentIds: settlement.completedAssignmentIds,
           },
           createdAt: input.now,
         });
       } else {
-        const failure = await failQuestV2InTransaction(
-          transaction,
-          input.questId,
-          subject.assignmentIds,
-          commandId,
-          input.now,
-          input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
-        );
-        if (current.questState === 'QUEST_IN_PROGRESS') {
-          await createAdminDisputeCaseInTransaction(transaction, {
-            questId: input.questId,
-            filerUserId: subject.workerId,
-            now: input.now,
-          });
-        }
+        const actorId = input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null;
+        const reviewsEachWorker =
+          current.questState === 'QUEST_IN_PROGRESS' &&
+          current.v2Mode === questV2Mode.firstComeFirstServed &&
+          current.v2Participation === questV2Participation.group;
+        const failure = reviewsEachWorker
+          ? await markAssignmentIncompleteV2InTransaction(
+              transaction,
+              input.questId,
+              subject.assignmentId,
+              commandId,
+              input.now,
+              actorId
+            )
+          : await failQuestV2InTransaction(
+              transaction,
+              input.questId,
+              subject.assignmentIds,
+              commandId,
+              input.now,
+              actorId
+            );
         questStatus = failure.questStatus;
+        holdsRemainder = failure.questStatus === 'QUEST_COMPLETED';
+        changedAssignmentIds = failure.incompleteAssignmentIds;
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments
           .filter(
@@ -2278,11 +2327,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           ? await failedQuestPendingProofParticipantIds(transaction, input.questId, current.dueAt)
           : [];
       const closesAffected =
-        !terminalFailure &&
-        questStatus !== 'QUEST_COMPLETED' &&
-        (questStatus === 'QUEST_FAILED' || input.decision === 'PROOF_APPROVED')
-          ? proofMembers
-          : [];
+        !terminalFailure && questStatus !== 'QUEST_COMPLETED' ? proofMembers : [];
       await emitQuestUpdate(
         transaction,
         input.questId,
@@ -2291,6 +2336,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         closesAffected
       );
       if (terminalFailure) {
+        const failureRecipientIds = await failureRecipientWorkerIds(transaction, input.questId);
         const closeMemberIds = activeWorkerIds.filter(
           (workerId) => !pendingAfterFailure.includes(workerId)
         );
@@ -2298,21 +2344,67 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           transaction,
           input.questId,
           'QUEST_FAILED',
-          [current.hirerId, ...activeWorkerIds],
+          [current.hirerId, ...failureRecipientIds],
           closeMemberIds
         );
         await emitQuestUpdate(transaction, input.questId, 'DISPUTE_WINDOW_OPENED', [
           current.hirerId,
-          ...activeWorkerIds,
+          ...failureRecipientIds,
         ]);
+        await enqueueQuestFailedPush(transaction, {
+          recipientMemberIds: failureRecipientIds,
+          questId: input.questId,
+          reason: 'PROOF_NOT_APPROVED',
+          now: input.now,
+        });
       } else if (current.questState !== 'QUEST_COMPLETED' && questStatus === 'QUEST_COMPLETED') {
-        await emitQuestUpdate(
-          transaction,
-          input.questId,
-          'QUEST_COMPLETED',
-          [current.hirerId, ...activeWorkerIds],
-          activeWorkerIds
-        );
+        if (holdsRemainder) {
+          const incomplete = await assignmentsWithStatus(transaction, input.questId, [
+            'ASSIGNMENT_INCOMPLETE',
+          ]);
+          const incompleteWorkerIds = incomplete.map(({ workerId }) => workerId);
+          const completedWorkerIds = activeWorkerIds.filter(
+            (workerId) => !incompleteWorkerIds.includes(workerId)
+          );
+          const recipientIds = [current.hirerId, ...activeWorkerIds, ...incompleteWorkerIds];
+          await emitQuestUpdate(transaction, input.questId, 'QUEST_COMPLETED', recipientIds);
+          await emitQuestUpdate(
+            transaction,
+            input.questId,
+            'DISPUTE_WINDOW_OPENED',
+            recipientIds,
+            completedWorkerIds
+          );
+          await enqueueQuestCompletedDisputeWindowPush(transaction, {
+            recipients: incomplete,
+            questId: input.questId,
+            now: input.now,
+          });
+        } else {
+          await emitQuestUpdate(
+            transaction,
+            input.questId,
+            'QUEST_COMPLETED',
+            [current.hirerId, ...activeWorkerIds],
+            allocationPending ? [] : activeWorkerIds
+          );
+        }
+      }
+      if (questStatus === 'QUEST_IN_PROGRESS' && input.decision === 'PROOF_NOT_APPROVED') {
+        await enqueueProofNotApprovedPush(transaction, {
+          recipientMemberId: subject.workerId,
+          assignmentId: subject.assignmentId,
+          questId: input.questId,
+          now: input.now,
+        });
+      }
+      let relatedMemberIds: string[] = [];
+      if (changedAssignmentIds.length > 0) {
+        const assignments = await transaction
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(inArray(questAssignment.id, [...new Set(changedAssignmentIds)]));
+        relatedMemberIds = [...new Set(assignments.map(({ workerId }) => workerId))];
       }
 
       return {
@@ -2320,6 +2412,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         result: { proof, questStatus },
         resourceType: 'quest-v2-proof-command',
         resourceId: proof.id,
+        relatedMemberIds,
       };
     },
     toSnapshot: reviewSnapshotFor,
@@ -2505,7 +2598,7 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
     }
     const assignmentIds = await dueQuestV2ProofFailureAssignmentIds(transaction, current, questId);
     if (assignmentIds.length === 0) return false;
-    const workerIds = await activeAssignmentWorkerIds(transaction, questId);
+    const workerIds = await failureRecipientWorkerIds(transaction, questId);
     const pendingProofWorkerIds = await failedQuestPendingProofParticipantIds(
       transaction,
       questId,
@@ -2537,6 +2630,12 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       current.hirerId,
       ...workerIds,
     ]);
+    await enqueueQuestFailedPush(transaction, {
+      recipientMemberIds: workerIds,
+      questId,
+      reason: 'DUE_AT_MISSED',
+      now,
+    });
     return true;
   });
 

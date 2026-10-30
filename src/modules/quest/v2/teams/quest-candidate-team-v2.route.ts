@@ -228,7 +228,7 @@ export const questCandidateTeamV2Route = new Elysia({
       tags: ['Quest Candidate Teams v2'],
       summary: 'Submit a full Candidate Team',
       description:
-        'The Team Leader submits a full, immutable Candidate Team with text and at least one valid Work Conversation Attachment file.',
+        'The Team Leader submits a full, immutable Candidate Team with text and optional valid Work Conversation Attachment files.',
       operationId: 'submitQuestCandidateTeamV2',
       security: betterAuthSecurity,
     },

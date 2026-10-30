@@ -498,7 +498,7 @@ const expectedV2OperationContracts: Record<
   },
   submitQuestCandidateTeamV2: {
     bodyProperties: ['text', 'fileIds'],
-    requiredBodyProperties: ['text', 'fileIds'],
+    requiredBodyProperties: ['text'],
     responseStatuses: ['200', '400', '401', '404', '409', '503'],
   },
   submitQuestV2ProofSubmission: {
@@ -669,6 +669,7 @@ const createOpenGroupCandidateQuest = async (
 ) => {
   const id = randomUUID();
   questIds.push(id);
+  const failedAt = overrides.questStatus === 'QUEST_FAILED' ? new Date() : null;
   await db.insert(quest).values({
     id,
     hirerId: hirer.id,
@@ -690,7 +691,8 @@ const createOpenGroupCandidateQuest = async (
     startTime: new Date('2030-01-01T10:00:00.000Z'),
     dueAt: new Date('2030-01-01T11:00:00.000Z'),
     proofRequired: true,
-    failedAt: overrides.questStatus === 'QUEST_FAILED' ? new Date() : null,
+    failedAt,
+    moneyHoldStartedAt: failedAt,
     ...overrides,
   });
   return id;
@@ -1337,7 +1339,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     );
     const secondApplicationId = (await secondApplication.json()).data.id as string;
     const singleCandidateSelection = await request(
-      `/api/v2/quests/${singleCandidateQuestId}/applications/${firstApplicationId}/select`,
+      `/api/v2/quests/${singleCandidateQuestId}/applications/${secondApplicationId}/select`,
       'POST',
       hirer.id,
       { 'idempotency-key': 'quest-migration-matrix-single-candidate-select' }
@@ -1352,8 +1354,8 @@ describe('Quest API v1 to v2 migration verification', () => {
         .from(questCandidateApplicationV2)
         .where(eq(questCandidateApplicationV2.questId, singleCandidateQuestId))
     ).toEqual([
-      { memberId: worker.id, state: 'APPLICATION_SELECTED' },
-      { memberId: secondWorker.id, state: 'APPLICATION_REJECTED' },
+      { memberId: secondWorker.id, state: 'APPLICATION_SELECTED' },
+      { memberId: worker.id, state: 'APPLICATION_REJECTED' },
     ]);
     expect(
       await db
@@ -1633,7 +1635,7 @@ describe('Quest API v1 to v2 migration verification', () => {
         .select({ kind: chatMessage.kind })
         .from(chatMessage)
         .where(eq(chatMessage.conversationId, conversation!.id))
-    ).toHaveLength(3);
+    ).toHaveLength(0);
     expect(
       await db
         .select({ processingStatus: chatTransitionCommand.processingStatus })
@@ -1714,6 +1716,36 @@ describe('Quest API v1 to v2 migration verification', () => {
         .where(eq(questV2ProofSubmission.id, proofSubmissionId))
     ).toEqual([{ status: 'PROOF_APPROVED' }]);
 
+    const pendingAllocation = await request(
+      `/api/v2/quests/${questId}/reward-allocation`,
+      'GET',
+      winningTeam.leaderId
+    );
+    expect(pendingAllocation.status).toBe(200);
+    expect((await pendingAllocation.json()).data).toMatchObject({
+      status: 'PENDING',
+      leaderId: winningTeam.leaderId,
+      totalRewardSatang: 2_000,
+      viewerIsLeader: true,
+    });
+    const winningTeammateId =
+      winningTeam.leaderId === worker.id ? secondWorker.id : fourthWorker.id;
+    const submittedAllocation = await jsonRequest(
+      `/api/v2/quests/${questId}/reward-allocation`,
+      'POST',
+      winningTeam.leaderId,
+      {
+        teammateShares: [{ memberId: winningTeammateId, percentageBasisPoints: 4_000 }],
+      },
+      'quest-migration-team-reward-allocation'
+    );
+    expect(submittedAllocation.status).toBe(200);
+    expect((await submittedAllocation.json()).data).toMatchObject({
+      status: 'SUBMITTED',
+      totalRewardSatang: 2_000,
+      viewerIsLeader: true,
+    });
+
     const reservation = await readTestQuestEscrow({
       ownerUserId: hirer.id,
       questId,
@@ -1725,9 +1757,9 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(reserveLedger?.eventType).toBe('FUNDING_RESERVE');
     const settlements = await listTestQuestEscrowSettlements(reservation!.id);
     expect(settlements).toHaveLength(2);
-    expect(
-      settlements.every(({ recipientUserId }) => recipientUserId === winningTeam.leaderId)
-    ).toBe(true);
+    expect(settlements.map(({ recipientUserId }) => recipientUserId).sort()).toEqual(
+      [winningTeam.leaderId, winningTeammateId].sort()
+    );
     expect(
       settlements.reduce((total, settlement) => total + settlement.recipientAmountSatang, 0)
     ).toBe(2_000);
@@ -1953,7 +1985,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(rejectedReview.status).toBe(200);
     expect((await rejectedReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_NOT_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_IN_PROGRESS',
     });
     expect(
       (
@@ -1981,8 +2013,11 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(pendingReview.status).toBe(200);
     expect((await pendingReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_COMPLETED',
     });
+    expect(
+      await readTestQuestEscrow({ ownerUserId: hirer.id, questId: failedQuest.questId })
+    ).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_020 });
 
     const autoQuest = await createInProgressQuest({
       mode: 'FIRST_COME_FIRST_SERVED',

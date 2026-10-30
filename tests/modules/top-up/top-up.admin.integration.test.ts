@@ -1,6 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { paymentTopUp, paymentTopUpStatusHistory } from '@/database/schema/payment.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { ensureInitialMoneyPolicy, ensureWallet, positiveSatang } from '@/modules/wallet';
 import { initiateTopUp, quoteTopUp } from '@/modules/top-up';
@@ -153,6 +154,10 @@ describe('Admin Top-Up API routes', () => {
       new Request(`http://localhost/api/v1/admin/top-ups/${fakeId}`)
     );
     expect(unauthenticatedDetail.status).toBe(401);
+    const unauthenticatedHistory = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${fakeId}/status-history`)
+    );
+    expect(unauthenticatedHistory.status).toBe(401);
 
     const unauthenticatedRetry = await app.handle(
       new Request(`http://localhost/api/v1/admin/top-ups/events/${fakeId}/retry`, {
@@ -272,6 +277,65 @@ describe('Admin Top-Up API routes', () => {
     expect(missingResponse.status).toBe(404);
     expect(missingBody.success).toBe(false);
     expect(missingBody.error.code).toBe('TOP_UP_NOT_FOUND');
+  });
+
+  it('returns recorded Top-Up status history with its occurrence time, including failure', async () => {
+    const userId = await seedTopUpMember();
+    const topUpId = await seedDatedTopUp(
+      userId,
+      new FakeInboundPaymentProvider(),
+      new Date().toISOString()
+    );
+    const providerOccurredAt = new Date('2026-08-27T00:00:00.000Z');
+    await db
+      .update(paymentTopUp)
+      .set({ topUpStatus: 'FAILED', updatedAt: providerOccurredAt })
+      .where(eq(paymentTopUp.id, topUpId));
+    await db.insert(paymentTopUpStatusHistory).values({
+      topUpId,
+      fromStatus: 'PENDING',
+      toStatus: 'FAILED',
+      providerStatus: 'FAILED',
+      source: 'PROVIDER',
+      reason: 'Provider reported a failed payment.',
+      occurredAt: providerOccurredAt,
+    });
+
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${topUpId}/status-history`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const body = (await response.json()) as {
+      success: boolean;
+      data: Array<{
+        fromStatus: string | null;
+        toStatus: string;
+        source: string;
+        occurredAt: string;
+      }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.success).toBe(true);
+    expect(body.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fromStatus: 'PENDING',
+          toStatus: 'FAILED',
+          source: 'PROVIDER',
+          occurredAt: providerOccurredAt.toISOString(),
+        }),
+      ])
+    );
+
+    const missing = await app.handle(
+      new Request(`http://localhost/api/v1/admin/top-ups/${crypto.randomUUID()}/status-history`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error.code).toBe('TOP_UP_NOT_FOUND');
   });
 
   it('pages newest-first through every Top-Up without dropping rows that share the anchor millisecond', async () => {

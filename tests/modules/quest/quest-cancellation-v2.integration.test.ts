@@ -119,6 +119,7 @@ const createV2Quest = async (input: {
     input.headcount ?? (participation === 'SINGLE' ? 1 : Math.max(2, workers.length));
   const questId = randomUUID();
   questIds.push(questId);
+  const failedAt = input.status === 'QUEST_FAILED' ? new Date() : null;
 
   await db.insert(quest).values({
     id: questId,
@@ -131,7 +132,8 @@ const createV2Quest = async (input: {
     v2Mode: mode,
     v2Participation: participation,
     questStatus: input.status,
-    failedAt: input.status === 'QUEST_FAILED' ? new Date() : null,
+    failedAt,
+    moneyHoldStartedAt: failedAt,
     rewardSatang: input.status === 'QUEST_DRAFT' ? null : rewardSatang,
     questFundingTotalSatang:
       input.status === 'QUEST_DRAFT' ? null : rewardSatang + platformFeeSatang,

@@ -158,7 +158,7 @@ stateDiagram-v2
     QUEST_ASSIGNED --> QUEST_IN_PROGRESS: required Start Work actions
     QUEST_ASSIGNED --> QUEST_FAILED: no required start by dueAt
     QUEST_IN_PROGRESS --> QUEST_COMPLETED: required work completes
-    QUEST_IN_PROGRESS --> QUEST_FAILED: non-approval or dueAt failure
+    QUEST_IN_PROGRESS --> QUEST_FAILED: non-approval (not GROUP + FCFS) or dueAt failure
     QUEST_OPEN --> QUEST_CANCELLED: Candidate startTime / cancellation / underfilled refusal
     QUEST_ASSIGNED --> QUEST_CANCELLED: Hirer cancellation
     QUEST_IN_PROGRESS --> QUEST_CANCELLED: Hirer cancellation

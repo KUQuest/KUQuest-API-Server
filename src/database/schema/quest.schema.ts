@@ -88,6 +88,7 @@ export const quest = pgTable(
     startTime: time('start_time').notNull(),
     dueAt: time('due_at'),
     failedAt: time('failed_at'),
+    moneyHoldStartedAt: time('money_hold_started_at'),
     disputeWindowClosedNotifiedAt: time('dispute_window_closed_notified_at'),
     proofRequired: boolean('proof_required').default(true).notNull(),
     cancelledAt: time('cancelled_at'),
@@ -143,6 +144,14 @@ export const quest = pgTable(
       sql`(${table.failedAt} IS NOT NULL) = (${table.questStatus} = 'QUEST_FAILED')`
     ),
     check(
+      'quest_money_hold_started_at_check',
+      sql`CASE ${table.questStatus}
+        WHEN 'QUEST_FAILED' THEN ${table.moneyHoldStartedAt} IS NOT DISTINCT FROM ${table.failedAt}
+        WHEN 'QUEST_COMPLETED' THEN true
+        ELSE ${table.moneyHoldStartedAt} IS NULL
+      END`
+    ),
+    check(
       'quest_participation_headcount_check',
       sql`(
         ${table.apiVersion} <> 'v2' AND
@@ -175,6 +184,7 @@ export const quest = pgTable(
     ),
     index('quest_hirer_id_idx').on(table.hirerId),
     index('quest_status_idx').on(table.questStatus),
+    index('quest_money_hold_started_at_idx').on(table.moneyHoldStartedAt),
     index('quest_mode_idx').on(table.mode),
     index('quest_tag_id_idx').on(table.tagId),
     index('quest_start_time_idx').on(table.startTime),
@@ -562,6 +572,77 @@ export const questCandidateTeamV2Member = pgTable(
   (table) => [
     primaryKey({ columns: [table.teamId, table.memberId] }),
     index('quest_candidate_team_v2_member_member_id_idx').on(table.memberId),
+  ]
+);
+
+/** Holds a completed Candidate Team Reward until its Leader submits an allocation. */
+export const questV2TeamRewardAllocation = pgTable(
+  'quest_v2_team_reward_allocation',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => questCandidateTeamV2.id),
+    leaderId: uuid('leader_id')
+      .notNull()
+      .references(() => authUser.id),
+    status: varchar('status', { length: 24 })
+      .$type<'PENDING' | 'SUBMITTED' | 'AUTO_EQUAL'>()
+      .default('PENDING')
+      .notNull(),
+    totalRewardSatang: integer('total_reward_satang').notNull(),
+    totalPlatformFeeSatang: integer('total_platform_fee_satang').notNull(),
+    deadlineAt: time('deadline_at').notNull(),
+    submittedAt: time('submitted_at'),
+    settledAt: time('settled_at'),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'quest_v2_team_reward_allocation_status_check',
+      sql`${table.status} IN ('PENDING', 'SUBMITTED', 'AUTO_EQUAL')`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_amount_check',
+      sql`${table.totalRewardSatang} > 0 AND ${table.totalPlatformFeeSatang} >= 0`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_completion_check',
+      sql`(${table.status} = 'PENDING' AND ${table.submittedAt} IS NULL AND ${table.settledAt} IS NULL) OR (${table.status} <> 'PENDING' AND ${table.submittedAt} IS NOT NULL AND ${table.settledAt} IS NOT NULL)`
+    ),
+    unique('quest_v2_team_reward_allocation_quest_id_key').on(table.questId),
+    index('quest_v2_team_reward_allocation_due_idx').on(table.status, table.deadlineAt),
+  ]
+);
+
+/** Immutable per-Worker percentage and integer-satang result for an allocation. */
+export const questV2TeamRewardAllocationMember = pgTable(
+  'quest_v2_team_reward_allocation_member',
+  {
+    allocationId: uuid('allocation_id')
+      .notNull()
+      .references(() => questV2TeamRewardAllocation.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id),
+    percentageBasisPoints: smallint('percentage_basis_points').notNull(),
+    rewardSatang: integer('reward_satang').notNull(),
+    platformFeeSatang: integer('platform_fee_satang').notNull(),
+    createdAt: time('created_at').defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.allocationId, table.memberId] }),
+    check(
+      'quest_v2_team_reward_allocation_member_basis_points_check',
+      sql`${table.percentageBasisPoints} BETWEEN 0 AND 10000`
+    ),
+    check(
+      'quest_v2_team_reward_allocation_member_amount_check',
+      sql`${table.rewardSatang} >= 0 AND ${table.platformFeeSatang} >= 0`
+    ),
   ]
 );
 

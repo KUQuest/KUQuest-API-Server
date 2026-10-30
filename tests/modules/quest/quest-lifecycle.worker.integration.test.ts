@@ -13,7 +13,14 @@ import { tag } from '@/database/schema/tag.schema';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { questV2Storage } from '@/modules/quest/v2';
 import { questV2ImageUploadOperationScope } from '@/modules/quest/v2';
+import { positiveSatang, reserveSpending } from '@/modules/wallet';
 import { workChatMembershipWriter } from '@/modules/work-chat';
+
+import {
+  fundTestWallet,
+  readTestQuestEscrow,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
 
 import { and, eq, inArray } from 'drizzle-orm';
 import {
@@ -313,15 +320,76 @@ describe('Quest lifecycle worker', () => {
       expect.arrayContaining([missingProofId, missingConfirmationId])
     );
     const rows = await db
-      .select({ id: quest.id, status: quest.questStatus, failedAt: quest.failedAt })
+      .select({
+        id: quest.id,
+        status: quest.questStatus,
+        failedAt: quest.failedAt,
+        moneyHoldStartedAt: quest.moneyHoldStartedAt,
+      })
       .from(quest)
       .where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
-    expect(rows.find((row) => row.id === missingProofId)?.status).toBe('QUEST_FAILED');
-    expect(rows.find((row) => row.id === missingProofId)?.failedAt?.getTime()).toBe(
-      testNow.getTime()
-    );
+    expect(rows.find((row) => row.id === missingProofId)).toMatchObject({
+      status: 'QUEST_FAILED',
+      failedAt: testNow,
+      moneyHoldStartedAt: testNow,
+    });
     expect(rows.find((row) => row.id === missingConfirmationId)?.status).toBe('QUEST_FAILED');
     expect(rows.find((row) => row.id === submittedId)?.status).toBe('QUEST_SUBMITTED');
+  });
+
+  it('releases a completed Quest money hold once, 7 days after the hold started', async () => {
+    const holdHirerId = crypto.randomUUID();
+    await db.insert(authUser).values({
+      id: holdHirerId,
+      email: `${holdHirerId}@ku.th`,
+      firstName: 'Lifecycle',
+      lastName: 'Hold Hirer',
+    });
+    await fundTestWallet(holdHirerId, 5_000);
+    const questId = crypto.randomUUID();
+    const reservation = await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: holdHirerId,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: positiveSatang(1_000),
+      })
+    );
+    await createQuest({
+      id: questId,
+      hirerId: holdHirerId,
+      questStatus: 'QUEST_COMPLETED',
+      fundingReservationId: reservation.id,
+      moneyHoldStartedAt: new Date(testNow.getTime() - 7 * 24 * 60 * 60 * 1000),
+    });
+    questIds.push(questId);
+
+    const early = await runQuestLifecycleWorker({
+      clock: { now: () => new Date(testNow.getTime() - 1) },
+      autoApprove: async () => [],
+    });
+    expect(early.releasedFailedQuestIds).not.toContain(questId);
+    expect(await readTestQuestEscrow({ ownerUserId: holdHirerId, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_000,
+    });
+
+    const options = { clock: { now: () => testNow }, autoApprove: async () => [] };
+    const runs = await Promise.all([
+      runQuestLifecycleWorker(options),
+      runQuestLifecycleWorker(options),
+    ]);
+    expect(
+      runs.flatMap((run) => run.releasedFailedQuestIds).filter((id) => id === questId)
+    ).toEqual([questId]);
+    expect(await readTestQuestEscrow({ ownerUserId: holdHirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+    expect(await readTestWallet(holdHirerId)).toMatchObject({
+      spendingBalanceSatang: 5_000,
+      fundingReservedSatang: 0,
+    });
   });
 
   it('expires only pending invitations and delegates proof auto-approval to its seam', async () => {

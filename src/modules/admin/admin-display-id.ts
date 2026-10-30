@@ -2,6 +2,7 @@ import { sql, type SQLWrapper } from 'drizzle-orm';
 
 const displayIdWidth = 6;
 const displayIdPrefixes = {
+  activity: 'ACT',
   member: 'MEM',
   quest: 'QST',
   dispute: 'DSP',
@@ -27,6 +28,9 @@ export const formatDisplayIdSql = (type: DisplayIdType, publicSequence: SQLWrapp
 
 export const formatQuestDisplayId = (publicSequence: number): string =>
   formatDisplayId('quest', publicSequence);
+
+export const formatActivityDisplayId = (publicSequence: number): string =>
+  formatDisplayId('activity', publicSequence);
 
 export const formatDisputeDisplayId = (publicSequence: number): string =>
   formatDisplayId('dispute', publicSequence);

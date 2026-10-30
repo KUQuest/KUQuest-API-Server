@@ -28,6 +28,10 @@ export const adminAction = pgTable(
   'admin_action',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_action_public_sequence' })
+      .notNull()
+      .unique(),
     adminId: uuid('admin_id')
       .notNull()
       .references(() => authAdmin.id, { onDelete: 'restrict' }),
@@ -38,6 +42,7 @@ export const adminAction = pgTable(
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
     reasonCatalogVersion: integer('reason_catalog_version').notNull(),
     reasonCode: text('reason_code'),
+    decisionReasonText: varchar('decision_reason_text', { length: 200 }),
     expectedVersion: integer('expected_version'),
     expectedTimestamp: timestamp('expected_timestamp', { withTimezone: true }),
     resultVersion: integer('result_version'),
@@ -66,6 +71,10 @@ export const adminAction = pgTable(
       sql`${table.reasonCode} IS NULL OR ${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
     ),
     check(
+      'admin_action_decision_reason_text_check',
+      sql`${table.decisionReasonText} IS NULL OR btrim(${table.decisionReasonText}) <> ''`
+    ),
+    check(
       'admin_action_resource_version_check',
       sql`(${table.expectedVersion} IS NULL OR ${table.expectedVersion} >= 1) AND (${table.resultVersion} IS NULL OR ${table.resultVersion} >= 1)`
     ),
@@ -84,8 +93,16 @@ export const adminAction = pgTable(
 export const memberPenaltyLadders = ['MISCONDUCT', 'REVIEW'] as const;
 export type MemberPenaltyLadder = (typeof memberPenaltyLadders)[number];
 
-export const memberPenaltySources = ['REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE'] as const;
+export const memberPenaltySources = [
+  'REPORT_CASE',
+  'CONDUCT_REPORT',
+  'REVIEW_AVERAGE',
+  'ADMIN',
+] as const;
 export type MemberPenaltySource = (typeof memberPenaltySources)[number];
+
+export const memberPenaltyCommandKinds = ['ADD', 'REMOVE'] as const;
+export type MemberPenaltyCommandKind = (typeof memberPenaltyCommandKinds)[number];
 
 export const memberPenaltyResults = [
   'PENALTY_EXEMPT',
@@ -115,23 +132,34 @@ export const memberPenaltyRecord = pgTable(
       onDelete: 'restrict',
     }),
     reasonCode: varchar('reason_code', { length: 100 }).notNull(),
+    adminNote: varchar('admin_note', { length: 200 }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     reversalOfRecordId: uuid('reversal_of_record_id').references(
       (): AnyPgColumn => memberPenaltyRecord.id,
       { onDelete: 'restrict' }
     ),
+    recalculationOfRecordId: uuid('recalculation_of_record_id').references(
+      (): AnyPgColumn => memberPenaltyRecord.id,
+      { onDelete: 'restrict' }
+    ),
+    commandKind: text('command_kind').$type<MemberPenaltyCommandKind>(),
+    commandRequestKey: text('command_request_key'),
+    commandRequestHash: varchar('command_request_hash', { length: 64 }),
+    commandExpectedVersionToken: integer('command_expected_version_token'),
+    commandResultVersionToken: integer('command_result_version_token'),
   },
   (table) => [
     check('member_penalty_records_ladder_check', sql`${table.ladder} IN ('MISCONDUCT', 'REVIEW')`),
     check(
       'member_penalty_records_source_check',
-      sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE')`
+      sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE', 'ADMIN')`
     ),
     check(
       'member_penalty_records_source_ladder_check',
       sql`(
         (${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.ladder} = 'MISCONDUCT') OR
-        (${table.source} = 'REVIEW_AVERAGE' AND ${table.ladder} = 'REVIEW')
+        (${table.source} = 'REVIEW_AVERAGE' AND ${table.ladder} = 'REVIEW') OR
+        (${table.source} = 'ADMIN' AND ${table.ladder} = 'MISCONDUCT')
       )`
     ),
     check(
@@ -158,17 +186,61 @@ export const memberPenaltyRecord = pgTable(
       'member_penalty_records_not_self_reversal_check',
       sql`${table.reversalOfRecordId} IS NULL OR ${table.reversalOfRecordId} <> ${table.id}`
     ),
+    check(
+      'member_penalty_records_not_self_recalculation_check',
+      sql`${table.recalculationOfRecordId} IS NULL OR ${table.recalculationOfRecordId} <> ${table.id}`
+    ),
+    check(
+      'member_penalty_records_admin_note_check',
+      sql`${table.adminNote} IS NULL OR btrim(${table.adminNote}) <> ''`
+    ),
+    check(
+      'member_penalty_records_command_check',
+      sql`(
+        num_nonnulls(
+          ${table.commandKind},
+          ${table.commandRequestKey},
+          ${table.commandRequestHash},
+          ${table.commandExpectedVersionToken},
+          ${table.commandResultVersionToken}
+        ) = 0 OR (
+          num_nonnulls(
+            ${table.commandKind},
+            ${table.commandRequestKey},
+            ${table.commandRequestHash},
+            ${table.commandExpectedVersionToken},
+            ${table.commandResultVersionToken}
+          ) = 5 AND
+          ${table.commandKind} IN ('ADD', 'REMOVE') AND
+          btrim(${table.commandRequestKey}) <> '' AND
+          ${table.commandRequestHash} ~ '^[0-9a-f]{64}$' AND
+          ${table.commandExpectedVersionToken} >= 0 AND
+          ${table.commandResultVersionToken} >= 1 AND
+          ${table.actorType} = 'ADMIN' AND
+          ((${table.commandKind} = 'ADD' AND ${table.source} = 'ADMIN' AND ${table.result} <> 'PENALTY_REVERSAL') OR
+           (${table.commandKind} = 'REMOVE' AND ${table.result} = 'PENALTY_REVERSAL'))
+        )
+      )`
+    ),
     uniqueIndex('member_penalty_records_reversal_uidx')
       .on(table.reversalOfRecordId)
       .where(sql`${table.reversalOfRecordId} IS NOT NULL`),
+    uniqueIndex('member_penalty_records_recalculation_uidx')
+      .on(table.recalculationOfRecordId)
+      .where(sql`${table.recalculationOfRecordId} IS NOT NULL`),
     uniqueIndex('member_penalty_records_review_source_uidx')
       .on(table.memberId, table.sourceId)
-      .where(sql`${table.source} = 'REVIEW_AVERAGE'`),
+      .where(
+        sql`${table.source} = 'REVIEW_AVERAGE' AND ${table.result} <> 'PENALTY_REVERSAL' AND ${table.recalculationOfRecordId} IS NULL`
+      ),
     uniqueIndex('member_penalty_records_violation_source_uidx')
       .on(table.memberId, table.source, table.sourceId)
       .where(
-        sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.result} <> 'PENALTY_REVERSAL'`
+        sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.result} <> 'PENALTY_REVERSAL' AND ${table.recalculationOfRecordId} IS NULL`
       ),
+    uniqueIndex('member_penalty_records_command_request_uidx')
+      .on(table.actorAdminId, table.commandKind, table.commandRequestKey)
+      .where(sql`${table.commandRequestKey} IS NOT NULL`),
     index('member_penalty_records_member_created_idx').on(
       table.memberId,
       table.createdAt,
@@ -425,6 +497,14 @@ export const disputeCaseStatuses = [
 ] as const;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 
+export const disputeCaseCategories = [
+  'PROOF_REVIEW',
+  'QUEST_CONDITION',
+  'PARTIAL_WORK',
+  'OTHER',
+] as const;
+export type DisputeCaseCategory = (typeof disputeCaseCategories)[number];
+
 /** An Admin queue record for a payment dispute on a failed Quest. */
 export const adminDisputeCase = pgTable(
   'admin_dispute_cases',
@@ -440,6 +520,11 @@ export const adminDisputeCase = pgTable(
       .notNull()
       .references(() => authUser.id),
     openedByAdminId: uuid('opened_by_admin_id').references(() => authAdmin.id),
+    category: text('category').$type<DisputeCaseCategory>(),
+    submittedDetail: text('submitted_detail'),
+    filerStatement: text('filer_statement'),
+    respondentStatement: text('respondent_statement'),
+    respondentUserId: uuid('respondent_user_id').references(() => authUser.id),
     status: text('status').$type<DisputeCaseStatus>().default('DISPUTE_CASE_PENDING').notNull(),
     version: integer('version').default(1).notNull(),
     resolvedWorkerId: uuid('resolved_worker_id').references(() => authUser.id),
@@ -454,6 +539,22 @@ export const adminDisputeCase = pgTable(
     index('admin_dispute_cases_status_created_idx').on(table.status, table.createdAt, table.id),
     index('admin_dispute_cases_quest_idx').on(table.questId, table.createdAt),
     index('admin_dispute_cases_filer_idx').on(table.filerUserId),
+    check(
+      'admin_dispute_cases_category_check',
+      sql`${table.category} IS NULL OR ${table.category} IN ('PROOF_REVIEW', 'QUEST_CONDITION', 'PARTIAL_WORK', 'OTHER')`
+    ),
+    check(
+      'admin_dispute_cases_filing_content_check',
+      sql`(${table.category} IS NULL AND ${table.submittedDetail} IS NULL) OR (${table.category} IS NOT NULL AND ${table.submittedDetail} IS NOT NULL AND btrim(${table.submittedDetail}) <> '')`
+    ),
+    check(
+      'admin_dispute_cases_filer_statement_check',
+      sql`${table.filerStatement} IS NULL OR btrim(${table.filerStatement}) <> ''`
+    ),
+    check(
+      'admin_dispute_cases_respondent_statement_check',
+      sql`(${table.respondentStatement} IS NULL AND ${table.respondentUserId} IS NULL) OR (${table.respondentStatement} IS NOT NULL AND btrim(${table.respondentStatement}) <> '' AND ${table.respondentUserId} IS NOT NULL)`
+    ),
     check(
       'admin_dispute_cases_status_check',
       sql`${table.status} IN ('DISPUTE_CASE_PENDING', 'DISPUTE_CASE_DISMISSED', 'DISPUTE_CASE_RESOLVED')`

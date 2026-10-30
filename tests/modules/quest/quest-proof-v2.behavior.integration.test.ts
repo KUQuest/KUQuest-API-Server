@@ -9,6 +9,7 @@ import {
   quest,
   questCommand,
   questAssignment,
+  questConditionItem,
   questCandidateTeamV2,
   questCandidateTeamV2Member,
   questV2CompletionConfirmation,
@@ -28,6 +29,7 @@ import {
   submitQuestV2ProofSubmission,
   type QuestTransaction,
 } from '@/modules/quest';
+import { terminateQuestInTransaction } from '@/modules/quest/settlement';
 import { questV2ProofStorage } from '@/modules/quest/v2';
 import type { QuestWorkChatWriter } from '@/modules/quest/shared';
 import { createWorkChatMembershipWriter, workChatMembershipWriter } from '@/modules/work-chat';
@@ -703,7 +705,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         .where(
           and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, worker.id))
         )
-    ).toEqual([{ filerUserId: worker.id, status: 'DISPUTE_CASE_PENDING' }]);
+    ).toEqual([]);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
       remainingSatang: 1_020,
@@ -2118,5 +2120,583 @@ describe('Quest Proof Submission v2 behavior', () => {
         .from(questV2ProofSubmission)
         .where(eq(questV2ProofSubmission.questId, questId))
     ).toEqual([{ submissionStatus: 'PROOF_PENDING', teamId }]);
+  });
+});
+
+const createGroupFcfsQuest = async (overrides: Partial<typeof quest.$inferInsert> = {}) => {
+  const { questId } = await createQuest({
+    v2Participation: 'GROUP',
+    v2Mode: 'FIRST_COME_FIRST_SERVED',
+    ...overrides,
+  });
+  await reserveQuest(questId, overrides.questEscrowSatang ?? 2_040);
+  const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+  await db
+    .update(quest)
+    .set({ fundingReservationId: reservation!.id })
+    .where(eq(quest.id, questId));
+  const assignments = await db
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(eq(questAssignment.questId, questId));
+  const assignmentIdOf = (memberId: string) =>
+    assignments.find(({ workerId }) => workerId === memberId)!.id;
+  return { questId, assignmentIdOf };
+};
+
+const reviewOverHttp = (
+  questId: string,
+  proofSubmissionId: string,
+  decision: 'PROOF_APPROVED' | 'PROOF_NOT_APPROVED',
+  key = `proof-v2-behavior-per-worker-${proofSubmissionId}`
+) =>
+  jsonRequest(
+    'POST',
+    `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+    hirer.id,
+    decision === 'PROOF_APPROVED'
+      ? { decision }
+      : { decision, reason: 'The submitted work is incomplete' },
+    { 'idempotency-key': key }
+  );
+
+const questStatusOf = async (questId: string) =>
+  (
+    await db
+      .select({ status: quest.questStatus, moneyHoldStartedAt: quest.moneyHoldStartedAt })
+      .from(quest)
+      .where(eq(quest.id, questId))
+  )[0];
+
+const assignmentStatusesOf = async (questId: string) =>
+  Object.fromEntries(
+    (
+      await db
+        .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId))
+    ).map(({ workerId, status }) => [workerId, status])
+  );
+
+type PushRow = { recipient: string; eventType: string; eventKey: string };
+
+const sortedPushRows = (rows: PushRow[]) =>
+  [...rows].sort((left, right) =>
+    `${left.recipient}${left.eventType}`.localeCompare(`${right.recipient}${right.eventType}`)
+  );
+
+const pushRowsOf = async (questId: string) =>
+  sortedPushRows(
+    (
+      await sql<PushRow[]>`
+        select recipient_member_id as recipient, event_type as "eventType", event_key as "eventKey"
+        from push_deliveries
+        where data->>'questId' = ${questId}
+      `
+    ).map((row) => ({ ...row }))
+  );
+
+type QuestUpdateSeen = {
+  changeType: string;
+  recipientMemberIds: string[];
+  closeMemberIds: string[];
+};
+
+const listenQuestUpdates = async (questId: string) => {
+  const events: QuestUpdateSeen[] = [];
+  let read = 0;
+  let wake = () => {};
+  const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+    const event = JSON.parse(payload);
+    if (event.questId !== questId) return;
+    events.push({
+      changeType: event.changeType,
+      recipientMemberIds: [...event.recipientMemberIds].sort(),
+      closeMemberIds: [...(event.closeMemberIds ?? [])].sort(),
+    });
+    wake();
+  });
+  return {
+    next: async (count: number) => {
+      while (events.length < read + count) {
+        await new Promise<void>((resolve) => (wake = resolve));
+      }
+      read += count;
+      return events.slice(read - count, read);
+    },
+    stop: () => listener.unlisten(),
+  };
+};
+
+describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
+  it('keeps the Quest in progress after one Worker is not approved and lets another Worker submit', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+
+    const notApproved = await reviewOverHttp(
+      questId,
+      first.proofSubmissionId,
+      'PROOF_NOT_APPROVED'
+    );
+    expect(notApproved.status).toBe(200);
+    expect((await notApproved.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(await questStatusOf(questId)).toEqual({
+      status: 'QUEST_IN_PROGRESS',
+      moneyHoldStartedAt: null,
+    });
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_ACTIVE',
+    });
+    expect(
+      await db
+        .select({ assignmentId: adminReviewItem.assignmentId, workerId: adminReviewItem.workerId })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.questId, questId))
+    ).toEqual([{ assignmentId: assignmentIdOf(worker.id), workerId: worker.id }]);
+    expect(await pushRowsOf(questId)).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'PROOF_NOT_APPROVED',
+        eventKey: `quest-v2:PROOF_NOT_APPROVED:${assignmentIdOf(worker.id)}`,
+      },
+    ]);
+
+    const draft = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      secondWorker.id,
+      { description: 'Second Worker proof' },
+      { 'idempotency-key': `proof-v2-behavior-per-worker-draft-${questId}` }
+    );
+    expect(draft.status).toBe(201);
+    const blocked = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      { description: 'Second try' },
+      { 'idempotency-key': `proof-v2-behavior-per-worker-retry-${questId}` }
+    );
+    expect(blocked.status).toBe(403);
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 2_040,
+    });
+  });
+
+  it('completes the Quest when a later Worker is approved, pays that Worker, and holds the unpaid slot', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const key = `proof-v2-behavior-per-worker-a-${questId}`;
+    const notApproved = await reviewOverHttp(
+      questId,
+      first.proofSubmissionId,
+      'PROOF_NOT_APPROVED',
+      key
+    );
+    const notApprovedBody = await notApproved.json();
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+
+    const approved = await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED');
+    expect(approved.status).toBe(200);
+    expect((await approved.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const completed = await questStatusOf(questId);
+    expect(completed?.status).toBe('QUEST_COMPLETED');
+    expect(completed?.moneyHoldStartedAt).toBeInstanceOf(Date);
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_COMPLETED',
+    });
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    expect(reservation).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_020 });
+    expect(
+      (await listTestQuestEscrowSettlements(reservation!.id)).map(
+        ({ recipientUserId, recipientAmountSatang, platformFeeSatang }) => ({
+          recipientUserId,
+          recipientAmountSatang,
+          platformFeeSatang,
+        })
+      )
+    ).toEqual([
+      { recipientUserId: secondWorker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 },
+    ]);
+
+    await db.insert(questConditionItem).values({ questId, position: 0, text: 'Complete the work' });
+    const readParticipation = async (memberId: string) =>
+      (await (await request('GET', `/api/v2/quests/${questId}/participation`, memberId)).json())
+        .data;
+    expect((await readParticipation(worker.id)).workerSettlement).toEqual({
+      status: 'NO_PAYMENT',
+      amountSatang: 0,
+      settledAt: null,
+    });
+    expect((await readParticipation(secondWorker.id)).workerSettlement).toMatchObject({
+      status: 'PAID',
+      amountSatang: 1_000,
+    });
+    const detail = await request('GET', `/api/v2/quests/${questId}`, hirer.id);
+    expect((await detail.json()).data.moneyHold).toEqual({
+      status: 'HELD',
+      releasesAt: new Date(
+        completed!.moneyHoldStartedAt!.getTime() + 7 * 24 * 60 * 60 * 1000
+      ).toISOString(),
+      heldSatang: 1_020,
+    });
+
+    const replay = await reviewOverHttp(
+      questId,
+      first.proofSubmissionId,
+      'PROOF_NOT_APPROVED',
+      key
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(notApprovedBody);
+    expect((await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED')).status).toBe(
+      200
+    );
+    expect(await pushRowsOf(questId)).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'PROOF_NOT_APPROVED',
+        eventKey: `quest-v2:PROOF_NOT_APPROVED:${assignmentIdOf(worker.id)}`,
+      },
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        eventKey: `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentIdOf(worker.id)}`,
+      },
+    ]);
+    expect(
+      await db.select().from(adminReviewItem).where(eq(adminReviewItem.questId, questId))
+    ).toHaveLength(1);
+    expect(await listTestQuestEscrowSettlements(reservation!.id)).toHaveLength(1);
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_020,
+    });
+  });
+
+  it('completes the Quest when the last Active Worker is not approved after another was approved', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+    expect((await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED')).status).toBe(
+      200
+    );
+
+    const notApproved = await reviewOverHttp(
+      questId,
+      first.proofSubmissionId,
+      'PROOF_NOT_APPROVED'
+    );
+    const notApprovedBody = await notApproved.json();
+    expect(notApprovedBody.data.questStatus).toBe('QUEST_COMPLETED');
+    const replay = await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+    expect(await replay.json()).toEqual(notApprovedBody);
+    expect((await questStatusOf(questId))?.moneyHoldStartedAt).toBeInstanceOf(Date);
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_020,
+    });
+    expect(await pushRowsOf(questId)).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        eventKey: `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentIdOf(worker.id)}`,
+      },
+    ]);
+  });
+
+  it('closes only the not-approved Worker stream and opens the Dispute window at completion', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+    const updates = await listenQuestUpdates(questId);
+    try {
+      await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+      expect(await updates.next(1)).toEqual([
+        {
+          changeType: 'PROOF_REVIEWED',
+          recipientMemberIds: [hirer.id, worker.id].sort(),
+          closeMemberIds: [worker.id],
+        },
+      ]);
+      await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED');
+      const everyone = [hirer.id, worker.id, secondWorker.id].sort();
+      expect(await updates.next(3)).toEqual([
+        {
+          changeType: 'PROOF_REVIEWED',
+          recipientMemberIds: [hirer.id, secondWorker.id].sort(),
+          closeMemberIds: [],
+        },
+        { changeType: 'QUEST_COMPLETED', recipientMemberIds: everyone, closeMemberIds: [] },
+        {
+          changeType: 'DISPUTE_WINDOW_OPENED',
+          recipientMemberIds: everyone,
+          closeMemberIds: [secondWorker.id],
+        },
+      ]);
+    } finally {
+      await updates.stop();
+    }
+  });
+
+  it('keeps the last not-approved Worker stream open and sends that Worker the Dispute window', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+    await reviewOverHttp(questId, second.proofSubmissionId, 'PROOF_APPROVED');
+    const updates = await listenQuestUpdates(questId);
+    try {
+      await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+      const hirerAndWorker = [hirer.id, worker.id].sort();
+      expect(await updates.next(3)).toEqual([
+        { changeType: 'PROOF_REVIEWED', recipientMemberIds: hirerAndWorker, closeMemberIds: [] },
+        { changeType: 'QUEST_COMPLETED', recipientMemberIds: hirerAndWorker, closeMemberIds: [] },
+        {
+          changeType: 'DISPUTE_WINDOW_OPENED',
+          recipientMemberIds: hirerAndWorker,
+          closeMemberIds: [],
+        },
+      ]);
+    } finally {
+      await updates.stop();
+    }
+  });
+
+  it('fails the Quest when every Worker is not approved and alerts each Worker once', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    const second = await createSentProofForQuest(questId, secondWorker.id);
+    await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+
+    const lastReview = await reviewOverHttp(
+      questId,
+      second.proofSubmissionId,
+      'PROOF_NOT_APPROVED'
+    );
+    expect((await lastReview.json()).data.questStatus).toBe('QUEST_FAILED');
+    expect((await questStatusOf(questId))?.status).toBe('QUEST_FAILED');
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_INCOMPLETE',
+    });
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 2_040,
+    });
+    expect(await pushRowsOf(questId)).toEqual(
+      sortedPushRows([
+        {
+          recipient: worker.id,
+          eventType: 'PROOF_NOT_APPROVED',
+          eventKey: `quest-v2:PROOF_NOT_APPROVED:${assignmentIdOf(worker.id)}`,
+        },
+        {
+          recipient: worker.id,
+          eventType: 'QUEST_FAILED',
+          eventKey: `quest-v2:QUEST_FAILED:${questId}`,
+        },
+        {
+          recipient: secondWorker.id,
+          eventType: 'QUEST_FAILED',
+          eventKey: `quest-v2:QUEST_FAILED:${questId}`,
+        },
+      ])
+    );
+    expect(
+      await db.select().from(adminReviewItem).where(eq(adminReviewItem.questId, questId))
+    ).toHaveLength(2);
+  });
+
+  it('fails the Quest at dueAt when the other Worker sent no Proof after one was not approved', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() + 60_000);
+    const { questId } = await createGroupFcfsQuest({
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    const first = await createSentProofForQuest(questId, worker.id);
+    await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+
+    expect(await failQuestV2AtDueAt(questId, new Date(dueAt.getTime() + 1))).toBe(true);
+    expect((await questStatusOf(questId))?.status).toBe('QUEST_FAILED');
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_INCOMPLETE',
+    });
+    expect(
+      (await pushRowsOf(questId))
+        .filter(({ eventType }) => eventType === 'QUEST_FAILED')
+        .map(({ recipient }) => recipient)
+        .sort()
+    ).toEqual([worker.id, secondWorker.id].sort());
+  });
+
+  it('refuses cancellation and Admin termination while a Worker is ASSIGNMENT_INCOMPLETE on the running Quest', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createGroupFcfsQuest();
+    const first = await createSentProofForQuest(questId, worker.id);
+    await reviewOverHttp(questId, first.proofSubmissionId, 'PROOF_NOT_APPROVED');
+
+    const cancelled = await request(
+      'POST',
+      `/api/v2/quests/${questId}/cancel`,
+      hirer.id,
+      undefined,
+      {
+        'idempotency-key': `proof-v2-behavior-per-worker-cancel-${questId}`,
+      }
+    );
+    expect(cancelled.status).toBe(409);
+    expect((await cancelled.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
+    const preview = await request('GET', `/api/v2/quests/${questId}/cancel-preview`, hirer.id);
+    expect((await preview.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
+    expect(
+      await db.transaction((transaction) =>
+        terminateQuestInTransaction(transaction, questId, randomUUID(), `terminate-${questId}`)
+      )
+    ).toEqual({ outcome: 'invalid-state' });
+    expect((await questStatusOf(questId))?.status).toBe('QUEST_IN_PROGRESS');
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 2_040,
+    });
+  });
+
+  it('holds the unpaid slot by its underfilled consent amount and fee share', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createGroupFcfsQuest({
+      headcount: 4,
+      questFundingTotalSatang: 4_000,
+      questEscrowSatang: 4_080,
+      platformFeePerWorkerSatang: 20,
+    });
+    await db.insert(questAssignment).values({
+      questId,
+      workerId: unrelated.id,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      createdAt: new Date(Date.now() + 10),
+    });
+    const assignments = await db
+      .select({
+        id: questAssignment.id,
+        workerId: questAssignment.workerId,
+        createdAt: questAssignment.createdAt,
+      })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId))
+      .orderBy(asc(questAssignment.createdAt));
+    const now = new Date();
+    const decisionId = randomUUID();
+    await db.insert(questV2UnderfilledDecision).values({
+      id: decisionId,
+      questId,
+      activeWorkerCount: 3,
+      workerRewardPoolSatang: 4_000,
+      state: 'UNDERFILLED_COMPLETED',
+      decision: 'PROCEED',
+      decisionExpiresAt: now,
+      consentExpiresAt: now,
+      detectedAt: now,
+      resolvedAt: now,
+    });
+    await db.insert(questV2UnderfilledConsent).values(
+      assignments.map((assignment, index) => ({
+        decisionId,
+        questId,
+        assignmentId: assignment.id,
+        workerId: assignment.workerId,
+        rewardSatang: index === 0 ? 1_334 : 1_333,
+        decision: 'ACCEPT' as const,
+        respondedAt: now,
+        createdAt: assignment.createdAt,
+      }))
+    );
+    expect(assignments[0]?.workerId).toBe(worker.id);
+    const proofs = await Promise.all(
+      [worker, secondWorker, unrelated].map(({ id }) => createSentProofForQuest(questId, id))
+    );
+
+    await reviewOverHttp(questId, proofs[0]!.proofSubmissionId, 'PROOF_NOT_APPROVED');
+    await reviewOverHttp(questId, proofs[1]!.proofSubmissionId, 'PROOF_APPROVED');
+    const last = await reviewOverHttp(questId, proofs[2]!.proofSubmissionId, 'PROOF_APPROVED');
+    expect((await last.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    expect(reservation).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_334 + 27 });
+    expect(
+      (await listTestQuestEscrowSettlements(reservation!.id))
+        .map(({ recipientUserId, recipientAmountSatang, platformFeeSatang }) => ({
+          recipientUserId,
+          recipientAmountSatang,
+          platformFeeSatang,
+        }))
+        .sort((left, right) => left.platformFeeSatang - right.platformFeeSatang)
+    ).toEqual([
+      { recipientUserId: unrelated.id, recipientAmountSatang: 1_333, platformFeeSatang: 26 },
+      { recipientUserId: secondWorker.id, recipientAmountSatang: 1_333, platformFeeSatang: 27 },
+    ]);
+  });
+
+  it('still fails a GROUP + CANDIDATE Quest at once on PROOF_NOT_APPROVED', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({
+      mode: 'CANDIDATE',
+      v2Mode: 'CANDIDATE',
+      v2Participation: 'GROUP',
+      headcount: 2,
+    });
+    await reserveQuest(questId, 2_040);
+    const teamId = randomUUID();
+    await db.insert(questCandidateTeamV2).values({
+      id: teamId,
+      questId,
+      leaderId: worker.id,
+      name: 'Proof Team',
+      headcount: 2,
+      state: 'TEAM_SELECTED',
+    });
+    await db.insert(questCandidateTeamV2Member).values([
+      { teamId, memberId: worker.id },
+      { teamId, memberId: secondWorker.id },
+    ]);
+    const proof = await createSentProofForQuest(questId, worker.id);
+
+    const review = await reviewOverHttp(questId, proof.proofSubmissionId, 'PROOF_NOT_APPROVED');
+    expect((await review.json()).data.questStatus).toBe('QUEST_FAILED');
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_INCOMPLETE',
+    });
+    expect((await pushRowsOf(questId)).map(({ eventType }) => eventType)).toEqual([
+      'QUEST_FAILED',
+      'QUEST_FAILED',
+    ]);
+  });
+
+  it('still fails a SINGLE Quest at once on PROOF_NOT_APPROVED', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    await reserveQuest(questId, 1_020);
+    const proof = await createSentProofForQuest(questId, worker.id);
+
+    const review = await reviewOverHttp(questId, proof.proofSubmissionId, 'PROOF_NOT_APPROVED');
+    expect((await review.json()).data.questStatus).toBe('QUEST_FAILED');
+    expect(await pushRowsOf(questId)).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_FAILED',
+        eventKey: `quest-v2:QUEST_FAILED:${questId}`,
+      },
+    ]);
   });
 });
