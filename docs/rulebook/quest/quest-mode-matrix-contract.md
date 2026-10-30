@@ -13,23 +13,25 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## 2x2 Comparison Table
 
-| Feature / Behavior             | `SINGLE + FCFS`                             | `SINGLE + CANDIDATE`                        | `GROUP + FCFS`                                                     | `GROUP + CANDIDATE`                                                                                                                                       |
-| ------------------------------ | ------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Headcount**                  | Exactly 1                                   | Exactly 1                                   | 2 to 20                                                            | Published Quest: 2 to 20. Candidate Team: Team Leader enters 2 through the published `headcount`.                                                         |
-| **Joining / Formation**        | Direct join (1st eligible wins)             | Candidate applies; Hirer selects            | Direct join slot-by-slot                                           | Team Leader enters Team `headcount`, sends the 24h Join Code, and Members accept it; Leader submits the Team with text and optional files; Hirer selects. |
-| **Application Withdrawal**     | N/A (instant join)                          | Candidate can withdraw while `QUEST_OPEN`   | N/A (instant join)                                                 | Members can leave before submission; submitted Team cannot withdraw                                                                                       |
-| **Underfilled at `startTime`** | Unjoined Quest auto-cancels                 | Unselected Quest auto-cancels               | 10m Hirer choice + 10m all-Worker consent; splits pool equally     | Unselected Quest auto-cancels                                                                                                                             |
-| **Required Starter**           | Worker                                      | Worker                                      | **Every Active Worker**                                            | **Team Leader only**                                                                                                                                      |
-| **Required Submitter**         | Worker                                      | Worker                                      | **Every Active Worker**                                            | **Team Leader only**                                                                                                                                      |
-| **Quest Edit Consent**         | Single Worker (10m)                         | Single Worker (10m)                         | **Every Active Worker** (10m)                                      | **Every Active Worker** (10m)                                                                                                                             |
-| **Review & Decision**          | 1 Proof reviewed by Hirer                   | 1 Proof reviewed by Hirer                   | Hirer reviews each Worker individually                             | Hirer reviews 1 Team submission                                                                                                                           |
-| **Approval Outcome**           | Completes Worker Assignment                 | Completes Worker Assignment                 | Completes individual Worker Assignment                             | Completes **every** teammate Assignment                                                                                                                   |
-| **Non-Approval Outcome**       | Fails Quest (`QUEST_FAILED`)                | Fails Quest (`QUEST_FAILED`)                | Fails Quest; completed Workers keep Reward                         | Fails Quest; **every** teammate Assignment incomplete                                                                                                     |
-| **Reward Allocation**          | 100% net Reward to Worker                   | 100% net Reward to Worker                   | Equal split per slot; remainder satang to earliest accepted        | After success, Leader sets teammate shares (up to 100%) within 24h and keeps the remainder; timeout splits equally.                                       |
-| **Conduct Reports**            | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE` | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE` | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, **`CONDUCT_NO_SHOW`** | `CONDUCT_ABANDONED` (Leader only), `CONDUCT_OUT_OF_SCOPE`                                                                                                 |
-| **Rating Review Pairs**        | Hirer &harr; Worker (1 pair)                | Hirer &harr; Worker (1 pair)                | Hirer &harr; each Worker (N pairs); no Worker-Worker review        | Hirer &harr; each teammate (N pairs); no Worker-Worker review                                                                                             |
+| Feature / Behavior             | `SINGLE + FCFS`                                             | `SINGLE + CANDIDATE`                                        | `GROUP + FCFS`                                                          | `GROUP + CANDIDATE`                                                                                                                                       |
+| ------------------------------ | ----------------------------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Headcount**                  | Exactly 1                                                   | Exactly 1                                                   | 2 to 20                                                                 | Published Quest: 2 to 20. Candidate Team: Team Leader enters 2 through the published `headcount`.                                                         |
+| **Joining / Formation**        | Direct join (1st eligible wins)                             | Candidate applies; Hirer selects                            | Direct join slot-by-slot                                                | Team Leader enters Team `headcount`, sends the 24h Join Code, and Members accept it; Leader submits the Team with text and optional files; Hirer selects. |
+| **Application Withdrawal**     | N/A (instant join)                                          | Candidate can withdraw while `QUEST_OPEN`                   | N/A (instant join)                                                      | Members can leave before submission; submitted Team cannot withdraw                                                                                       |
+| **Underfilled at `startTime`** | Unjoined Quest auto-cancels                                 | Unselected Quest auto-cancels                               | 10m Hirer choice + 10m all-Worker consent; splits pool equally          | Unselected Quest auto-cancels                                                                                                                             |
+| **Required Starter**           | Worker                                                      | Worker                                                      | **Every Active Worker**                                                 | **Team Leader only**                                                                                                                                      |
+| **Required Submitter**         | Worker                                                      | Worker                                                      | **Every Active Worker**                                                 | **Team Leader only**                                                                                                                                      |
+| **Quest Edit Consent**         | Single Worker (10m)                                         | Single Worker (10m)                                         | **Every Active Worker** (10m)                                           | **Every Active Worker** (10m)                                                                                                                             |
+| **Review & Decision**          | Hirer reviews 1 Proof Submission or Completion Confirmation | Hirer reviews 1 Proof Submission or Completion Confirmation | Hirer reviews each Worker's Proof Submission or Completion Confirmation | Hirer reviews 1 Team Proof Submission or Completion Confirmation                                                                                          |
+| **Approval Outcome**           | Completes Worker Assignment                                 | Completes Worker Assignment                                 | Completes individual Worker Assignment                                  | Completes **every** teammate Assignment                                                                                                                   |
+| **Non-Approval Outcome**       | Fails Quest (`QUEST_FAILED`)                                | Fails Quest (`QUEST_FAILED`)                                | Only affected Assignment is incomplete; other Workers can finish        | Fails Quest; **every** teammate Assignment incomplete                                                                                                     |
+| **Reward Allocation**          | 100% net Reward to Worker                                   | 100% net Reward to Worker                                   | Equal split per slot; remainder satang to earliest accepted             | After success, Leader sets teammate shares (up to 100%) within 24h and keeps the remainder; timeout splits equally.                                       |
+| **Conduct Reports**            | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`                 | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`                 | `CONDUCT_ABANDONED`, `CONDUCT_OUT_OF_SCOPE`, **`CONDUCT_NO_SHOW`**      | `CONDUCT_ABANDONED` (Leader only), `CONDUCT_OUT_OF_SCOPE`                                                                                                 |
+| **Rating Review Pairs**        | Hirer &harr; Worker (1 pair)                                | Hirer &harr; Worker (1 pair)                                | Hirer &harr; each Worker (N pairs); no Worker-Worker review             | Hirer &harr; each teammate (N pairs); no Worker-Worker review                                                                                             |
 
 ---
+
+For a proof-free Quest, the required submitter creates a Completion Confirmation instead of a Proof Submission. The Hirer reviews it under the same mode rules in this matrix. If the Hirer does not decide within 24 hours, the Server approves the Confirmation. A Completion Confirmation is not a Proof Submission.
 
 ## Detailed Specifications by Quadrant
 
@@ -48,9 +50,9 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 4. **Quest Edit**:
    - Hirer may submit one Quest Edit during `QUEST_ASSIGNED`. The Worker has 10 minutes to accept or decline.
 5. **Proof & Completion**:
-   - Worker submits Proof (1–5 files) or confirms proof-free completion before `dueAt`.
-   - Hirer approves (`QUEST_COMPLETED`, pays Reward) or does not approve (`QUEST_FAILED`, triggers 1 Admin Review Item and 7-day money hold).
-   - 24-hour review timeout automatically approves.
+   - Worker sends a Proof Submission or creates a proof-free Completion Confirmation before `dueAt`.
+   - Hirer approval completes the Assignment and settles its Reward. Non-approval fails the Quest, creates one Admin Review Item, and starts the 7-day money hold.
+   - A pending Proof Submission or Completion Confirmation is auto-approved 24 hours after it is sent or created.
 6. **Conduct Reports**:
    - Hirer can file `CONDUCT_ABANDONED` against Worker if no proof/confirmation was sent.
    - Worker can file `CONDUCT_OUT_OF_SCOPE` against Hirer from `QUEST_ASSIGNED` onward.
@@ -70,7 +72,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 3. **Start Work & Execution**:
    - The selected Worker must press Start Work between `startTime` and `dueAt` &rarr; `QUEST_IN_PROGRESS`.
 4. **Quest Edit, Proof, and Settlement**:
-   - Same execution, 10-minute edit response, proof submission (1–5 files), 24h review timeout, failure hold, and 3-tier cancellation matrix as Quadrant 1.
+   - Same execution, 10-minute edit response, Proof Submission or proof-free Completion Confirmation, 24-hour review timeout, failure hold, and 3-tier cancellation matrix as Quadrant 1.
 5. **Conduct Reports**:
    - Hirer &rarr; Worker: `CONDUCT_ABANDONED` (if work missing at `dueAt`).
    - Worker &rarr; Hirer: `CONDUCT_OUT_OF_SCOPE`.
@@ -96,13 +98,13 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 4. **Quest Edit Protocol**:
    - Hirer edits in `QUEST_ASSIGNED`. **All Active Workers** must accept within 10 minutes. Any decline or timeout restores the old Condition.
 5. **Proof Submission & Partial Success**:
-   - **Every Active Worker** submits individual Proof (1–5 files) or confirms completion.
-   - Hirer reviews each Worker's submission individually.
-   - `PROOF_NOT_APPROVED` on one Worker makes only that Worker's Assignment `ASSIGNMENT_INCOMPLETE`. The Quest stays `QUEST_IN_PROGRESS`, and every other Worker can still submit Proof or confirm completion before `dueAt`.
+   - **Every Active Worker** sends an individual Proof Submission or creates a proof-free Completion Confirmation.
+   - Hirer reviews each Worker's result individually.
+   - A non-approval makes only that Worker's Assignment `ASSIGNMENT_INCOMPLETE`. The Quest stays `QUEST_IN_PROGRESS`, and every other Worker can still finish their work.
    - The Quest becomes `QUEST_COMPLETED` when every Worker has a final result and at least one Worker is `ASSIGNMENT_COMPLETED`. It becomes `QUEST_FAILED` when every Worker is `ASSIGNMENT_INCOMPLETE`.
    - A Worker with `ASSIGNMENT_INCOMPLETE` receives no Reward. The Reward share of that Worker returns to the Hirer when the Quest ends (see [Reward & Money Contract](reward-money-contract.md)).
    - **Completed Workers keep Reward**: Any Worker who completed work before failure keeps their Reward.
-   - Post-failure pending Proofs can still be reviewed by the Hirer and paid from the 7-day held Funding Reservation.
+   - Post-failure pending Proof Submissions and Completion Confirmations can still be reviewed by the Hirer and paid from the 7-day held Funding Reservation.
 6. **Conduct Reports**:
    - Hirer &rarr; Worker: `CONDUCT_ABANDONED` (against any Worker who delivered nothing).
    - Worker &rarr; Hirer: `CONDUCT_OUT_OF_SCOPE`.
@@ -126,7 +128,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 3. **Quest Edit Protocol**:
    - **All teammates** (every Active Worker) must accept within 10 minutes.
 4. **Proof Submission & Team Outcome**:
-   - **Team Leader ONLY** submits the Team's Proof (1–5 files) or confirms completion on behalf of the Team before `dueAt`.
+   - **Team Leader ONLY** submits the Team's Proof (1–5 files) or creates a proof-free Completion Confirmation on behalf of the Team before `dueAt`.
    - Hirer reviews the single Team submission:
      - `PROOF_APPROVED`: Makes **every** teammate Assignment `ASSIGNMENT_COMPLETED`. The Team Leader has 24 hours to assign each teammate a percentage of the complete Worker Reward pool for all published slots; the Leader receives the remainder. If the Leader does not submit in time, the Server splits the pool equally. Each member is paid directly to Earnings from Quest Escrow.
      - `PROOF_NOT_APPROVED` / Missing submission: Makes **every** teammate Assignment `ASSIGNMENT_INCOMPLETE`, fails the Quest (`QUEST_FAILED`), and creates 1 Admin Review Item.

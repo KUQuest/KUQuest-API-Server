@@ -12,11 +12,18 @@ import {
   editQuestV2ProofSubmissionController,
   listQuestV2ProofSubmissionsController,
   getQuestV2ProofFileController,
+  listQuestV2CompletionConfirmationsController,
   reviewQuestV2ProofSubmissionController,
+  reviewQuestV2CompletionConfirmationController,
   submitQuestV2ProofSubmissionController,
 } from './quest-proof-v2.controller';
 import {
   questV2CompletionConfirmationResponseSchema,
+  questV2CompletionConfirmationParamsSchema,
+  questV2CompletionConfirmationDetailParamsSchema,
+  questV2CompletionConfirmationListResponseSchema,
+  questV2CompletionConfirmationReviewResponseSchema,
+  questV2CompletionConfirmationReviewSchema,
   questV2ProofSubmissionCreateSchema,
   questV2ProofSubmissionDeleteResponseSchema,
   questV2ProofSubmissionDetailParamsSchema,
@@ -187,6 +194,46 @@ export const questProofV2Route = new Elysia({
         description:
           'Returns a short-lived link for a ready Proof file to its submitting Worker or the Quest Hirer.',
         operationId: 'getQuestV2ProofFile',
+        security: betterAuthSecurity,
+      },
+    }
+  )
+  .get('/:questId/completion-confirmations', listQuestV2CompletionConfirmationsController, {
+    params: questV2CompletionConfirmationParamsSchema,
+    response: responses(questV2CompletionConfirmationListResponseSchema, 401, 403, 404, 500),
+    detail: {
+      tags: ['Quest Proof v2'],
+      summary: 'List v2 Completion Confirmations',
+      description:
+        'Returns Completion Confirmations to the Hirer and affected Workers. The Hirer sees every Confirmation. A Worker sees the Confirmation for their Assignment or selected Team. The reason is visible only to the Hirer and the submitter.',
+      operationId: 'listQuestV2CompletionConfirmations',
+      security: betterAuthSecurity,
+    },
+  })
+  .post(
+    '/:questId/completion-confirmations/:completionConfirmationId/review',
+    reviewQuestV2CompletionConfirmationController,
+    {
+      params: questV2CompletionConfirmationDetailParamsSchema,
+      body: questV2CompletionConfirmationReviewSchema,
+      headers: questV2ProofSubmissionHeadersSchema,
+      transform: rejectUnknownFields(questV2CompletionConfirmationReviewSchema),
+      response: responses(
+        questV2CompletionConfirmationReviewResponseSchema,
+        400,
+        401,
+        403,
+        404,
+        409,
+        500,
+        503
+      ),
+      detail: {
+        tags: ['Quest Proof v2'],
+        summary: 'Review a v2 Completion Confirmation',
+        description:
+          'Records the Hirer’s first approval or non-approval decision. A non-approval requires a reason and creates an Admin Review Item. The Server approves the Confirmation after 24 hours if the Hirer does not decide.',
+        operationId: 'reviewQuestV2CompletionConfirmation',
         security: betterAuthSecurity,
       },
     }

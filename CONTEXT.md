@@ -74,6 +74,19 @@ which the Hirer may decide the outcome. If the Hirer does not decide, the
 Server records `PROOF_APPROVED`.
 _Avoid_: mode-specific review deadlines.
 
+**Completion Confirmation**:
+A record a required submitter creates to confirm that Work is complete when
+`proofRequired=false`. It has no Proof or other evidence. It remains pending
+until the Hirer approves it, the Server auto-approves it, or the Quest is
+cancelled.
+_Avoid_: treating a pending Confirmation as an approved Assignment.
+
+**Completion Confirmation Review Window**:
+The 24-hour period after a required submitter confirms proof-free completion.
+The Confirmation stays pending while the Hirer reviews it. If the Hirer does
+not decide by the deadline, the Server records `COMPLETION_CONFIRMATION_APPROVED`.
+_Avoid_: treating a Completion Confirmation as a Proof Submission.
+
 **Giver**:
 Legacy term for Hirer. In new Quest and Work Chat text, use Hirer.
 _Avoid_: Giver in new domain text, Employer, client, job owner.

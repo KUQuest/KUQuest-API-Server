@@ -12,14 +12,17 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createQuestV2, formatQuestV2ScheduleTime, type QuestV2CreateInput } from '@/modules/quest';
+import { stopQuestUpdateListener } from '@/modules/quest/v2/realtime';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { positiveSatang, reserveSpending } from '@/modules/wallet';
+import { stopWalletUpdateListener } from '@/modules/wallet';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { eq, inArray } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 import { randomUUID } from 'node:crypto';
+import { createConnection } from 'node:net';
 
 import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
@@ -63,6 +66,50 @@ const baseInput: QuestV2CreateInput = {
 
 const cookieHeader = (response: Response) =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
+
+const assertPortClosed = (port: number) =>
+  new Promise<void>((resolve, reject) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`Realtime test server port ${port} did not close`));
+    }, 500);
+    socket.once('connect', () => {
+      clearTimeout(timeout);
+      socket.destroy();
+      reject(new Error(`Realtime test server port ${port} still accepts connections`));
+    });
+    socket.once('error', (error) => {
+      clearTimeout(timeout);
+      if ((error as NodeJS.ErrnoException).code === 'ECONNREFUSED') resolve();
+      else reject(error);
+    });
+  });
+
+const stopRealtimeTestServer = async (
+  nativeServer: NonNullable<Elysia['server']>,
+  port: number
+) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // Bun can leave pendingWebSockets non-zero after the port stops accepting connections.
+    const outcome = await Promise.race([
+      nativeServer.stop(true).then(() => 'stopped' as const),
+      new Promise<'timeout'>((resolve) => {
+        timeout = setTimeout(() => resolve('timeout'), 500);
+      }),
+    ]);
+
+    if (outcome === 'timeout') {
+      expect(nativeServer.pendingRequests).toBe(0);
+      expect(nativeServer.pendingWebSockets).toBeGreaterThan(0);
+      await assertPortClosed(port);
+    }
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    await Promise.all([stopQuestUpdateListener(), stopWalletUpdateListener()]);
+  }
+};
 
 const signIn = async (authApp: Elysia, email: string) => {
   const response = await authApp.handle(
@@ -173,7 +220,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     let hirerSocket: QuestWebSocketClient | undefined;
@@ -225,7 +272,7 @@ describe('Quest Proof v2 realtime source updates', () => {
       });
       expect(pendingRead.status).toBe(200);
       expect(JSON.stringify(await pendingRead.json())).toContain('PROOF_PENDING');
-      workerSocket.destroy();
+      await workerSocket.destroyAndWait();
       const reviewResponse = await fetch(
         `${origin}/api/v2/quests/${questId}/proof-submissions/${draft.data.id}/review`,
         {
@@ -265,9 +312,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(workerRead.status).toBe(200);
       expect(JSON.stringify(await workerRead.json())).toContain('PROOF_APPROVED');
     } finally {
-      hirerSocket?.destroy();
-      workerSocket?.destroy();
-      await server.stop();
+      await Promise.all([hirerSocket?.destroyAndWait(), workerSocket?.destroyAndWait()]);
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('delivers a Candidate Group Team Leader send to only its current team', async () => {
@@ -316,7 +362,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -376,8 +422,8 @@ describe('Quest Proof v2 realtime source updates', () => {
         });
       }
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('auto-approves only at the Review Window boundary through the lifecycle worker', async () => {
@@ -405,7 +451,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     let hirerSocket: QuestWebSocketClient | undefined;
@@ -440,7 +486,7 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(sent.status).toBe(200);
       await hirerSocket.nextText();
       await workerSocket.nextText();
-      const sentAt = new Date('1900-01-01T00:00:00.000Z');
+      const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
       await db
         .update(questV2ProofSubmission)
         .set({ sentAt, updatedAt: sentAt })
@@ -484,9 +530,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(read.status).toBe(200);
       expect(JSON.stringify(await read.json())).toContain('PROOF_APPROVED');
     } finally {
-      hirerSocket?.destroy();
-      workerSocket?.destroy();
-      await server.stop();
+      await Promise.all([hirerSocket?.destroyAndWait(), workerSocket?.destroyAndWait()]);
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('confirms proof-free FCFS Single completion through the completion endpoint', async () => {
@@ -508,7 +553,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -529,8 +574,26 @@ describe('Quest Proof v2 realtime source updates', () => {
         }
       );
       expect(confirmation.status).toBe(200);
+      const confirmationBody = await confirmation.json();
       for (const socket of sockets) {
-        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_CONFIRMED');
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEW_PENDING');
+        expect(await socket.nextText(250)).toBeUndefined();
+      }
+      const review = await fetch(
+        `http://127.0.0.1:${port}/api/v2/quests/${questId}/completion-confirmations/${confirmationBody.data.id}/review`,
+        {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `proof-live-single-review-${randomUUID()}`,
+          },
+          body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
+        }
+      );
+      expect(review.status).toBe(200);
+      for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEWED');
         expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_COMPLETED');
       }
       expect((await sockets[1]?.nextFrame())?.opcode).toBe(8);
@@ -541,8 +604,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(read.status).toBe(200);
       expect(JSON.stringify(await read.json())).toContain('QUEST_COMPLETED');
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('confirms proof-free Candidate Group completion as its selected Team Leader', async () => {
@@ -581,7 +644,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -604,20 +667,32 @@ describe('Quest Proof v2 realtime source updates', () => {
       );
       expect(confirmation.status).toBe(200);
       const confirmationBody = await confirmation.json();
-      expect(JSON.stringify(confirmationBody)).toContain('QUEST_COMPLETED');
+      expect(confirmationBody.data.reviewStatus).toBe('COMPLETION_CONFIRMATION_PENDING');
+      expect(confirmationBody.data.questStatus).toBe('QUEST_IN_PROGRESS');
       for (const socket of sockets) {
         expect(JSON.parse((await socket.nextText())!)).toEqual({
           type: 'QUEST_UPDATED',
           version: 1,
           questId,
-          changeType: 'COMPLETION_CONFIRMED',
+          changeType: 'COMPLETION_REVIEW_PENDING',
         });
-        expect(JSON.parse((await socket.nextText())!)).toEqual({
-          type: 'QUEST_UPDATED',
-          version: 1,
-          questId,
-          changeType: 'QUEST_COMPLETED',
-        });
+      }
+      const review = await fetch(
+        `${origin}/api/v2/quests/${questId}/completion-confirmations/${confirmationBody.data.id}/review`,
+        {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `proof-live-candidate-review-${randomUUID()}`,
+          },
+          body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
+        }
+      );
+      expect(review.status).toBe(200);
+      for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEWED');
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_COMPLETED');
       }
       for (const socket of sockets) {
         expect(await socket.nextText(250)).toBeUndefined();
@@ -675,8 +750,8 @@ describe('Quest Proof v2 realtime source updates', () => {
         amountSatang: 800,
       });
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('preserves on-time Proof access across deadline failure, then applies a final non-approval without reopening', async () => {
@@ -713,7 +788,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     let hirerSocket: QuestWebSocketClient | undefined;
@@ -827,9 +902,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(questRead.status).toBe(200);
       expect(JSON.stringify(await questRead.json())).toContain('QUEST_FAILED');
     } finally {
-      hirerSocket?.destroy();
-      workerSocket?.destroy();
-      await server.stop();
+      await Promise.all([hirerSocket?.destroyAndWait(), workerSocket?.destroyAndWait()]);
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('does not announce whole-Quest completion after one FCFS Group Assignment is approved', async () => {
@@ -863,7 +937,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -929,11 +1003,11 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(questRead.status).toBe(200);
       expect(JSON.stringify(await questRead.json())).toContain('QUEST_IN_PROGRESS');
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
-  it('serializes proof-free completion against Hirer cancellation with one terminal result', async () => {
+  it('cancels a pending proof-free Completion Confirmation when the Hirer cancels', async () => {
     const [hirer, worker] = sessions;
     if (!hirer || !worker) throw new Error('Test sessions are missing');
     const created = await createQuestV2(
@@ -948,7 +1022,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -975,12 +1049,13 @@ describe('Quest Proof v2 realtime source updates', () => {
           },
         }),
       ]);
-      expect(Number(completion.ok) + Number(cancellation.ok)).toBe(1);
+      expect(cancellation.status).toBe(200);
+      expect([200, 409]).toContain(completion.status);
       for (const socket of sockets) {
         const first = JSON.parse((await socket.nextText())!);
         if (completion.ok) {
-          expect(first.changeType).toBe('COMPLETION_CONFIRMED');
-          expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_COMPLETED');
+          expect(first.changeType).toBe('COMPLETION_REVIEW_PENDING');
+          expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_CANCELLED');
         } else {
           expect(first.changeType).toBe('QUEST_CANCELLED');
         }
@@ -990,11 +1065,18 @@ describe('Quest Proof v2 realtime source updates', () => {
       });
       expect(read.status).toBe(200);
       const current = JSON.stringify(await read.json());
-      expect(current).toContain(completion.ok ? 'QUEST_COMPLETED' : 'QUEST_CANCELLED');
-      expect(current).not.toContain(completion.ok ? 'QUEST_CANCELLED' : 'QUEST_COMPLETED');
+      expect(current).toContain('QUEST_CANCELLED');
+      expect(current).not.toContain('QUEST_COMPLETED');
+      const confirmations = await db
+        .select({ reviewStatus: questV2CompletionConfirmation.reviewStatus })
+        .from(questV2CompletionConfirmation)
+        .where(eq(questV2CompletionConfirmation.questId, questId));
+      expect(confirmations).toEqual(
+        completion.ok ? [{ reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' }] : []
+      );
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('reports missing proof-free completion only when the lifecycle worker fails the due Quest', async () => {
@@ -1021,7 +1103,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -1064,8 +1146,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(participationRead.status).toBe(200);
       expect(JSON.stringify(await participationRead.json())).toContain('ASSIGNMENT_INCOMPLETE');
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('does not emit PROOF_REVIEWED when the REST review transaction rolls back', async () => {
@@ -1093,7 +1175,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -1165,8 +1247,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       for (const socket of sockets) expect(await socket.nextText(250)).toBeUndefined();
     } finally {
       failWorkChatTransition = false;
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
 
@@ -1189,7 +1271,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -1199,8 +1281,7 @@ describe('Quest Proof v2 realtime source updates', () => {
         sockets.push(socket);
         await socket.nextText();
       }
-      failWorkChatTransition = true;
-      const response = await fetch(
+      const confirmation = await fetch(
         `http://127.0.0.1:${port}/api/v2/quests/${questId}/completion-confirmation`,
         {
           method: 'POST',
@@ -1210,15 +1291,33 @@ describe('Quest Proof v2 realtime source updates', () => {
           },
         }
       );
+      expect(confirmation.status).toBe(200);
+      const confirmationBody = await confirmation.json();
+      for (const socket of sockets) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEW_PENDING');
+      }
+      failWorkChatTransition = true;
+      const response = await fetch(
+        `http://127.0.0.1:${port}/api/v2/quests/${questId}/completion-confirmations/${confirmationBody.data.id}/review`,
+        {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `proof-live-completion-rollback-review-${randomUUID()}`,
+          },
+          body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
+        }
+      );
       failWorkChatTransition = false;
       expect(response.status).toBe(503);
       expect((await response.json()).error.code).toBe('QUEST_COMPLETION_UNAVAILABLE');
       expect(
         await db
-          .select({ id: questV2CompletionConfirmation.id })
+          .select({ status: questV2CompletionConfirmation.reviewStatus })
           .from(questV2CompletionConfirmation)
           .where(eq(questV2CompletionConfirmation.questId, questId))
-      ).toEqual([]);
+      ).toEqual([{ status: 'COMPLETION_CONFIRMATION_PENDING' }]);
       expect(
         (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
           ?.status
@@ -1234,8 +1333,8 @@ describe('Quest Proof v2 realtime source updates', () => {
       for (const socket of sockets) expect(await socket.nextText(250)).toBeUndefined();
     } finally {
       failWorkChatTransition = false;
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
   it('serializes Hirer review against automatic approval with one committed update', async () => {
@@ -1263,7 +1362,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     let hirerSocket: QuestWebSocketClient | undefined;
@@ -1343,12 +1442,11 @@ describe('Quest Proof v2 realtime source updates', () => {
         )[0]?.status
       ).toBe('PROOF_APPROVED');
     } finally {
-      workerSocket?.destroy();
-      hirerSocket?.destroy();
-      await server.stop();
+      await Promise.all([workerSocket?.destroyAndWait(), hirerSocket?.destroyAndWait()]);
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
-  it('serializes proof-free completion against a dueAt failure with one terminal result', async () => {
+  it('keeps on-time proof-free confirmations reviewable after dueAt', async () => {
     const [hirer, firstWorker, finalWorker] = sessions;
     if (!hirer || !firstWorker || !finalWorker) throw new Error('Test sessions are missing');
     const created = await createQuestV2(
@@ -1375,7 +1473,7 @@ describe('Quest Proof v2 realtime source updates', () => {
     const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
     const port = server.server?.port;
     if (port === undefined) {
-      await server.stop();
+      await server.stop(true);
       throw new Error('Quest Proof realtime server did not start');
     }
     const sockets: QuestWebSocketClient[] = [];
@@ -1397,13 +1495,13 @@ describe('Quest Proof v2 realtime source updates', () => {
         }
       );
       expect(firstConfirmation.status).toBe(200);
-      for (const socket of sockets.slice(0, 2)) {
-        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_CONFIRMED');
+      const firstConfirmationBody = await firstConfirmation.json();
+      for (const socket of [sockets[0]!, sockets[1]!]) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEW_PENDING');
       }
       expect(await sockets[2]?.nextText(250)).toBeUndefined();
-      expect((await sockets[1]?.nextFrame())?.opcode).toBe(8);
 
-      const completionPromise = fetch(
+      const finalConfirmation = await fetch(
         `${origin}/api/v2/quests/${questId}/completion-confirmation`,
         {
           method: 'POST',
@@ -1413,38 +1511,71 @@ describe('Quest Proof v2 realtime source updates', () => {
           },
         }
       );
-      const deadlinePromise = runQuestLifecycleWorker({
+      expect(finalConfirmation.status).toBe(200);
+      const finalConfirmationBody = await finalConfirmation.json();
+      for (const socket of [sockets[0]!, sockets[2]!]) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEW_PENDING');
+      }
+      expect(await sockets[1]?.nextText(250)).toBeUndefined();
+
+      const deadlineRun = await runQuestLifecycleWorker({
         clock: { now: () => new Date(dueAt.getTime() + 1) },
         batchSize: 100,
       });
-      const [completion, deadlineRun] = await Promise.all([completionPromise, deadlinePromise]);
-      const [storedQuest] = await db
-        .select({ status: quest.questStatus })
-        .from(quest)
-        .where(eq(quest.id, questId));
-      if (!storedQuest) throw new Error(`Quest ${questId} disappeared during the race`);
-      expect(['QUEST_COMPLETED', 'QUEST_FAILED']).toContain(storedQuest.status);
-      const completed = storedQuest.status === 'QUEST_COMPLETED';
-      expect(completion.status === 200).toBe(completed);
-      expect(deadlineRun.failedQuestIds.includes(questId)).toBe(!completed);
-      for (const socket of [sockets[0]!, sockets[2]!]) {
-        if (completed) {
-          expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_CONFIRMED');
+      expect(deadlineRun.failedQuestIds).not.toContain(questId);
+      expect(
+        (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+          ?.status
+      ).toBe('QUEST_IN_PROGRESS');
+
+      const firstReview = await fetch(
+        `${origin}/api/v2/quests/${questId}/completion-confirmations/${firstConfirmationBody.data.id}/review`,
+        {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `proof-live-deadline-race-first-review-${randomUUID()}`,
+          },
+          body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
         }
-        expect(JSON.parse((await socket.nextText())!).changeType).toBe(
-          completed ? 'QUEST_COMPLETED' : 'QUEST_FAILED'
-        );
+      );
+      expect(firstReview.status).toBe(200);
+      for (const socket of [sockets[0]!, sockets[1]!]) {
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEWED');
       }
+      expect(await sockets[2]?.nextText(250)).toBeUndefined();
+
+      const finalReview = await fetch(
+        `${origin}/api/v2/quests/${questId}/completion-confirmations/${finalConfirmationBody.data.id}/review`,
+        {
+          method: 'POST',
+          headers: {
+            cookie: hirer.cookie,
+            'content-type': 'application/json',
+            'idempotency-key': `proof-live-deadline-race-final-review-${randomUUID()}`,
+          },
+          body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
+        }
+      );
+      expect(finalReview.status).toBe(200);
+      for (const socket of sockets) {
+        if (socket === sockets[0] || socket === sockets[2]) {
+          expect(JSON.parse((await socket.nextText())!).changeType).toBe('COMPLETION_REVIEWED');
+        }
+        expect(JSON.parse((await socket.nextText())!).changeType).toBe('QUEST_COMPLETED');
+      }
+      expect((await sockets[1]?.nextFrame())?.opcode).toBe(8);
       expect((await sockets[2]?.nextFrame())?.opcode).toBe(8);
       expect(await sockets[0]?.nextText(250)).toBeUndefined();
       const read = await fetch(`${origin}/api/v2/quests/${questId}`, {
         headers: { cookie: hirer.cookie },
       });
       expect(read.status).toBe(200);
-      expect(JSON.stringify(await read.json())).toContain(storedQuest.status);
+      expect(JSON.stringify(await read.json())).toContain('QUEST_COMPLETED');
     } finally {
-      for (const socket of sockets) socket.destroy();
-      await server.stop();
+      await Promise.all(sockets.map((socket) => socket.destroyAndWait()));
+      await stopRealtimeTestServer(server.server!, port);
     }
   });
 });

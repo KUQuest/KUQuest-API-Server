@@ -21,6 +21,9 @@ import type {
   QuestV2ProofSubmissionEditInput,
   QuestV2ProofSubmissionParams,
   QuestV2ProofSubmissionReviewInput,
+  QuestV2CompletionConfirmationParams,
+  QuestV2CompletionConfirmationDetailParams,
+  QuestV2CompletionConfirmationReviewInput,
 } from './quest-proof-v2.schema';
 import {
   confirmQuestV2Completion,
@@ -28,10 +31,13 @@ import {
   deleteQuestV2ProofSubmission,
   editQuestV2ProofSubmissionWithFiles,
   getQuestV2ProofFile,
+  listQuestV2CompletionConfirmations,
   listQuestV2ProofSubmissions,
+  reviewQuestV2CompletionConfirmation,
   reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
   type QuestV2CompletionConfirmationOutcome,
+  type QuestV2CompletionConfirmationRecord,
   type QuestV2ProofSubmission,
   type ProofCommandOutcomeCode,
   type QuestV2ProofSubmissionListOutcome,
@@ -59,6 +65,13 @@ const serializeSubmission = (submission: QuestV2ProofSubmission) => ({
   visibility: submission.visibility,
   fileIds: submission.fileIds,
   files: submission.files,
+});
+
+const serializeCompletionConfirmation = (confirmation: QuestV2CompletionConfirmationRecord) => ({
+  ...confirmation,
+  confirmedAt: confirmation.confirmedAt.toISOString(),
+  reviewDeadlineAt: confirmation.reviewDeadlineAt?.toISOString() ?? null,
+  reviewedAt: confirmation.reviewedAt?.toISOString() ?? null,
 });
 
 const conflict = (set: AuthedContext['set'], code: string, message: string) => {
@@ -118,6 +131,28 @@ const mapCommandError = (set: AuthedContext['set'], outcome: ProofCommandOutcome
       'COMPLETION_ALREADY_CONFIRMED',
       'Completion was already confirmed for this Assignment'
     );
+  }
+  if (outcome === 'completion-confirmation-not-found') {
+    set.status = 404;
+    return apiError('COMPLETION_CONFIRMATION_NOT_FOUND', 'Completion Confirmation not found');
+  }
+  if (outcome === 'completion-confirmation-review-not-pending') {
+    return conflict(
+      set,
+      'COMPLETION_CONFIRMATION_NOT_PENDING',
+      'The Completion Confirmation already has a final decision'
+    );
+  }
+  if (outcome === 'completion-review-reason-required') {
+    set.status = 400;
+    return apiError(
+      'COMPLETION_NOT_APPROVED_REASON_REQUIRED',
+      'COMPLETION_CONFIRMATION_NOT_APPROVED requires a non-blank reason'
+    );
+  }
+  if (outcome === 'completion-review-reason-invalid') {
+    set.status = 400;
+    return apiError('COMPLETION_REVIEW_REASON_INVALID', 'The completion review reason is invalid');
   }
   if (outcome === 'files-required') {
     set.status = 400;
@@ -471,8 +506,91 @@ export const confirmQuestV2CompletionController = async ({
   }
   if ('outcome' in result) return mapCommandError(set, result.outcome);
   return apiSuccess({
+    id: result.id,
     confirmed: result.confirmed,
     confirmedAt: result.confirmedAt.toISOString(),
+    reviewDeadlineAt: result.reviewDeadlineAt.toISOString(),
+    reviewStatus: result.reviewStatus,
+    questStatus: result.questStatus,
+  });
+};
+
+export const listQuestV2CompletionConfirmationsController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2CompletionConfirmationParams }) => {
+  const result = await listQuestV2CompletionConfirmations(session.user.id, params.questId);
+  if ('outcome' in result) {
+    set.status = result.outcome === 'not-found' ? 404 : 403;
+    return apiError(
+      result.outcome === 'not-found' ? 'QUEST_NOT_FOUND' : 'COMPLETION_CONFIRMATION_NOT_ALLOWED',
+      result.outcome === 'not-found'
+        ? 'Quest not found'
+        : 'The Member cannot read this Quest completion confirmation list'
+    );
+  }
+  return apiSuccess({ items: result.map(serializeCompletionConfirmation) });
+};
+
+export const reviewQuestV2CompletionConfirmationController = async ({
+  body,
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & {
+  body: QuestV2CompletionConfirmationReviewInput;
+  params: QuestV2CompletionConfirmationDetailParams;
+}) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  let result: Awaited<ReturnType<typeof reviewQuestV2CompletionConfirmation>>;
+  try {
+    result = await reviewQuestV2CompletionConfirmation(
+      session.user.id,
+      params.questId,
+      params.completionConfirmationId,
+      body.decision,
+      body.reason ?? null,
+      commandId
+    );
+  } catch (error) {
+    if (error instanceof WorkChatTransitionError) {
+      set.status = 503;
+      return apiError(
+        'QUEST_COMPLETION_UNAVAILABLE',
+        'Quest completion could not settle its Wallet or Work Chat transition'
+      );
+    }
+    if (error instanceof MoneyDomainError) {
+      set.status = 503;
+      return apiError(
+        'QUEST_SETTLEMENT_UNAVAILABLE',
+        'Quest Reward settlement could not be completed'
+      );
+    }
+    throw error;
+  }
+  if ('outcome' in result) {
+    if (result.outcome === 'hirer-not-allowed') {
+      set.status = 403;
+      return apiError(
+        'COMPLETION_REVIEW_NOT_ALLOWED',
+        'Only the Quest Hirer can review a Completion Confirmation'
+      );
+    }
+    if (result.outcome === 'not-reviewable') {
+      return conflict(
+        set,
+        'COMPLETION_CONFIRMATION_NOT_REVIEWABLE',
+        'The Quest does not accept a Completion Confirmation review in its current state'
+      );
+    }
+    return mapCommandError(set, result.outcome);
+  }
+  return apiSuccess({
+    confirmation: serializeCompletionConfirmation(result.confirmation),
     questStatus: result.questStatus,
   });
 };

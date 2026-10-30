@@ -19,6 +19,13 @@ export const questV2ProofSubmissionDetailParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   proofSubmissionId: t.String({ format: 'uuid' }),
 });
+export const questV2CompletionConfirmationParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+});
+export const questV2CompletionConfirmationDetailParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+  completionConfirmationId: t.String({ format: 'uuid' }),
+});
 export const questV2ProofFileParamsSchema = t.Object({
   questId: t.String({ format: 'uuid' }),
   proofSubmissionId: t.String({ format: 'uuid' }),
@@ -75,6 +82,17 @@ export const questV2ProofSubmissionReviewSchema = t.Object(
   {
     additionalProperties: false,
   }
+);
+
+export const questV2CompletionConfirmationReviewSchema = t.Object(
+  {
+    decision: t.Union([
+      t.Literal('COMPLETION_CONFIRMATION_APPROVED'),
+      t.Literal('COMPLETION_CONFIRMATION_NOT_APPROVED'),
+    ]),
+    reason: t.Optional(t.Nullable(t.String({ maxLength: 1000, pattern: '\\S' }))),
+  },
+  { additionalProperties: false }
 );
 
 const proofStatusSchema = t.Nullable(proofStatus);
@@ -163,8 +181,44 @@ const questV2State = t.Union(
 export const questV2CompletionConfirmationResponseSchema = t.Object({
   success: t.Literal(true),
   data: t.Object({
+    id: t.String({ format: 'uuid' }),
     confirmed: t.Literal(true),
     confirmedAt: t.String({ format: 'date-time' }),
+    reviewDeadlineAt: t.String({ format: 'date-time' }),
+    reviewStatus: t.Literal('COMPLETION_CONFIRMATION_PENDING'),
+    questStatus: questV2State,
+  }),
+});
+
+const completionConfirmationStatusSchema = t.Union([
+  t.Literal('COMPLETION_CONFIRMATION_PENDING'),
+  t.Literal('COMPLETION_CONFIRMATION_APPROVED'),
+  t.Literal('COMPLETION_CONFIRMATION_NOT_APPROVED'),
+  t.Literal('COMPLETION_CONFIRMATION_CANCELLED'),
+]);
+const completionConfirmationSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  questId: t.String({ format: 'uuid' }),
+  workerId: t.Nullable(t.String({ format: 'uuid' })),
+  teamId: t.Nullable(t.String({ format: 'uuid' })),
+  confirmedByUserId: t.String({ format: 'uuid' }),
+  confirmedAt: t.String({ format: 'date-time' }),
+  reviewStatus: completionConfirmationStatusSchema,
+  reviewDeadlineAt: t.Nullable(t.String({ format: 'date-time' })),
+  reviewReason: t.Nullable(t.String()),
+  reviewedAt: t.Nullable(t.String({ format: 'date-time' })),
+  reviewedBy: t.Nullable(t.Union([t.Literal('HIRER'), t.Literal('AUTO_APPROVE')])),
+});
+
+export const questV2CompletionConfirmationListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({ items: t.Array(completionConfirmationSchema) }),
+});
+
+export const questV2CompletionConfirmationReviewResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    confirmation: completionConfirmationSchema,
     questStatus: questV2State,
   }),
 });
@@ -181,7 +235,16 @@ export type QuestV2ProofSubmissionParams = Static<typeof questV2ProofSubmissionP
 export type QuestV2ProofSubmissionDetailParams = Static<
   typeof questV2ProofSubmissionDetailParamsSchema
 >;
+export type QuestV2CompletionConfirmationParams = Static<
+  typeof questV2CompletionConfirmationParamsSchema
+>;
+export type QuestV2CompletionConfirmationDetailParams = Static<
+  typeof questV2CompletionConfirmationDetailParamsSchema
+>;
 export type QuestV2ProofFileParams = Static<typeof questV2ProofFileParamsSchema>;
 export type QuestV2ProofSubmissionCreateInput = Static<typeof questV2ProofSubmissionCreateSchema>;
 export type QuestV2ProofSubmissionEditInput = Static<typeof questV2ProofSubmissionEditSchema>;
 export type QuestV2ProofSubmissionReviewInput = Static<typeof questV2ProofSubmissionReviewSchema>;
+export type QuestV2CompletionConfirmationReviewInput = Static<
+  typeof questV2CompletionConfirmationReviewSchema
+>;

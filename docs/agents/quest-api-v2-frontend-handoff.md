@@ -2747,15 +2747,76 @@ Success status: HTTP 200.
 {
   "success": true,
   "data": {
+    "id": "completion-confirmation-uuid",
     "confirmed": true,
     "confirmedAt": "2026-10-07T17:00:00.000+07:00",
-    "questStatus": "QUEST_COMPLETED"
+    "reviewDeadlineAt": "2026-10-08T17:00:00.000+07:00",
+    "reviewStatus": "COMPLETION_CONFIRMATION_PENDING",
+    "questStatus": "QUEST_IN_PROGRESS"
   }
 }
 ```
 
-For a GROUP Quest, the Quest can remain QUEST_IN_PROGRESS until all required
-Accepted Participants complete their obligation.
+The Worker must wait for the Hirer to decide. Do not show the Quest as complete
+when the Worker creates the Confirmation. If the Hirer does not decide by
+`reviewDeadlineAt`, the Server approves it automatically. The response has no
+Proof Submission or evidence.
+
+The mode rules are:
+
+- `SINGLE`: the Worker creates one Completion Confirmation.
+- `GROUP + FIRST_COME_FIRST_SERVED`: each Active Worker creates a Completion
+  Confirmation for that Worker's Assignment. A non-approval affects only that
+  Assignment. Other Workers can continue. The final Quest State is
+  `QUEST_COMPLETED` if at least one Assignment succeeds; otherwise it is
+  `QUEST_FAILED`. The not-approved Worker gets the `COMPLETION_REVIEWED` Push
+  for the decision. If the Quest then completes, that Worker keeps the Quest
+  socket during the money hold and gets the `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`
+  Push, as for a not-approved Proof (see the socket rules and section 13.3).
+  While a not-approved Worker is
+  `ASSIGNMENT_INCOMPLETE` on the running Quest, Hirer cancellation answers
+  409 `QUEST_SETTLEMENT_NOT_ALLOWED` and Admin termination answers 409
+  `QUEST_ACTION_NOT_ALLOWED`.
+- `GROUP + CANDIDATE`: the Team Leader creates one Completion Confirmation for
+  the Team. A non-approval fails the Quest and affects every Team Assignment.
+
+### 12.9 Read and review Completion Confirmations
+
+Use `GET /api/v2/quests/:questId/completion-confirmations` to read the role-
+filtered list. The Hirer sees every Confirmation. A Worker sees the Confirmation
+for that Worker or selected Team. Only the Hirer and submitting Worker see a
+non-approval reason.
+
+Review one Confirmation:
+
+```http
+POST /api/v2/quests/:questId/completion-confirmations/:completionConfirmationId/review
+Idempotency-Key: review-completion-client-action-id
+Content-Type: application/json
+```
+
+Approve:
+
+```json
+{ "decision": "COMPLETION_CONFIRMATION_APPROVED" }
+```
+
+Do not approve:
+
+```json
+{
+  "decision": "COMPLETION_CONFIRMATION_NOT_APPROVED",
+  "reason": "The agreed work is incomplete."
+}
+```
+
+Only the Hirer can decide. A non-approval requires a non-blank reason and
+creates an Admin Review Item. The Hirer receives a notification when the
+Confirmation is created. The submitting Worker receives a notification when a
+decision is recorded. Listen for `COMPLETION_REVIEW_PENDING` and
+`COMPLETION_REVIEWED` real-time Events and refresh the list after reconnect.
+The Server auto-approves a pending Confirmation after 24 hours. Approved Workers
+begin Reward settlement when the decision is recorded.
 
 Errors include:
 
@@ -2765,6 +2826,23 @@ Errors include:
 - 409 COMPLETION_ALREADY_CONFIRMED
 - 409 COMPLETION_NOT_ALLOWED
 - idempotency errors
+
+Review errors include:
+
+- 403 COMPLETION_REVIEW_NOT_ALLOWED
+- 404 COMPLETION_CONFIRMATION_NOT_FOUND
+- 409 COMPLETION_CONFIRMATION_NOT_PENDING
+- 409 COMPLETION_CONFIRMATION_NOT_REVIEWABLE
+- 400 COMPLETION_NOT_APPROVED_REASON_REQUIRED
+- idempotency errors
+
+If the Hirer cancels or an Admin terminates the Quest while a Completion Confirmation is pending,
+the Server returns that Confirmation in later lists with
+`reviewStatus: "COMPLETION_CONFIRMATION_CANCELLED"`. The Server does not pay
+the affected Worker or Team for that Confirmation and does not create an Admin
+Review Item. A Completion Confirmation that was already approved keeps its
+normal cancellation settlement. Refresh the Confirmation list after the Quest
+is cancelled or terminated.
 
 ## 13. Cancellation and money outcomes
 
@@ -2808,6 +2886,13 @@ Settlement meaning:
 | QUEST_OPEN          | Refund 100 percent of reserved funding                             |
 | QUEST_ASSIGNED      | Pay 20 percent of Worker pool; refund remaining 80 percent and fee |
 | QUEST_IN_PROGRESS   | Full applicable settlement                                         |
+
+For `QUEST_IN_PROGRESS`, a pending proof-free Completion Confirmation is
+cancelled with the Quest. Its Worker or Team receives no Reward, and the
+unsettled Reward and Platform Fee return to the Hirer. Already approved Worker
+Rewards keep the normal cancellation settlement. The API returns each
+cancelled Confirmation as `COMPLETION_CONFIRMATION_CANCELLED` when the list is
+read again.
 
 The returned paidSatang and refundedSatang values are authoritative.
 Do not calculate them in the frontend.

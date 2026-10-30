@@ -93,6 +93,7 @@ const fixtureConductAssignmentIds: string[] = [];
 const fixturePushDeviceIds: string[] = [];
 const penaltyMemberIds = new Set<string>();
 const fixtureProofSubmissionIds: string[] = [];
+const fixtureQuestV2ProofSubmissionIds: string[] = [];
 const fixtureMemberIds: string[] = [];
 
 const cookieHeaderFor = (response: Response): string =>
@@ -467,6 +468,7 @@ const createConductReportFixture = async (
 
     if (input.includeTeamProof) {
       proofSubmissionId = randomUUID();
+      fixtureQuestV2ProofSubmissionIds.push(proofSubmissionId);
       await db.insert(questV2ProofSubmission).values({
         id: proofSubmissionId,
         questId,
@@ -889,6 +891,11 @@ const cleanFixtures = async () => {
         .delete(proofSubmission)
         .where(inArray(proofSubmission.id, fixtureProofSubmissionIds));
     }
+    if (fixtureQuestV2ProofSubmissionIds.length > 0) {
+      await transaction
+        .delete(questV2ProofSubmission)
+        .where(inArray(questV2ProofSubmission.id, fixtureQuestV2ProofSubmissionIds));
+    }
     if (fixtureCaseIds.length > 0) {
       await transaction
         .delete(adminModerationDecision)
@@ -955,6 +962,7 @@ const cleanFixtures = async () => {
   fixtureCaseIds.length = 0;
   fixtureConductReportIds.length = 0;
   fixtureConductQuestIds.length = 0;
+  fixtureQuestV2ProofSubmissionIds.length = 0;
   fixtureConductAssignmentIds.length = 0;
   fixturePushDeviceIds.length = 0;
   fixtureProofSubmissionIds.length = 0;

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'bun:test';
 
 const questId = '018f47a7-1c7d-7c98-9a11-690d7e83430c';
 const proofSubmissionId = '018f47a7-1c7d-7c98-9a11-690d7e834301';
+const completionConfirmationId = '018f47a7-1c7d-7c98-9a11-690d7e834302';
 
 const request = (method: string, path: string, headers: HeadersInit = {}, body?: BodyInit) =>
   app.handle(new Request(`http://localhost${path}`, { method, headers, body }));
@@ -32,13 +33,22 @@ describe('Quest Proof API v2 contract', () => {
         JSON.stringify({ decision: 'PROOF_APPROVED' })
       ),
       request('POST', `/api/v2/quests/${questId}/completion-confirmation`),
+      request(
+        'POST',
+        `/api/v2/quests/${questId}/completion-confirmations/${completionConfirmationId}/review`,
+        { 'content-type': 'application/json' },
+        JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' })
+      ),
     ];
     const responses = await Promise.all(requests);
 
-    expect(responses.map((response) => response.status)).toEqual([400, 400, 400, 400, 400, 400]);
+    expect(responses.map((response) => response.status)).toEqual([
+      400, 400, 400, 400, 400, 400, 400,
+    ]);
     expect(
       await Promise.all(responses.map(async (response) => (await response.json()).error.code))
     ).toEqual([
+      'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
       'IDEMPOTENCY_KEY_REQUIRED',
@@ -85,11 +95,18 @@ describe('Quest Proof API v2 contract', () => {
         `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofSubmissionId}`
       ),
       request('POST', `/api/v2/quests/${questId}/completion-confirmation`, headers),
+      request('GET', `/api/v2/quests/${questId}/completion-confirmations`),
+      request(
+        'POST',
+        `/api/v2/quests/${questId}/completion-confirmations/${completionConfirmationId}/review`,
+        headers,
+        JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' })
+      ),
     ];
     const responses = await Promise.all(requests);
 
     expect(responses.map((response) => response.status)).toEqual([
-      401, 401, 401, 401, 401, 401, 401, 401,
+      401, 401, 401, 401, 401, 401, 401, 401, 401, 401,
     ]);
   });
 
@@ -107,7 +124,7 @@ describe('Quest Proof API v2 contract', () => {
     expect(operation?.security).toEqual([{ betterAuthSession: [] }]);
   });
 
-  it('documents all eight v2 operations with canonical Proof statuses and no retired vocabulary', async () => {
+  it('documents v2 Proof and Completion Confirmation operations with canonical statuses', async () => {
     const response = await request('GET', '/openapi/json');
     const document = (await response.json()) as {
       paths: Record<
@@ -152,6 +169,16 @@ describe('Quest Proof API v2 contract', () => {
         'getQuestV2ProofFile',
       ],
       ['/api/v2/quests/{questId}/completion-confirmation', 'post', 'confirmQuestV2Completion'],
+      [
+        '/api/v2/quests/{questId}/completion-confirmations',
+        'get',
+        'listQuestV2CompletionConfirmations',
+      ],
+      [
+        '/api/v2/quests/{questId}/completion-confirmations/{completionConfirmationId}/review',
+        'post',
+        'reviewQuestV2CompletionConfirmation',
+      ],
     ] as const;
 
     for (const [path, method, operationId] of operations) {
@@ -170,5 +197,6 @@ describe('Quest Proof API v2 contract', () => {
     expect(openapiText).not.toContain('PROOF_AUTO_APPROVED');
     expect(openapiText).not.toContain('QUEST_REWORK');
     expect(openapiText).not.toContain('reworkLimit');
+    expect(openapiText).toContain('COMPLETION_CONFIRMATION_PENDING');
   });
 });

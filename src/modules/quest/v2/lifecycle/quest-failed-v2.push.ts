@@ -2,7 +2,8 @@ import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 
-export type QuestFailedPushReason = 'PROOF_NOT_APPROVED' | 'DUE_AT_MISSED';
+export type QuestFailedPushReason =
+  'PROOF_NOT_APPROVED' | 'COMPLETION_NOT_APPROVED' | 'DUE_AT_MISSED';
 
 type QuestFailedPushInput = {
   recipientMemberIds: string[];
@@ -36,7 +37,9 @@ export const enqueueQuestFailedPush = async (
       body:
         input.reason === 'PROOF_NOT_APPROVED'
           ? 'The Hirer did not approve a Proof Submission, so the Quest failed. You can open a Dispute Case within 1 day.'
-          : 'The Quest passed its due time without Proof, so it failed. You can open a Dispute Case within 1 day.',
+          : input.reason === 'COMPLETION_NOT_APPROVED'
+            ? 'The Hirer did not approve the completion confirmation, so the Quest failed. You can open a Dispute Case within 1 day.'
+            : 'The Quest passed its due time without Proof, so it failed. You can open a Dispute Case within 1 day.',
       deepLink: `kuquest://quest/${input.questId}`,
       data,
       now: input.now,

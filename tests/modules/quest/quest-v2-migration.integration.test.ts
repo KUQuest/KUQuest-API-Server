@@ -1860,7 +1860,8 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(confirmed.status).toBe(200);
     expect((await confirmed.json()).data).toMatchObject({
       confirmed: true,
-      questStatus: 'QUEST_COMPLETED',
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      questStatus: 'QUEST_IN_PROGRESS',
     });
 
     const groupFcfs = await createInProgressQuest({

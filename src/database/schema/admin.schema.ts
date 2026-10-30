@@ -20,6 +20,7 @@ import {
   quest,
   questAssignment,
   questCandidateTeamV2,
+  questV2CompletionConfirmation,
   questV2ProofSubmission,
 } from './quest.schema';
 import { chatAttachment, chatConversation, chatMessage } from './work-chat.schema';
@@ -267,9 +268,13 @@ export const adminReviewItem = pgTable(
     assignmentId: uuid('assignment_id')
       .notNull()
       .references(() => questAssignment.id, { onDelete: 'cascade' }),
-    proofSubmissionId: uuid('proof_submission_id')
-      .notNull()
-      .references(() => questV2ProofSubmission.id, { onDelete: 'cascade' }),
+    proofSubmissionId: uuid('proof_submission_id').references(() => questV2ProofSubmission.id, {
+      onDelete: 'cascade',
+    }),
+    completionConfirmationId: uuid('completion_confirmation_id').references(
+      () => questV2CompletionConfirmation.id,
+      { onDelete: 'cascade' }
+    ),
     hirerId: uuid('hirer_id')
       .notNull()
       .references(() => authUser.id),
@@ -285,12 +290,17 @@ export const adminReviewItem = pgTable(
     unique('admin_review_item_proof_submission_key').on(table.proofSubmissionId),
     check('admin_review_item_reason_check', sql`btrim(${table.reason}) <> ''`),
     check(
+      'admin_review_item_source_check',
+      sql`num_nonnulls(${table.proofSubmissionId}, ${table.completionConfirmationId}) = 1`
+    ),
+    check(
       'admin_review_item_evidence_check',
-      sql`jsonb_typeof(${table.evidenceReferences}) = 'array' AND jsonb_array_length(${table.evidenceReferences}) > 0`
+      sql`jsonb_typeof(${table.evidenceReferences}) = 'array'`
     ),
     index('admin_review_item_quest_idx').on(table.questId, table.createdAt),
     index('admin_review_item_assignment_idx').on(table.assignmentId),
     index('admin_review_item_worker_idx').on(table.workerId),
+    unique('admin_review_item_completion_confirmation_key').on(table.completionConfirmationId),
   ]
 );
 

@@ -8,6 +8,7 @@ import {
   questV2UnderfilledDecision,
   questV2UnderfilledConsent,
   questV2ProofSubmission,
+  questV2CompletionConfirmation,
   questV2TeamRewardAllocation,
   questV2TeamRewardAllocationMember,
   questCandidateTeamV2Member,
@@ -699,17 +700,22 @@ export const settleApprovedLegacyQuestProofAfterFailureInTransaction = async (
   };
 };
 
-/** Complete a proof-free v2 Quest after every required work confirmation exists. */
+/** Settle an approved proof-free completion confirmation. */
 export const settleProofFreeQuestV2InTransaction = async (
   tx: QuestTransaction,
   questId: string,
   commandId: string,
   now: Date,
   completedWorkerId: string | undefined,
-  actorUserId: string
-): Promise<(CommandResult & { allocationPending?: boolean }) | undefined> => {
+  actorUserId: string | null
+): Promise<CommandResult & { allocationPending?: boolean; holdsRemainder?: boolean }> => {
   const current = await lockQuest(tx, questId);
-  if (!current || current.apiVersion !== 'v2' || current.questStatus !== questStatus.inProgress) {
+  if (
+    !current ||
+    current.apiVersion !== 'v2' ||
+    ![questStatus.inProgress, questStatus.failed].includes(current.questStatus as never) ||
+    (current.questStatus === questStatus.failed && completedWorkerId === undefined)
+  ) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'The v2 Quest is not ready for completion.'
@@ -754,6 +760,8 @@ export const settleProofFreeQuestV2InTransaction = async (
       'The completed Worker Assignment is missing.'
     );
   }
+  const groupFcfs =
+    current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
   const underfilledConsents =
     completedWorkerId === undefined
       ? []
@@ -868,6 +876,22 @@ export const settleProofFreeQuestV2InTransaction = async (
         )
       );
     const remainingWorkers = await activeAssignments(tx, questId);
+    if (current.questStatus === questStatus.failed) {
+      await applyInactiveWorkersChat(
+        tx,
+        current,
+        [assignment],
+        assignmentStatus.completed,
+        now,
+        actorUserId
+      );
+      return {
+        questStatus: questStatus.failed,
+        outcome: 'COMPLETED',
+        paidSatang: paid,
+        refundedSatang: 0,
+      };
+    }
     if (remainingWorkers.length > 0) {
       await applyInactiveWorkersChat(
         tx,
@@ -877,10 +901,53 @@ export const settleProofFreeQuestV2InTransaction = async (
         now,
         actorUserId
       );
-      return undefined;
+      return {
+        questStatus: questStatus.inProgress,
+        outcome: 'COMPLETED',
+        paidSatang: paid,
+        refundedSatang: 0,
+      };
     }
   }
-  if (remaining !== 0 && !allocationPending) {
+  let holdRemainder = false;
+  if (groupFcfs && current.questStatus === questStatus.inProgress) {
+    const finalAssignments = await tx
+      .select({
+        id: questAssignment.id,
+        workerId: questAssignment.workerId,
+        assignmentStatus: questAssignment.assignmentStatus,
+      })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    const incompleteAssignments = finalAssignments.filter(
+      ({ assignmentStatus: status }) => status === assignmentStatus.incomplete
+    );
+    const expectedRemainder = incompleteAssignments.reduce((total, incomplete) => {
+      if (underfilledConsents.length === 0) return total + rewardSatang + Number(fee);
+      const allocation = underfilledConsents.find(
+        ({ assignmentId, workerId }) =>
+          assignmentId === incomplete.id && workerId === incomplete.workerId
+      );
+      if (!allocation) {
+        throw new MoneyDomainError(
+          'FUNDING_SETTLEMENT_FAILED',
+          'The incomplete Worker Reward allocation is missing.'
+        );
+      }
+      return (
+        total +
+        allocation.rewardSatang +
+        Number(feeShareSatang(underfilledConsents, underfilledFeePoolSatang, incomplete.id))
+      );
+    }, 0);
+    if (remaining !== expectedRemainder) {
+      throw new MoneyDomainError(
+        'FUNDING_SETTLEMENT_FAILED',
+        'Quest Escrow does not match the incomplete Assignment funding.'
+      );
+    }
+    holdRemainder = expectedRemainder > 0;
+  } else if (remaining !== 0 && !allocationPending) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'Quest Escrow does not match the completion payout.'
@@ -900,8 +967,9 @@ export const settleProofFreeQuestV2InTransaction = async (
     from: current.questStatus,
     to: questStatus.completed,
     now,
+    holdRemainder,
     workChat: [terminalChatEntry(current, questStatus.completed, commandId, now)],
-    actor: { actorType: 'MEMBER', actorUserId },
+    actor: questStateAuditActor(actorUserId),
   });
   return {
     questStatus: questStatus.completed,
@@ -909,6 +977,7 @@ export const settleProofFreeQuestV2InTransaction = async (
     paidSatang: allocationPending ? 0 : paid,
     refundedSatang: 0,
     ...(allocationPending ? { allocationPending: true } : {}),
+    holdsRemainder: holdRemainder,
   };
 };
 
@@ -1471,6 +1540,7 @@ type ActiveWorker = Awaited<ReturnType<typeof activeAssignments>>[number];
 type V2RewardAllocation = {
   assignmentId: string;
   workerId: string;
+  assignmentStatus: 'ASSIGNMENT_ACTIVE' | 'ASSIGNMENT_COMPLETED' | 'ASSIGNMENT_INCOMPLETE';
   rewardSatang: number;
   feeSatang: number;
 };
@@ -1536,21 +1606,24 @@ const v2UnderfilledAllocations = async (
     })
     .from(questAssignment)
     .where(eq(questAssignment.questId, current.id));
-  const eligibleAssignments = assignments.filter(
-    ({ assignmentStatus: status }) => status !== assignmentStatus.cancelled
+  const consentAssignments = assignments.filter(
+    ({ assignmentStatus: status }) =>
+      status === assignmentStatus.active ||
+      status === assignmentStatus.completed ||
+      status === assignmentStatus.incomplete
   );
   const rewardPoolSatang =
     current.rewardSatang === null ? 0 : current.rewardSatang * current.headcount;
   const feePoolSatang = expectedEscrowSatang - rewardPoolSatang;
   const assignmentById = new Map(
-    eligibleAssignments.map((assignment) => [assignment.id, assignment])
+    consentAssignments.map((assignment) => [assignment.id, assignment])
   );
   const allocationTotal = consents.reduce((total, consent) => total + consent.rewardSatang, 0);
   if (
     decision.workerRewardPoolSatang !== rewardPoolSatang ||
     consents.length === 0 ||
     consents.length > current.headcount ||
-    eligibleAssignments.length !== consents.length ||
+    consentAssignments.length !== consents.length ||
     feePoolSatang < 0 ||
     allocationTotal !== rewardPoolSatang ||
     consents.some((consent) => {
@@ -1568,12 +1641,22 @@ const v2UnderfilledAllocations = async (
     consents.map(() => Math.floor(feePoolSatang / consents.length)),
     feePoolSatang
   );
-  return consents.map((consent, index) => ({
-    assignmentId: consent.assignmentId,
-    workerId: consent.workerId,
-    rewardSatang: consent.rewardSatang,
-    feeSatang: feeSatangByIndex[index],
-  }));
+  return consents.map((consent, index) => {
+    const assignment = assignmentById.get(consent.assignmentId);
+    if (!assignment) {
+      throw new MoneyDomainError(
+        'FUNDING_SETTLEMENT_FAILED',
+        'The underfilled Quest Assignment allocation is inconsistent.'
+      );
+    }
+    return {
+      assignmentId: consent.assignmentId,
+      workerId: consent.workerId,
+      assignmentStatus: assignment.assignmentStatus as V2RewardAllocation['assignmentStatus'],
+      rewardSatang: consent.rewardSatang,
+      feeSatang: feeSatangByIndex[index],
+    };
+  });
 };
 
 /** Splits a pool over per-item bases, handing the leftover satang one each to the first items. */
@@ -1609,10 +1692,9 @@ const scaledCancellationAllocations = (
 const recordV2CancellationAudit = async (
   tx: QuestTransaction,
   workers: ActiveWorker[],
-  hirerId: string,
+  actor: AuditActor,
   now: Date
 ) => {
-  const actor: AuditActor = { actorType: 'MEMBER', actorUserId: hirerId };
   for (const worker of workers) {
     await recordAudit(tx, {
       ...actor,
@@ -1629,18 +1711,33 @@ const recordV2CancellationAudit = async (
 const applyV2CancellationInTransaction = async (
   tx: QuestTransaction,
   current: LockedQuest,
-  hirerId: string,
+  actor: Actor,
   commandId: string,
-  now: Date
+  now: Date,
+  reasonCode?: string | null
 ): Promise<QuestSettlementOutcome> => {
+  const actorId = actor.userId ?? actor.adminId;
+  const auditActor: AuditActor = actor.adminId
+    ? { actorType: 'ADMIN', actorAdminId: actor.adminId }
+    : actor.userId
+      ? { actorType: 'MEMBER', actorUserId: actor.userId }
+      : { actorType: 'SYSTEM' };
+  const cancelledByUserId = actor.userId ?? null;
+  const cancelledByAdminId = actor.adminId ?? null;
   const discard = async (
     outcome: Extract<QuestSettlementOutcome, { outcome: string }>['outcome']
   ) => {
-    await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
+    if (actor.userId) {
+      await tx
+        .delete(questSettlementCommand)
+        .where(eq(questSettlementCommand.commandId, commandId));
+    }
     return { outcome } as QuestSettlementOutcome;
   };
 
-  if (current.hirerId !== hirerId) return discard('not-authorized');
+  if (!actorId || (actor.userId && current.hirerId !== actor.userId)) {
+    return discard('not-authorized');
+  }
   if (
     current.questStatus === questStatus.assigned &&
     (await hasPendingQuestV2EditRequest(tx, current.id))
@@ -1648,7 +1745,6 @@ const applyV2CancellationInTransaction = async (
     return discard('invalid-state');
   }
 
-  const cancelledByUserId = hirerId;
   if (current.questStatus === questStatus.draft) {
     await applyQuestStateTransition(tx, {
       questId: current.id,
@@ -1656,11 +1752,12 @@ const applyV2CancellationInTransaction = async (
       to: questStatus.cancelled,
       now,
       version: current.version,
-      columns: { cancelledByUserId, cancelledByAdminId: null },
-      workChat: [terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId)],
-      actor: { actorType: 'MEMBER', actorUserId: hirerId },
+      columns: { cancelledByUserId, cancelledByAdminId },
+      workChat: [terminalChatEntry(current, questStatus.cancelled, commandId, now, actorId)],
+      actor: auditActor,
+      reasonCode,
     });
-    await recordV2CancellationAudit(tx, [], hirerId, now);
+    await recordV2CancellationAudit(tx, [], auditActor, now);
     return {
       questStatus: questStatus.cancelled,
       outcome: 'CANCELLED',
@@ -1701,6 +1798,27 @@ const applyV2CancellationInTransaction = async (
   }
 
   const workers = await activeAssignments(tx, current.id);
+  const pendingConfirmations =
+    current.questStatus === questStatus.inProgress
+      ? await tx
+          .select({
+            id: questV2CompletionConfirmation.id,
+            workerId: questV2CompletionConfirmation.workerId,
+            teamId: questV2CompletionConfirmation.teamId,
+          })
+          .from(questV2CompletionConfirmation)
+          .where(
+            and(
+              eq(questV2CompletionConfirmation.questId, current.id),
+              eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
+            )
+          )
+          .for('update')
+      : [];
+  const pendingWorkerIds = new Set(
+    pendingConfirmations.flatMap(({ workerId }) => (workerId ? [workerId] : []))
+  );
+  const pendingTeamConfirmation = pendingConfirmations.some(({ teamId }) => teamId !== null);
   const groupCandidate = current.v2Mode === 'CANDIDATE' && current.v2Participation === 'GROUP';
   const groupFcfs =
     current.v2Mode === 'FIRST_COME_FIRST_SERVED' && current.v2Participation === 'GROUP';
@@ -1723,6 +1841,12 @@ const applyV2CancellationInTransaction = async (
       ? await v2UnderfilledAllocations(tx, current, expectedEscrowSatang)
       : undefined;
     if (groupCandidate) {
+      if (reservation.remainingSatang !== expectedEscrowSatang) {
+        throw new MoneyDomainError(
+          'FUNDING_SETTLEMENT_FAILED',
+          'Quest Escrow does not match the cancellation payout.'
+        );
+      }
       const leaderId = await selectedV2TeamLeader(tx, current.id);
       if (!leaderId || !workers.some(({ workerId }) => workerId === leaderId)) {
         throw new MoneyDomainError(
@@ -1735,8 +1859,11 @@ const applyV2CancellationInTransaction = async (
         rewardSatang * current.headcount
       );
     } else {
-      const allocations = rewardAllocations
-        ? rewardAllocations.map(({ workerId, rewardSatang: amountSatang }) => ({
+      const activeRewardAllocations = rewardAllocations?.filter(
+        ({ assignmentStatus: status }) => status === assignmentStatus.active
+      );
+      const allocations = activeRewardAllocations
+        ? activeRewardAllocations.map(({ workerId, rewardSatang: amountSatang }) => ({
             workerId,
             amountSatang,
           }))
@@ -1774,33 +1901,53 @@ const applyV2CancellationInTransaction = async (
           'Selected Team Leader Assignment is missing.'
         );
       }
-      payoutWorkers = Array.from({ length: current.headcount }, () => ({
-        workerId: leaderId,
-        amountSatang: rewardSatang,
-      }));
-      expectedRemainingSatang = (rewardSatang + Number(fee)) * current.headcount;
+      if (!pendingTeamConfirmation) {
+        payoutWorkers = Array.from({ length: current.headcount }, () => ({
+          workerId: leaderId,
+          amountSatang: rewardSatang,
+        }));
+      }
+      expectedRemainingSatang = expectedEscrowSatang;
     } else {
       const underfilled = groupFcfs
         ? await v2UnderfilledAllocations(tx, current, expectedEscrowSatang)
         : undefined;
       const activeWorkerIds = new Set(workers.map(({ id }) => id));
-      const allocations = underfilled
-        ? underfilled.filter(({ assignmentId }) => activeWorkerIds.has(assignmentId))
-        : workers.map(({ id, workerId }) => ({
+      const activeAllocations = underfilled?.filter(
+        ({ assignmentStatus: status, assignmentId }) =>
+          status === assignmentStatus.active && activeWorkerIds.has(assignmentId)
+      );
+      if (underfilled && (activeAllocations?.length ?? 0) !== workers.length) {
+        return discard('invalid-state');
+      }
+      const expectedEscrow = activeAllocations
+        ? activeAllocations.reduce(
+            (total, allocation) => total + allocation.rewardSatang + allocation.feeSatang,
+            0
+          )
+        : (rewardSatang + Number(fee)) * workers.length;
+      if (reservation.remainingSatang !== expectedEscrow) {
+        throw new MoneyDomainError(
+          'FUNDING_SETTLEMENT_FAILED',
+          'Quest Escrow does not match the cancellation payout.'
+        );
+      }
+      expectedRemainingSatang = expectedEscrow;
+      const eligibleWorkers = workers.filter(({ workerId }) => !pendingWorkerIds.has(workerId));
+      const eligibleAssignmentIds = new Set(eligibleWorkers.map(({ id }) => id));
+      const allocations = activeAllocations
+        ? activeAllocations.filter(({ assignmentId }) => eligibleAssignmentIds.has(assignmentId))
+        : eligibleWorkers.map(({ id, workerId }) => ({
             assignmentId: id,
             workerId,
             rewardSatang,
             feeSatang: Number(fee),
           }));
-      if (allocations.length !== workers.length) return discard('invalid-state');
+      if (allocations.length !== eligibleWorkers.length) return discard('invalid-state');
       payoutWorkers = allocations.map(({ workerId, rewardSatang: amountSatang }) => ({
         workerId,
         amountSatang,
       }));
-      expectedRemainingSatang = allocations.reduce(
-        (total, allocation) => total + allocation.rewardSatang + allocation.feeSatang,
-        0
-      );
       if (underfilled) {
         const feeByWorker = new Map(
           allocations.map(({ workerId, feeSatang }) => [workerId, feeSatang])
@@ -1809,28 +1956,30 @@ const applyV2CancellationInTransaction = async (
           Promise.resolve(satang(feeByWorker.get(workerId ?? '') ?? 0));
       }
     }
-    if (reservation.remainingSatang !== expectedRemainingSatang) {
-      throw new MoneyDomainError(
-        'FUNDING_SETTLEMENT_FAILED',
-        'Quest Escrow does not match the cancellation payout.'
+    if (payoutWorkers.length > 0) {
+      const settlementFees = await Promise.all(
+        payoutWorkers.map(({ amountSatang, workerId }) => payoutFee(amountSatang, workerId))
       );
-    }
-    remainingBeforeRelease = await settleQuestWorkers(
-      tx,
-      current.hirerId,
-      reservation.reservationId,
-      payoutWorkers,
-      payoutFee,
-      `quest-v2-cancel:${commandId}`
-    );
-    paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
-    if (remainingBeforeRelease !== 0) {
-      throw new MoneyDomainError(
-        'FUNDING_SETTLEMENT_FAILED',
-        'Quest Escrow does not match the cancellation payout.'
+      const settledSatang =
+        payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0) +
+        settlementFees.reduce<number>((total, amountSatang) => total + Number(amountSatang), 0);
+      remainingBeforeRelease = await settleQuestWorkers(
+        tx,
+        current.hirerId,
+        reservation.reservationId,
+        payoutWorkers,
+        payoutFee,
+        `quest-v2-cancel:${commandId}`
       );
+      paidSatang = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
+      expectedRemainingSatang = reservation.remainingSatang - settledSatang;
+      if (remainingBeforeRelease !== expectedRemainingSatang) {
+        throw new MoneyDomainError(
+          'FUNDING_SETTLEMENT_FAILED',
+          'Quest Escrow does not match the cancellation payout.'
+        );
+      }
     }
-    expectedRemainingSatang = 0;
   }
 
   if (remainingBeforeRelease !== expectedRemainingSatang) {
@@ -1844,6 +1993,29 @@ const applyV2CancellationInTransaction = async (
     reservationId: reservation.reservationId,
     operationReference: `quest-v2-cancel-release:${commandId}`,
   });
+  if (pendingConfirmations.length > 0) {
+    const cancelledConfirmations = await tx
+      .update(questV2CompletionConfirmation)
+      .set({ reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' })
+      .where(
+        and(
+          eq(questV2CompletionConfirmation.questId, current.id),
+          eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
+        )
+      )
+      .returning({ id: questV2CompletionConfirmation.id });
+    for (const confirmation of cancelledConfirmations) {
+      await recordAudit(tx, {
+        ...auditActor,
+        action: 'COMPLETION_CONFIRMATION_CANCELLED',
+        resourceType: 'COMPLETION_CONFIRMATION',
+        resourceId: confirmation.id,
+        oldValue: { status: 'COMPLETION_CONFIRMATION_PENDING' },
+        newValue: { status: 'COMPLETION_CONFIRMATION_CANCELLED' },
+        createdAt: now,
+      });
+    }
+  }
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })
@@ -1859,21 +2031,24 @@ const applyV2CancellationInTransaction = async (
     to: questStatus.cancelled,
     now,
     version: current.version,
-    columns: { cancelledByUserId, cancelledByAdminId: null },
+    columns: { cancelledByUserId, cancelledByAdminId },
     workChat: [
-      ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, hirerId),
-      terminalChatEntry(current, questStatus.cancelled, commandId, now, hirerId),
+      ...inactiveWorkerEntries(current, workers, assignmentStatus.cancelled, now, actorId),
+      terminalChatEntry(current, questStatus.cancelled, commandId, now, actorId),
     ],
-    actor: { actorType: 'MEMBER', actorUserId: hirerId },
+    actor: auditActor,
+    reasonCode,
   });
-  await recordV2CancellationAudit(tx, workers, hirerId, now);
+  await recordV2CancellationAudit(tx, workers, auditActor, now);
   if (
     cancelled &&
     (current.questStatus === questStatus.assigned || current.questStatus === questStatus.inProgress)
   ) {
     await notifyQuestUpdate(tx, {
       questId: current.id,
-      recipientMemberIds: [...new Set([hirerId, ...workers.map(({ workerId }) => workerId)])],
+      recipientMemberIds: [
+        ...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)]),
+      ],
       closeMemberIds: workers.map(({ workerId }) => workerId),
       changeType: 'QUEST_CANCELLED',
     });
@@ -1918,13 +2093,19 @@ const settleV2CancellationInTransaction = async (
   if (
     expectedPreviewVersion !== undefined &&
     expectedPreviewVersion !==
-      (await cancelPreviewVersion(current, await activeAssignments(tx, questId)))
+      (await cancelPreviewVersion(tx, current, await activeAssignments(tx, questId)))
   ) {
     await tx.delete(questSettlementCommand).where(eq(questSettlementCommand.commandId, commandId));
     return { outcome: 'preview-stale' };
   }
 
-  const result = await applyV2CancellationInTransaction(tx, current, hirerId, commandId, now);
+  const result = await applyV2CancellationInTransaction(
+    tx,
+    current,
+    { userId: hirerId },
+    commandId,
+    now
+  );
   if (!('questStatus' in result)) return result;
   await finishCommand(tx, commandId, result, now);
   return result;
@@ -1961,13 +2142,28 @@ export const cancelQuestV2 = async (
 };
 
 /** Opaque token of the Quest facts that decide the cancellation tier and amounts. */
-const cancelPreviewVersion = (current: LockedQuest, workers: Array<{ id: string }>) =>
-  hash({
+const cancelPreviewVersion = async (
+  tx: QuestTransaction,
+  current: LockedQuest,
+  workers: Array<{ id: string }>
+) => {
+  const pendingCompletionConfirmationIds = await tx
+    .select({ id: questV2CompletionConfirmation.id })
+    .from(questV2CompletionConfirmation)
+    .where(
+      and(
+        eq(questV2CompletionConfirmation.questId, current.id),
+        eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
+      )
+    );
+  return hash({
     questId: current.id,
     status: current.questStatus,
     version: current.version,
     assignmentIds: workers.map(({ id }) => id).sort(),
+    pendingCompletionConfirmationIds: pendingCompletionConfirmationIds.map(({ id }) => id).sort(),
   });
+};
 
 export type QuestV2CancelPreview = {
   questStatus: QuestStatus;
@@ -2001,12 +2197,12 @@ export const previewQuestV2Cancellation = async (
       if (!current || current.apiVersion !== 'v2') return { outcome: 'not-found' as const };
       if (current.hirerId !== hirerId) return { outcome: 'not-authorized' as const };
       const workers = await activeAssignments(tx, questId);
-      const previewVersion = await cancelPreviewVersion(current, workers);
+      const previewVersion = await cancelPreviewVersion(tx, current, workers);
       const escrow = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
       const result = await applyV2CancellationInTransaction(
         tx,
         current,
-        hirerId,
+        { userId: hirerId },
         `cancel-preview:${crypto.randomUUID()}`,
         now
       );
@@ -2069,6 +2265,9 @@ const cancelInTransaction = async (
     (await hasPendingQuestV2EditRequest(tx, questId))
   ) {
     return { outcome: 'invalid-state' };
+  }
+  if (actor.adminId && current.apiVersion === 'v2') {
+    return applyV2CancellationInTransaction(tx, current, actor, commandId, now, reasonCode);
   }
   if (current.questStatus === questStatus.draft) {
     await applyQuestStateTransition(tx, {

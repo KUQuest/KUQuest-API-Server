@@ -1,14 +1,19 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
-import { adminAction } from '@/database/schema/admin.schema';
+import { adminAction, adminReviewItem } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   quest,
   questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
   questConditionItem,
   questTeam,
   questTeamInvitation,
   questTeamMember,
+  questV2CompletionConfirmation,
+  questV2UnderfilledConsent,
+  questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
@@ -82,6 +87,15 @@ const workerRequest = (path: string, headers: HeadersInit = {}, body?: unknown) 
 
 const memberGet = (path: string) =>
   app.handle(new Request(`http://localhost${path}`, { method: 'GET' }));
+
+const memberCompletionList = async (questId: string, memberId: string) => {
+  const session = asMember(memberId);
+  try {
+    return await memberGet(`/api/v2/quests/${questId}/completion-confirmations`);
+  } finally {
+    session.mockRestore();
+  }
+};
 
 const hideQuest = (questId: string, version: number) =>
   adminRequest(
@@ -218,6 +232,174 @@ const createInProgressQuestWithChat = async () => {
     })
   );
   return { questId, assignmentId };
+};
+
+const createProofFreeGroupFcfsQuestWithChat = async (headcount = 2) => {
+  const questId = randomUUID();
+  const assignmentIds = [randomUUID(), randomUUID()];
+  const escrowSatang = 1_020 * headcount;
+  const joinedAt = new Date(Date.now() - 60 * 60 * 1000);
+  const startTime = new Date(joinedAt.getTime() + 30 * 60 * 1000);
+  const dueAt = new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    apiVersion: 'v2',
+    title: `Admin moderation proof-free group ${questId}`,
+    condition: 'Complete the work',
+    mode: 'NO_CANDIDATE',
+    participation: 'GROUP',
+    v2Mode: 'FIRST_COME_FIRST_SERVED',
+    v2Participation: 'GROUP',
+    proofRequired: false,
+    rewardSatang: 1_000,
+    questStatus: 'QUEST_IN_PROGRESS',
+    questFundingTotalSatang: escrowSatang,
+    platformFeePerWorkerSatang: 20,
+    questEscrowSatang: escrowSatang,
+    tagId,
+    headcount,
+    startTime,
+    dueAt,
+  });
+  const roster = [workerId, teamLeaderId].map((memberId, index) => ({
+    workerId: memberId,
+    assignmentId: assignmentIds[index]!,
+    joinedAt: new Date(joinedAt.getTime() + index),
+  }));
+  await db.insert(questAssignment).values(
+    roster.map(({ assignmentId, workerId: memberId, joinedAt: acceptedAt }) => ({
+      id: assignmentId,
+      questId,
+      workerId: memberId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      createdAt: acceptedAt,
+    }))
+  );
+  await db.transaction((transaction) =>
+    workChatMembershipWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_DIRECT_JOIN',
+      type: 'workersAccepted',
+      commandId: `admin-quest-proof-free-group-seed:${questId}`,
+      eventId: `admin-quest-proof-free-group-seed:${questId}`,
+      questId,
+      actorId: workerId,
+      hirerId,
+      occurredAt: joinedAt.toISOString(),
+      workers: [
+        {
+          workerId: roster[0]!.workerId,
+          assignmentId: roster[0]!.assignmentId,
+          joinedAt: roster[0]!.joinedAt.toISOString(),
+        },
+        {
+          workerId: roster[1]!.workerId,
+          assignmentId: roster[1]!.assignmentId,
+          joinedAt: roster[1]!.joinedAt.toISOString(),
+        },
+      ],
+    })
+  );
+  await db.transaction((transaction) =>
+    reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(escrowSatang),
+    })
+  );
+  return { questId, assignmentIds };
+};
+
+const createProofFreeGroupCandidateQuestWithChat = async () => {
+  const questId = randomUUID();
+  const teamId = randomUUID();
+  const assignmentIds = [randomUUID(), randomUUID()];
+  const joinedAt = new Date(Date.now() - 60 * 60 * 1000);
+  const startTime = new Date(joinedAt.getTime() + 30 * 60 * 1000);
+  const dueAt = new Date(startTime.getTime() + 2 * 60 * 60 * 1000);
+  questIds.push(questId);
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    apiVersion: 'v2',
+    title: `Admin moderation proof-free Candidate Team ${questId}`,
+    condition: 'Complete the work',
+    mode: 'CANDIDATE',
+    participation: 'GROUP',
+    v2Mode: 'CANDIDATE',
+    v2Participation: 'GROUP',
+    proofRequired: false,
+    rewardSatang: 1_000,
+    questStatus: 'QUEST_IN_PROGRESS',
+    questFundingTotalSatang: 2_040,
+    platformFeePerWorkerSatang: 20,
+    questEscrowSatang: 2_040,
+    tagId,
+    headcount: 2,
+    startTime,
+    dueAt,
+  });
+  await db.insert(questCandidateTeamV2).values({
+    id: teamId,
+    questId,
+    leaderId: teamLeaderId,
+    name: 'Selected Candidate Team',
+    headcount: 2,
+    state: 'TEAM_SELECTED',
+  });
+  await db.insert(questCandidateTeamV2Member).values([
+    { teamId, memberId: teamLeaderId },
+    { teamId, memberId: workerId },
+  ]);
+  const roster = [teamLeaderId, workerId].map((memberId, index) => ({
+    workerId: memberId,
+    assignmentId: assignmentIds[index]!,
+    joinedAt: new Date(joinedAt.getTime() + index),
+  }));
+  await db.insert(questAssignment).values(
+    roster.map(({ assignmentId, workerId: memberId, joinedAt: acceptedAt }) => ({
+      id: assignmentId,
+      questId,
+      workerId: memberId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      createdAt: acceptedAt,
+    }))
+  );
+  await db.transaction((transaction) =>
+    workChatMembershipWriter.applyQuestTransition(transaction, {
+      producer: 'QUEST_DIRECT_JOIN',
+      type: 'workersAccepted',
+      commandId: `admin-quest-proof-free-candidate-seed:${questId}`,
+      eventId: `admin-quest-proof-free-candidate-seed:${questId}`,
+      questId,
+      actorId: teamLeaderId,
+      hirerId,
+      occurredAt: joinedAt.toISOString(),
+      workers: [
+        {
+          workerId: roster[0]!.workerId,
+          assignmentId: roster[0]!.assignmentId,
+          joinedAt: roster[0]!.joinedAt.toISOString(),
+        },
+        {
+          workerId: roster[1]!.workerId,
+          assignmentId: roster[1]!.assignmentId,
+          joinedAt: roster[1]!.joinedAt.toISOString(),
+        },
+      ],
+    })
+  );
+  await db.transaction((transaction) =>
+    reserveSpending(transaction, {
+      ownerUserId: hirerId,
+      callerScope: 'quest',
+      callerReference: questId,
+      amountSatang: positiveSatang(2_040),
+    })
+  );
+  return { questId, teamId, assignmentIds };
 };
 
 beforeAll(async () => {
@@ -482,13 +664,19 @@ describe('Admin Quest moderation commands', () => {
         workers: [roster[0], roster[1]],
       })
     );
-    await db.insert(questTeam).values({
-      id: randomUUID(),
+    const candidateTeamId = randomUUID();
+    await db.insert(questCandidateTeamV2).values({
+      id: candidateTeamId,
       questId,
       leaderId: teamLeaderId,
       name: 'Terminated Quest Team',
-      teamStatus: 'TEAM_SELECTED',
+      headcount: 2,
+      state: 'TEAM_SELECTED',
     });
+    await db.insert(questCandidateTeamV2Member).values([
+      { teamId: candidateTeamId, memberId: teamLeaderId },
+      { teamId: candidateTeamId, memberId: workerId },
+    ]);
     await db.transaction((transaction) =>
       reserveSpending(transaction, {
         ownerUserId: hirerId,
@@ -509,7 +697,9 @@ describe('Admin Quest moderation commands', () => {
       { 'idempotency-key': `admin-terminate-group-leader-${questId}`, 'if-match': '1' }
     );
 
-    expect(response.status).toBe(200);
+    expect({ status: response.status, body: await response.clone().json() }).toMatchObject({
+      status: 200,
+    });
     const after = await Promise.all(
       [teamLeaderId, workerId].map(
         async (userId) => (await readTestWallet(userId)).earningsBalanceSatang
@@ -946,6 +1136,274 @@ describe('Admin Quest moderation commands', () => {
         .from(chatConversation)
         .where(eq(chatConversation.questId, questId))
     ).toEqual([{ readOnlyAt: expect.any(Date), archivedAt: expect.any(Date) }]);
+  });
+
+  it('cancels pending Completion Confirmations on Admin termination and preserves approved Reward', async () => {
+    if (!postgresAvailable) return;
+    const { questId, assignmentIds } = await createProofFreeGroupFcfsQuestWithChat();
+    const confirmedAt = new Date();
+    const reviewDeadlineAt = new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000);
+    const hirerSpendingBeforeTermination = (await readTestWallet(hirerId)).spendingBalanceSatang;
+    await db.insert(questV2CompletionConfirmation).values([
+      {
+        questId,
+        workerId,
+        teamId: null,
+        confirmedByUserId: workerId,
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt,
+      },
+      {
+        questId,
+        workerId: teamLeaderId,
+        teamId: null,
+        confirmedByUserId: teamLeaderId,
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt,
+      },
+    ]);
+    const workerBefore = (await readTestWallet(workerId)).earningsBalanceSatang;
+    const leaderBefore = (await readTestWallet(teamLeaderId)).earningsBalanceSatang;
+
+    const [leaderConfirmation] = await db
+      .select({ id: questV2CompletionConfirmation.id })
+      .from(questV2CompletionConfirmation)
+      .where(
+        and(
+          eq(questV2CompletionConfirmation.questId, questId),
+          eq(questV2CompletionConfirmation.workerId, teamLeaderId)
+        )
+      );
+    const reviewSession = asMember(hirerId);
+    let approved: Response;
+    try {
+      approved = await workerRequest(
+        `/api/v2/quests/${questId}/completion-confirmations/${leaderConfirmation!.id}/review`,
+        { 'idempotency-key': `admin-terminate-approved-review-${questId}` },
+        { decision: 'COMPLETION_CONFIRMATION_APPROVED' }
+      );
+    } finally {
+      reviewSession.mockRestore();
+    }
+    expect(approved.status).toBe(200);
+    expect((await readTestWallet(teamLeaderId)).earningsBalanceSatang).toBe(leaderBefore + 1_000);
+
+    const response = await adminRequest(
+      `/api/v1/admin/quests/${questId}/terminate`,
+      { reasonCode: 'SAFETY_REVIEW' },
+      { 'idempotency-key': `admin-terminate-pending-confirmation-${questId}`, 'if-match': '1' }
+    );
+    expect(response.status).toBe(200);
+    expect((await readTestWallet(workerId)).earningsBalanceSatang).toBe(workerBefore);
+    expect((await readTestWallet(teamLeaderId)).earningsBalanceSatang).toBe(leaderBefore + 1_000);
+    expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(
+      hirerSpendingBeforeTermination + 1_020
+    );
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+    expect(
+      await db
+        .select({ assignmentId: questAssignment.id, status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId))
+    ).toContainEqual({ assignmentId: assignmentIds[0], status: 'ASSIGNMENT_CANCELLED' });
+    expect(
+      await db
+        .select({
+          workerId: questV2CompletionConfirmation.workerId,
+          reviewStatus: questV2CompletionConfirmation.reviewStatus,
+        })
+        .from(questV2CompletionConfirmation)
+        .where(eq(questV2CompletionConfirmation.questId, questId))
+    ).toContainEqual({
+      workerId,
+      reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED',
+    });
+    const workerList = await memberCompletionList(questId, workerId);
+    const hirerList = await memberCompletionList(questId, hirerId);
+    expect(workerList.status).toBe(200);
+    expect((await workerList.json()).data.items).toMatchObject([
+      { workerId, reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' },
+    ]);
+    expect(hirerList.status).toBe(200);
+    const hirerItems = (await hirerList.json()).data.items as Array<{
+      workerId: string | null;
+      reviewStatus: string;
+    }>;
+    expect(hirerItems).toContainEqual(
+      expect.objectContaining({ workerId, reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' })
+    );
+    expect(hirerItems).toContainEqual(
+      expect.objectContaining({
+        workerId: teamLeaderId,
+        reviewStatus: 'COMPLETION_CONFIRMATION_APPROVED',
+      })
+    );
+    expect(
+      await db
+        .select({ id: adminReviewItem.id })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.questId, questId))
+    ).toHaveLength(0);
+  });
+
+  it('uses the selected V2 Candidate Team and notifies its members on Admin termination', async () => {
+    if (!postgresAvailable) return;
+    const { questId, teamId } = await createProofFreeGroupCandidateQuestWithChat();
+    const confirmedAt = new Date();
+    await db.insert(questV2CompletionConfirmation).values({
+      questId,
+      workerId: null,
+      teamId,
+      confirmedByUserId: teamLeaderId,
+      confirmedAt,
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      reviewDeadlineAt: new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000),
+    });
+    const hirerBefore = (await readTestWallet(hirerId)).spendingBalanceSatang;
+    const workerBefore = (await readTestWallet(workerId)).earningsBalanceSatang;
+    const leaderBefore = (await readTestWallet(teamLeaderId)).earningsBalanceSatang;
+    type QuestUpdate = {
+      questId: string;
+      changeType: string;
+      recipientMemberIds: string[];
+      closeMemberIds?: string[];
+    };
+    const events: QuestUpdate[] = [];
+    let wake!: () => void;
+    let waiting = new Promise<void>((resolve) => (wake = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as QuestUpdate;
+      if (event.questId !== questId) return;
+      events.push(event);
+      wake();
+      waiting = new Promise<void>((resolve) => (wake = resolve));
+    });
+    const untilCancelled = async () => {
+      while (!events.some(({ changeType }) => changeType === 'QUEST_CANCELLED')) await waiting;
+    };
+    try {
+      const response = await adminRequest(
+        `/api/v1/admin/quests/${questId}/terminate`,
+        { reasonCode: 'SAFETY_REVIEW' },
+        { 'idempotency-key': `admin-terminate-v2-team-${questId}`, 'if-match': '1' }
+      );
+      expect({ status: response.status, body: await response.clone().json() }).toMatchObject({
+        status: 200,
+      });
+      await untilCancelled();
+      expect((await readTestWallet(workerId)).earningsBalanceSatang).toBe(workerBefore);
+      expect((await readTestWallet(teamLeaderId)).earningsBalanceSatang).toBe(leaderBefore);
+      expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(hirerBefore + 2_040);
+      expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+        status: 'RELEASED',
+        remainingSatang: 0,
+      });
+      expect(
+        await db
+          .select({ status: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.questId, questId))
+      ).toEqual([{ status: 'COMPLETION_CONFIRMATION_CANCELLED' }]);
+      expect(
+        await db
+          .select({
+            cancelledByAdminId: quest.cancelledByAdminId,
+            cancelledByUserId: quest.cancelledByUserId,
+          })
+          .from(quest)
+          .where(eq(quest.id, questId))
+      ).toEqual([{ cancelledByAdminId: adminId, cancelledByUserId: null }]);
+      const cancelledEvent = events.find(({ changeType }) => changeType === 'QUEST_CANCELLED');
+      expect(cancelledEvent).toBeDefined();
+      expect(cancelledEvent!.recipientMemberIds.sort()).toEqual(
+        [hirerId, workerId, teamLeaderId].sort()
+      );
+      expect(cancelledEvent!.closeMemberIds?.sort()).toEqual([workerId, teamLeaderId].sort());
+      const teammateList = await memberCompletionList(questId, workerId);
+      expect(teammateList.status).toBe(200);
+      expect((await teammateList.json()).data.items).toMatchObject([
+        { teamId, reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' },
+      ]);
+    } finally {
+      await listener.unlisten();
+    }
+  });
+
+  it('uses accepted underfilled allocations for mixed pending and settled Workers on Admin termination', async () => {
+    if (!postgresAvailable) return;
+    const { questId, assignmentIds } = await createProofFreeGroupFcfsQuestWithChat(3);
+    const now = new Date();
+    const decisionId = randomUUID();
+    await db.insert(questV2UnderfilledDecision).values({
+      id: decisionId,
+      questId,
+      activeWorkerCount: 2,
+      workerRewardPoolSatang: 3_000,
+      state: 'UNDERFILLED_COMPLETED',
+      decision: 'PROCEED',
+      decisionExpiresAt: now,
+      consentExpiresAt: null,
+      detectedAt: now,
+      resolvedAt: now,
+    });
+    await db.insert(questV2UnderfilledConsent).values([
+      {
+        decisionId,
+        questId,
+        assignmentId: assignmentIds[0]!,
+        workerId,
+        rewardSatang: 1_500,
+        decision: 'ACCEPT',
+        respondedAt: now,
+      },
+      {
+        decisionId,
+        questId,
+        assignmentId: assignmentIds[1]!,
+        workerId: teamLeaderId,
+        rewardSatang: 1_500,
+        decision: 'ACCEPT',
+        respondedAt: now,
+      },
+    ]);
+    await db.insert(questV2CompletionConfirmation).values({
+      questId,
+      workerId,
+      teamId: null,
+      confirmedByUserId: workerId,
+      confirmedAt: now,
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      reviewDeadlineAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    });
+    const hirerBefore = (await readTestWallet(hirerId)).spendingBalanceSatang;
+    const workerBefore = (await readTestWallet(workerId)).earningsBalanceSatang;
+    const leaderBefore = (await readTestWallet(teamLeaderId)).earningsBalanceSatang;
+
+    const response = await adminRequest(
+      `/api/v1/admin/quests/${questId}/terminate`,
+      { reasonCode: 'SAFETY_REVIEW' },
+      { 'idempotency-key': `admin-terminate-underfilled-${questId}`, 'if-match': '1' }
+    );
+
+    expect(response.status).toBe(200);
+    expect((await readTestWallet(workerId)).earningsBalanceSatang).toBe(workerBefore);
+    expect((await readTestWallet(teamLeaderId)).earningsBalanceSatang).toBe(leaderBefore + 1_500);
+    expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(hirerBefore + 1_530);
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+    expect(
+      await db
+        .select({ status: questV2CompletionConfirmation.reviewStatus })
+        .from(questV2CompletionConfirmation)
+        .where(eq(questV2CompletionConfirmation.questId, questId))
+    ).toEqual([{ status: 'COMPLETION_CONFIRMATION_CANCELLED' }]);
   });
 
   it('refuses a v1 direct join once an Admin has hidden the Quest', async () => {
