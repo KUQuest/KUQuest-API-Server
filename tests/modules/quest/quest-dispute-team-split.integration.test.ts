@@ -6,6 +6,7 @@ import {
   adminDisputeTeamAllocationMember,
 } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { memberNotification } from '@/database/schema/notification.schema';
 import {
   quest,
   questAssignment,
@@ -288,6 +289,35 @@ describe('Admin approval of a team Dispute Case', () => {
       (await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId }))!
         .remainingSatang
     ).toBe(1_500);
+  });
+
+  it('tells every Team member and the Hirer when a team case is filed and decided', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createFailedTeamQuest();
+    const created = await fileTeamCase(fixture);
+    const filed = await db
+      .select()
+      .from(memberNotification)
+      .where(eq(memberNotification.disputeCaseId, created.id));
+    expect(filed.map((row) => [row.memberId, row.type])).toEqual([
+      [fixture.hirerId, 'DISPUTE_CASE_FILED_AGAINST_YOU'],
+    ]);
+
+    await approveTeamCase(created.id);
+    const decided = (
+      await db
+        .select()
+        .from(memberNotification)
+        .where(eq(memberNotification.disputeCaseId, created.id))
+    ).filter((row) => row.type === 'DISPUTE_CASE_DECIDED');
+    expect(decided.map((row) => row.memberId).sort()).toEqual(
+      [fixture.hirerId, ...fixture.memberIds].sort()
+    );
+    for (const row of decided) {
+      expect(row.disputeStatus).toBe('DISPUTE_CASE_RESOLVED');
+      expect(row.viewerWon).toBe(row.memberId !== fixture.hirerId);
+      expect(row.actorRole).toBe(row.memberId === fixture.hirerId ? 'HIRER' : 'WORKER');
+    }
   });
 
   it('approves all the hold can pay and ignores an amount from the Admin', async () => {

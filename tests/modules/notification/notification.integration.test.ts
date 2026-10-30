@@ -2,7 +2,12 @@ import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { memberNotification } from '@/database/schema/notification.schema';
 import { pushDelivery } from '@/database/schema/push.schema';
-import { recordMemberNotificationInTransaction } from '@/modules/notification';
+import {
+  categoryOfNotificationType,
+  insertMemberNotificationInTransaction,
+  notificationPushData,
+  recordMemberNotificationInTransaction,
+} from '@/modules/notification';
 
 import { randomUUID } from 'node:crypto';
 
@@ -87,9 +92,12 @@ describe('recordMemberNotificationInTransaction', () => {
       .where(eq(pushDelivery.recipientMemberId, memberId));
     expect(deliveries).toHaveLength(1);
     expect(deliveries[0]?.eventType).toBe('PENALTY_BAN_APPLIED');
+    expect(deliveries[0]?.deepLink).toBe('kuquestmobile://notifications');
     expect(deliveries[0]?.data).toEqual({
       type: 'PENALTY_BAN_APPLIED',
       notificationId: first.notificationId,
+      category: 'PENALTY',
+      route: '/notifications',
       transitionId: eventKey,
       result: 'TEMPORARY_BAN',
       ladder: 'MISCONDUCT',
@@ -141,5 +149,112 @@ describe('recordMemberNotificationInTransaction', () => {
     expect(
       await db.select().from(memberNotification).where(eq(memberNotification.memberId, memberId))
     ).toHaveLength(0);
+  });
+});
+
+describe('insertMemberNotificationInTransaction', () => {
+  const questId = randomUUID();
+  const insert = (memberId: string, eventKey: string) =>
+    db.transaction((transaction) =>
+      insertMemberNotificationInTransaction(transaction, {
+        memberId,
+        type: 'DISPUTE_CASE_DECIDED',
+        eventKey,
+        questId,
+        questTitle: 'Water the plants',
+        actorRole: 'WORKER',
+        failureReason: 'COMPLETION_NOT_APPROVED',
+        cancellationReason: 'WORKER_DECLINED',
+        assignmentId: randomUUID(),
+        disputeCaseId: randomUUID(),
+        disputeStatus: 'DISPUTE_CASE_RESOLVED',
+        viewerWon: true,
+        now: new Date('2030-01-01T00:00:00.000Z'),
+      })
+    );
+
+  it('stores the new columns, queues no Push, and ignores a replay', async () => {
+    if (!postgresAvailable) return;
+    const memberId = await createMember();
+    const eventKey = `dispute:${randomUUID()}`;
+
+    const first = await insert(memberId, eventKey);
+    const replay = await insert(memberId, eventKey);
+
+    expect(first.created).toBe(true);
+    expect(replay).toEqual({ notificationId: first.notificationId, created: false });
+    const rows = await db
+      .select()
+      .from(memberNotification)
+      .where(eq(memberNotification.memberId, memberId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      type: 'DISPUTE_CASE_DECIDED',
+      questId,
+      questTitle: 'Water the plants',
+      actorRole: 'WORKER',
+      failureReason: 'COMPLETION_NOT_APPROVED',
+      cancellationReason: 'WORKER_DECLINED',
+      disputeStatus: 'DISPUTE_CASE_RESOLVED',
+      viewerWon: true,
+      dismissedAt: null,
+    });
+    expect(
+      await db.select().from(pushDelivery).where(eq(pushDelivery.recipientMemberId, memberId))
+    ).toHaveLength(0);
+  });
+
+  it('rolls back with the caller transaction', async () => {
+    if (!postgresAvailable) return;
+    const memberId = await createMember();
+    await db
+      .transaction(async (transaction) => {
+        await insertMemberNotificationInTransaction(transaction, {
+          memberId,
+          type: 'QUEST_ASSIGNED',
+          eventKey: `quest:${randomUUID()}`,
+          now: new Date(),
+        });
+        throw new Error('rollback');
+      })
+      .catch(() => undefined);
+
+    expect(
+      await db.select().from(memberNotification).where(eq(memberNotification.memberId, memberId))
+    ).toHaveLength(0);
+  });
+
+  it('refuses a value outside a reason set', async () => {
+    if (!postgresAvailable) return;
+    const memberId = await createMember();
+    await expect(
+      db.transaction((transaction) =>
+        insertMemberNotificationInTransaction(transaction, {
+          memberId,
+          type: 'QUEST_FAILED',
+          eventKey: `quest:${randomUUID()}`,
+          failureReason: 'NOPE' as 'DUE_AT_MISSED',
+          now: new Date(),
+        })
+      )
+    ).rejects.toThrow();
+  });
+});
+
+describe('notification Push helpers', () => {
+  it('maps a type to a category and builds the route', () => {
+    expect(categoryOfNotificationType('CONDUCT_REPORT_UPHELD')).toBe('PENALTY');
+    expect(categoryOfNotificationType('QUEST_FAILED')).toBe('QUEST');
+    expect(categoryOfNotificationType('DISPUTE_CASE_FILED_AGAINST_YOU')).toBe('DISPUTE');
+    expect(
+      notificationPushData({ notificationId: 'n1', type: 'QUEST_FAILED', questId: 'q1' })
+    ).toEqual({
+      notificationId: 'n1',
+      category: 'QUEST',
+      route: '/quest/q1',
+    });
+    expect(notificationPushData({ notificationId: 'n1', type: 'PENALTY_BAN_ENDED' }).route).toBe(
+      '/notifications'
+    );
   });
 });

@@ -67,25 +67,54 @@ The Server sends no localized text. The Android client builds the alert text fro
   - `expiresAt`: the server time at which the restriction ends. The Server omits it for a permanent ban.
 - **Source of Events**: `memberPenaltyRecord` is the source of truth (see [Admin Member Penalty Contract](../admin/admin-member-penalty-contract.md)). Each applied, expired, or ended transition creates one Event per recipient. A penalty removal that ends a restriction creates the matching expired or ended Event. A direct Admin penalty action uses the same types; its `source` is the source recorded in `memberPenaltyRecord`.
 - **Privacy**: The payload never contains the reporter, Message text, proof details, evidence, the Admin note, or the filed Conduct Report reason. The reported Member learns only the result and the end time.
-- **Banned Members**: A banned Member cannot sign in and cannot reach the notification inbox. The Push is still sent to the Push Device. A client can show it, but the Member cannot open the inbox until the ban ends.
+- **Banned Members**: A banned Member cannot sign in. The Push is still sent to the Push Device. A banned Member who still has a session can read the own inbox (see the inbox contract).
+
+### Inbox Push data
+
+Every Push of an inbox type carries these keys in addition to its other data keys ([ADR 0037](../../adr/0037-notification-inbox-v2.md)):
+
+- `notificationId`: the ID of the inbox item. `CONDUCT_REPORT_UPHELD` always has it.
+- `category`: `PENALTY` or `QUEST`.
+- `route`: the app route to open, for example `/notifications` or `/quest/{questId}`.
+
+The existing keys and `transitionId` stay. The deep link scheme is `kuquestmobile://`. App builds also use `kuquestmobile-staging` and `kuquestmobile-uat`. The old `kuquest://` scheme is retired. The Server writes the Quest Event row in the same transaction as its Push, so a Push without a row cannot exist. The two Dispute inbox types have no Push.
 
 ## Notification inbox contract
 
-The notification inbox is a Member's server-side list of Member Penalty Notification Events. It lets a Member see an Event that the Push did not show, for example after the Member disabled a Push Device.
+The notification inbox is a Member's server-side list of Events. It lets a Member see an Event that the Push did not show, for example after the Member disabled a Push Device. The decisions are in [ADR 0035](../../adr/0035-member-notification-inbox.md) and [ADR 0037](../../adr/0037-notification-inbox-v2.md).
 
-- **Content**: The inbox holds Events only. It does not hold Work Conversation messages or System Messages. Chat history stays in the Work Conversation.
-- **Retention**: The Server keeps an inbox item for at least 90 days after `createdAt`.
+- **Content**: The inbox holds 15 types in 3 categories. It does not hold Work Conversation messages, System Messages, Payout status, or Top-up status. Chat history stays in the Work Conversation.
+  - `PENALTY`: the five Member Penalty Notification types.
+  - `QUEST`: `UNDERFILLED_DECISION_PENDING`, `UNDERFILLED_CONSENT_PENDING`, `UNDERFILLED_COMPLETED`, `UNDERFILLED_CANCELLED`, `QUEST_ASSIGNED`, `PROOF_NOT_APPROVED`, `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`, `QUEST_FAILED`.
+  - `DISPUTE`: `DISPUTE_CASE_FILED_AGAINST_YOU`, `DISPUTE_CASE_DECIDED`. These have inbox and realtime only, with no Push. See [Admin Dispute Case Contract](../admin/admin-dispute-case-contract.md).
+- **Row creation**: A Quest Event row is written in the same transaction as its Push.
+- **Retention**: The Server keeps an item for at least 90 days after `createdAt`. After that, the Server hard-deletes it.
 - **Scope**: A Member reads and changes only that Member's items. Every route needs a signed-in session.
 - `GET /api/v1/notifications` returns the Member's items, newest first.
-  - Query: `cursor` (opaque), `limit` (1 to 50, default 20), `unreadOnly` (boolean).
+  - Query: `cursor` (opaque), `limit` (1 to 50, default 20), `unreadOnly` (boolean), and `category` (repeatable: `PENALTY`, `QUEST`, `DISPUTE`).
   - Response: `items` and `nextCursor`. `nextCursor` is `null` on the last page.
-  - Item: `id`, `type`, `createdAt`, `readAt` (`null` when unread), `questId` (always `null` for Member Penalty Notifications), `result`, and `expiresAt` (`null` for a permanent ban).
-- `GET /api/v1/notifications/unread-count` returns `{ count }`.
-- `POST /api/v1/notifications/read` marks items read. The body is `{ ids }` (1 to 100 IDs) or `{ all: true }`. The command is idempotent: a second call keeps the first `readAt`. An ID that belongs to another Member is ignored.
-- **Localization**: The Server sends no localized text in the inbox. The client builds text from `type`, `result`, and `expiresAt`.
-- **Banned Members**: Sign-in denial blocks inbox routes for a banned Member (`403 MEMBER_BANNED`).
+  - Item: `id`, `type`, `category`, `createdAt`, `readAt` (`null` when unread), `questId` (`null` for penalty and `null` when the Event has no Quest), `result`, `expiresAt`, and the envelope fields below.
+- **Envelope fields** (additive; a field is `null` or absent when it does not apply):
 
-The decisions for this inbox are in [ADR 0035](../../adr/0035-member-notification-inbox.md).
+| Field                | Value                                                                         |
+| -------------------- | ----------------------------------------------------------------------------- |
+| `questTitle`         | Quest title, a snapshot at Event time.                                        |
+| `actorRole`          | `HIRER` or `WORKER`: the role of the recipient in the Quest.                  |
+| `cancellationReason` | `HIRER_CANCELLED`, `HIRER_NO_DECISION`, `WORKER_DECLINED`, `CONSENT_TIMEOUT`. |
+| `failureReason`      | `PROOF_NOT_APPROVED`, `COMPLETION_NOT_APPROVED`, `DUE_AT_MISSED`.             |
+| `assignmentId`       | The Assignment of the Event.                                                  |
+| `disputeCaseId`      | The Dispute Case of a `DISPUTE` item.                                         |
+| `disputeStatus`      | The Dispute Case status at Event time.                                        |
+| `viewerWon`          | Boolean on `DISPUTE_CASE_DECIDED`: whether the recipient won.                 |
+
+- An item never holds the reporter, the filed reason, proof, Message text, an amount, or data of the other party.
+- `GET /api/v1/notifications/unread-count` returns `{ count, byCategory }`.
+- `POST /api/v1/notifications/read` marks items read. The body is `{ ids }` (1 to 100 IDs) or `{ all: true }`. `category` is allowed only with `all`. The command is idempotent: a second call keeps the first `readAt`. An ID that belongs to another Member is ignored.
+- `POST /api/v1/notifications/dismiss` hides items. The body is `{ ids }` (1 to 100 IDs). It is idempotent and also marks the items read. A penalty item cannot be dismissed (`400 NOTIFICATION_NOT_DISMISSABLE`). Dismiss hides an item and does not delete it. Penalty items stay as the audit trail.
+- **Expired window**: An expired `*_PENDING` item stays unread. The client uses `expiresAt`. The Server does not mark it read.
+- **Localization**: The Server sends codes and no localized text. The client builds text from the codes.
+- **Realtime**: `GET /api/v1/notifications/events` is a WebSocket with the same Origin and Cookie rules as `/api/v1/wallet/events`. On connect the Server sends one `{ "type": "SUBSCRIBED", "version": 1 }` frame, as the other Member sockets do. Then the only change frame is `{ "type": "NOTIFICATIONS_CHANGED" }`, with no payload. The Server sends no heartbeat ping. The Server publishes it after commit when it creates a row. The client refetches the count and the first page.
+- **Banned Members**: The inbox routes and the events socket skip the ban guard. A banned Member with an existing session reads the own inbox (`200`). Every other route keeps `403 MEMBER_BANNED`. New sign-in stays denied. A ban does not revoke an existing session today, so a signed-out Member (for example a permanent ban) cannot read the row. The public ban-status route is not built.
 
 ## Audit and retention
 

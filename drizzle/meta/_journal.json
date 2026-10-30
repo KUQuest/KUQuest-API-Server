@@ -778,6 +778,13 @@
       "when": 1793408400000,
       "tag": "20261031000000_team_dispute_payout_split",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "7",
+      "when": 1793412000000,
+      "tag": "20261031010000_notification_inbox_v2",
+      "breakpoints": true
     }
   ]
 }

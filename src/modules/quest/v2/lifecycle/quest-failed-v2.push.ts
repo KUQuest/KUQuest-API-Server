@@ -1,6 +1,5 @@
-import { enqueuePushDeliveryInTransaction } from '@/modules/push';
-
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
+import { enqueueQuestMemberNotificationPush } from './quest-member-notification-v2.push';
 
 export type QuestFailedPushReason =
   'PROOF_NOT_APPROVED' | 'COMPLETION_NOT_APPROVED' | 'DUE_AT_MISSED';
@@ -29,10 +28,13 @@ export const enqueueQuestFailedPush = async (
     failureReason: input.reason,
   };
   for (const recipientMemberId of new Set(input.recipientMemberIds)) {
-    await enqueuePushDeliveryInTransaction(transaction, {
+    await enqueueQuestMemberNotificationPush(transaction, {
       recipientMemberId,
+      type: 'QUEST_FAILED',
+      actorRole: 'WORKER',
+      questId: input.questId,
       eventKey: transitionId,
-      eventType: 'QUEST_FAILED',
+      failureReason: input.reason,
       title: 'Quest failed',
       body:
         input.reason === 'PROOF_NOT_APPROVED'
@@ -40,7 +42,7 @@ export const enqueueQuestFailedPush = async (
           : input.reason === 'COMPLETION_NOT_APPROVED'
             ? 'The Hirer did not approve the completion confirmation, so the Quest failed. You can open a Dispute Case within 1 day.'
             : 'The Quest passed its due time without Proof, so it failed. You can open a Dispute Case within 1 day.',
-      deepLink: `kuquest://quest/${input.questId}`,
+      deepLink: `kuquestmobile://quest/${input.questId}`,
       data,
       now: input.now,
     });
@@ -53,13 +55,16 @@ export const enqueueQuestCompletedDisputeWindowPush = async (
 ) => {
   for (const { workerId, assignmentId } of input.recipients) {
     const transitionId = `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentId}`;
-    await enqueuePushDeliveryInTransaction(transaction, {
+    await enqueueQuestMemberNotificationPush(transaction, {
       recipientMemberId: workerId,
+      type: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+      actorRole: 'WORKER',
+      questId: input.questId,
+      assignmentId,
       eventKey: transitionId,
-      eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
       title: 'Quest finished',
       body: 'The Quest finished, but your Proof Submission was not approved, so you get no Reward. You can open a Dispute Case within 1 day.',
-      deepLink: `kuquest://quest/${input.questId}`,
+      deepLink: `kuquestmobile://quest/${input.questId}`,
       data: {
         type: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
         questId: input.questId,
@@ -76,13 +81,16 @@ export const enqueueProofNotApprovedPush = async (
   input: { recipientMemberId: string; assignmentId: string; questId: string; now: Date }
 ) => {
   const transitionId = `quest-v2:PROOF_NOT_APPROVED:${input.assignmentId}`;
-  await enqueuePushDeliveryInTransaction(transaction, {
+  await enqueueQuestMemberNotificationPush(transaction, {
     recipientMemberId: input.recipientMemberId,
+    type: 'PROOF_NOT_APPROVED',
+    actorRole: 'WORKER',
+    questId: input.questId,
+    assignmentId: input.assignmentId,
     eventKey: transitionId,
-    eventType: 'PROOF_NOT_APPROVED',
     title: 'Proof not approved',
     body: 'The Hirer did not approve your Proof Submission, so your Assignment ended with no Reward. You can open a Dispute Case within 1 day after the Quest ends.',
-    deepLink: `kuquest://quest/${input.questId}`,
+    deepLink: `kuquestmobile://quest/${input.questId}`,
     data: {
       type: 'PROOF_NOT_APPROVED',
       questId: input.questId,

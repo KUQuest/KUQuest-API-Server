@@ -71,6 +71,18 @@ channels:
         $ref: '#/components/messages/hirerQuestSubscriptionAccepted'
       hirerQuestUpdated:
         $ref: '#/components/messages/hirerQuestUpdated'
+  memberNotificationUpdates:
+    address: /api/v1/notifications/events
+    description: |
+      Invalidations for the authenticated Member inbox. The Server sends a frame after a new
+      Member Notification row commits for that Member. A replay creates no row and sends no frame.
+      A banned Member with a live session may still listen. The stream does not replay messages
+      after reconnect.
+    messages:
+      subscribed:
+        $ref: '#/components/messages/hirerQuestSubscriptionAccepted'
+      notificationsChanged:
+        $ref: '#/components/messages/notificationsChanged'
 
   workConversations:
     address: /api/v1/chat/conversations/{conversationId}/events
@@ -176,6 +188,22 @@ operations:
       - $ref: '#/channels/hirerQuestUpdates/messages/subscribed'
       - $ref: '#/channels/hirerQuestUpdates/messages/hirerQuestUpdated'
 
+  receiveMemberNotificationUpdates:
+    action: receive
+    channel:
+      $ref: '#/channels/memberNotificationUpdates'
+    summary: Receive Member inbox invalidations
+    description: |
+      The Server sends SUBSCRIBED after it accepts the connection, then NOTIFICATIONS_CHANGED
+      after a committed change to the Member inbox. Reload GET /api/v1/notifications and
+      GET /api/v1/notifications/unread-count after SUBSCRIBED, after each frame, and after
+      every reconnect. The frame has no data. A client message closes the connection with
+      code 1008. The Server closes with code 4401 when the session ends and with code 4403
+      for an Origin that is not trusted.
+    messages:
+      - $ref: '#/channels/memberNotificationUpdates/messages/subscribed'
+      - $ref: '#/channels/memberNotificationUpdates/messages/notificationsChanged'
+
   sendWorkConversationMessage:
     action: send
     channel:
@@ -258,6 +286,19 @@ components:
             const: SUBSCRIBED
           version:
             const: 1
+    notificationsChanged:
+      name: NOTIFICATIONS_CHANGED
+      summary: The Member inbox changed
+      description: |
+        The frame carries no data. Read the inbox and the unread count from REST after each frame.
+      payload:
+        type: object
+        additionalProperties: false
+        required:
+          - type
+        properties:
+          type:
+            const: NOTIFICATIONS_CHANGED
     hirerQuestUpdated:
       name: HIRER_QUEST_UPDATED
       summary: An owned Quest changed

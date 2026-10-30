@@ -32,6 +32,7 @@ import {
   type AdminActionCommandInput,
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
+import { insertMemberNotificationInTransaction } from '@/modules/notification';
 import { positiveSatang, settleDisputeCase, type WalletTransaction } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
@@ -295,6 +296,111 @@ const caseByIdInTransaction = async (
   return record;
 };
 
+type DisputeNotificationCase = typeof adminDisputeCase.$inferSelect;
+
+/**
+ * Members on each side of a Dispute Case. The respondent rule matches the response rule:
+ * when the Hirer files, every Worker with an Assignment on the Quest is a respondent;
+ * when a Worker files, the Hirer is the respondent. The filer side adds the Candidate Team
+ * members of a team case, because the Team Leader files for the whole team.
+ */
+const disputeSidesInTransaction = async (
+  transaction: WalletTransaction,
+  disputeCase: DisputeNotificationCase
+) => {
+  const [questRow] = await transaction
+    .select({ hirerId: quest.hirerId, title: quest.title })
+    .from(quest)
+    .where(eq(quest.id, disputeCase.questId))
+    .limit(1);
+  if (!questRow) return undefined;
+  const filerSide = new Set<string>([disputeCase.filerUserId]);
+  const respondentSide = new Set<string>();
+  if (disputeCase.filerUserId === questRow.hirerId) {
+    const assignments = await transaction
+      .select({ workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, disputeCase.questId));
+    for (const { workerId } of assignments) respondentSide.add(workerId);
+    const team = await readSelectedTeam(transaction, disputeCase.questId);
+    if (team) {
+      const roster = await transaction
+        .select({ memberId: questCandidateTeamV2Member.memberId })
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, team.id));
+      for (const { memberId } of roster) respondentSide.add(memberId);
+    }
+  } else {
+    respondentSide.add(questRow.hirerId);
+    if (disputeCase.teamId) {
+      const roster = await transaction
+        .select({ memberId: questCandidateTeamV2Member.memberId })
+        .from(questCandidateTeamV2Member)
+        .where(eq(questCandidateTeamV2Member.teamId, disputeCase.teamId));
+      for (const { memberId } of roster) filerSide.add(memberId);
+    }
+  }
+  for (const memberId of filerSide) respondentSide.delete(memberId);
+  return { hirerId: questRow.hirerId, questTitle: questRow.title, filerSide, respondentSide };
+};
+
+/** Inbox row only, no Push: tells each respondent that a Dispute Case was filed against them. */
+const recordDisputeFiledNotifications = async (
+  transaction: WalletTransaction,
+  disputeCase: DisputeNotificationCase,
+  now: Date
+) => {
+  const sides = await disputeSidesInTransaction(transaction, disputeCase);
+  if (!sides) return;
+  for (const memberId of sides.respondentSide) {
+    await insertMemberNotificationInTransaction(transaction, {
+      memberId,
+      type: 'DISPUTE_CASE_FILED_AGAINST_YOU',
+      eventKey: `dispute-filed:${disputeCase.id}:${memberId}`,
+      questId: disputeCase.questId,
+      questTitle: sides.questTitle,
+      disputeCaseId: disputeCase.id,
+      actorRole: memberId === sides.hirerId ? 'HIRER' : 'WORKER',
+      now,
+    });
+  }
+};
+
+/**
+ * Inbox row only, no Push: tells the filer side and the respondent side of a decided case.
+ * `viewerWon` is the server answer for each recipient. The filer side wins a resolved case and
+ * loses a dismissed case. The respondent side gets the opposite. It never carries the amount,
+ * the Admin note, the filed reason, or the other party.
+ */
+const recordDisputeDecidedNotifications = async (
+  transaction: WalletTransaction,
+  disputeCase: DisputeNotificationCase,
+  disputeStatus: 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED',
+  now: Date
+) => {
+  const sides = await disputeSidesInTransaction(transaction, disputeCase);
+  if (!sides) return;
+  const filerWon = disputeStatus === 'DISPUTE_CASE_RESOLVED';
+  const recipients = [
+    ...[...sides.filerSide].map((memberId) => ({ memberId, viewerWon: filerWon })),
+    ...[...sides.respondentSide].map((memberId) => ({ memberId, viewerWon: !filerWon })),
+  ];
+  for (const { memberId, viewerWon } of recipients) {
+    await insertMemberNotificationInTransaction(transaction, {
+      memberId,
+      type: 'DISPUTE_CASE_DECIDED',
+      eventKey: `dispute-decided:${disputeCase.id}:${memberId}`,
+      questId: disputeCase.questId,
+      questTitle: sides.questTitle,
+      disputeCaseId: disputeCase.id,
+      disputeStatus,
+      actorRole: memberId === sides.hirerId ? 'HIRER' : 'WORKER',
+      viewerWon,
+      now,
+    });
+  }
+};
+
 /** Create the queue record after a filing adapter has authenticated its actor. */
 /** A selected Candidate Team has one outcome, so only its Team Leader can file a Dispute Case. */
 const isSelectedTeamMemberOnly = async (
@@ -461,6 +567,7 @@ export const createAdminDisputeCaseInTransaction = async (
         })
         .returning();
   if (created) {
+    await recordDisputeFiledNotifications(transaction, created, now);
     await notifyDisputeCaseUpdated(transaction, created);
     await notifyAdminDisputeCaseViewsUpdated(transaction, created);
     return created;
@@ -549,6 +656,7 @@ const dismissOverdueDisputeCaseInTransaction = async (
     reason: 'The 7-day Dispute Case decision window expired.',
     createdAt: now,
   });
+  await recordDisputeDecidedNotifications(transaction, updated, 'DISPUTE_CASE_DISMISSED', now);
   await notifyDisputeCaseUpdated(transaction, updated);
   await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
   return { changed: true, systemDismissed: true, notFound: false, checkedAt: now } as const;
@@ -1151,6 +1259,12 @@ const resolveAdminDisputeCaseInTransaction = (
                 'DISPUTE_CASE_NOT_PENDING',
                 'Dispute Case changed before dismissal.'
               );
+            await recordDisputeDecidedNotifications(
+              transaction,
+              updated,
+              'DISPUTE_CASE_DISMISSED',
+              now
+            );
             await notifyDisputeCaseUpdated(transaction, updated);
             await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
             return summaryResultInTransaction(transaction, updated.id);
@@ -1261,6 +1375,12 @@ const resolveAdminDisputeCaseInTransaction = (
               'DISPUTE_CASE_NOT_PENDING',
               'Dispute Case changed before resolution.'
             );
+          await recordDisputeDecidedNotifications(
+            transaction,
+            updated,
+            'DISPUTE_CASE_RESOLVED',
+            now
+          );
           const affectedWallets = await transaction
             .select({ id: walletWallet.id })
             .from(walletWallet)
