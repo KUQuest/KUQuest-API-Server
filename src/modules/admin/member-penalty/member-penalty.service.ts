@@ -7,6 +7,7 @@ import {
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { review } from '@/database/schema/quest.schema';
 import { walletStatusHistory, walletWallet } from '@/database/schema/wallet.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import {
   type MemberPenaltyAddReasonCode,
   type MemberPenaltyRemoveReasonCode,
@@ -605,6 +606,7 @@ export const addAdminMemberPenalty = async (input: {
         now
       );
     }
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', input.memberId);
     return penaltyCommandResult('ADD', created);
   });
 };
@@ -697,6 +699,7 @@ export const removeAdminMemberPenalty = async (input: {
     const updatedRecords = [...records, reversal, ...recalculations];
     await rebuildMemberProjections(transaction, input.memberId, now);
     await reconcileBanWalletStatusInTransaction(transaction, input.memberId, updatedRecords, now);
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', input.memberId);
     return penaltyCommandResult('REMOVE', reversal);
   });
 };
@@ -893,6 +896,7 @@ export const processExpiredMemberBanWalletFreeze = async (
     const records = await readMemberRecords(transaction, memberId);
     await rebuildMemberProjections(transaction, memberId, now);
     await reconcileBanWalletStatusInTransaction(transaction, memberId, records, now);
+    await notifyAdminResourceUpdated(transaction, 'MEMBER', memberId);
     return true;
   });
 

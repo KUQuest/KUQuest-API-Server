@@ -12,7 +12,7 @@ import {
   questV2CompletionConfirmation,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
-import { formatConductReportDisplayId } from '@/modules/admin';
+import { formatConductReportDisplayId, notifyAdminResourceUpdated } from '@/modules/admin';
 
 import { and, asc, eq, isNotNull } from 'drizzle-orm';
 
@@ -394,6 +394,7 @@ export const createQuestV2ConductReport = async (
         if (!created) return { kind: 'rejected', rejection: 'already-reported' };
 
         const row = toRow(created);
+        await notifyAdminResourceUpdated(transaction, 'CONDUCT_REPORT', row.id);
         return {
           kind: 'success',
           result: row,

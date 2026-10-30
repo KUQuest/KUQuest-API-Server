@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import {
   quest,
@@ -275,6 +276,7 @@ const failRequest = async (
         eq(questV2EditRequest.requestStatus, 'EDIT_REQUEST_PENDING')
       )
     );
+  await notifyAdminResourceUpdated(transaction, 'QUEST', request.questId);
   await notifyQuestEditUpdate(transaction, request.questId, request.id);
   return {
     ...request,

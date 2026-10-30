@@ -14,6 +14,7 @@ import {
   questTeam,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { notifyAdminQuestAndMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
 import { getEffectiveFundingReservationPolicy, reserveSpending } from '@/modules/wallet';
 import {
   isRedFlagActive,
@@ -569,6 +570,7 @@ export const createQuest = async (
       );
     }
 
+    await notifyAdminQuestAndMembersUpdated(transaction, created.id);
     return { id: created.id };
   });
 };
@@ -1049,6 +1051,7 @@ export const editQuest = async (
       }))
     );
 
+    await notifyAdminQuestAndMembersUpdated(transaction, questId);
     return { id: questId };
   });
 };
@@ -1135,6 +1138,7 @@ const resolveExpiredEditRequestInTransaction = async (
       .update(questEditRequest)
       .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
       .where(eq(questEditRequest.id, requestId));
+    await notifyAdminQuestUpdated(transaction, request.questId);
     if (current.questStatus === questStatus.awaitingConsent)
       await applyQuestStateTransition(transaction, {
         questId: request.questId,
@@ -1156,6 +1160,7 @@ const resolveExpiredEditRequestInTransaction = async (
       resolvedAt: now,
     })
     .where(eq(questEditRequest.id, requestId));
+  await notifyAdminQuestUpdated(transaction, request.questId);
   await applyQuestStateTransition(transaction, {
     questId: request.questId,
     from: current.questStatus,
@@ -1217,6 +1222,7 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
+      await notifyAdminQuestUpdated(transaction, request.questId);
       if (current.questStatus === questStatus.awaitingConsent)
         await applyQuestStateTransition(transaction, {
           questId: request.questId,
@@ -1233,6 +1239,7 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
+      await notifyAdminQuestUpdated(transaction, request.questId);
       await applyQuestStateTransition(transaction, {
         questId: request.questId,
         from: current.questStatus,
@@ -1260,11 +1267,13 @@ export const respondToQuestEditRequest = async (
       .update(questEditRequestResponse)
       .set({ decision, respondedAt: now })
       .where(eq(questEditRequestResponse.id, response.id));
+    await notifyAdminQuestUpdated(transaction, request.questId);
     if (decision === 'EDIT_RESPONSE_REJECTED') {
       await transaction
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
+      await notifyAdminQuestUpdated(transaction, request.questId);
       await applyQuestStateTransition(transaction, {
         questId: request.questId,
         from: current.questStatus,
@@ -1293,6 +1302,7 @@ export const respondToQuestEditRequest = async (
         .update(questEditRequest)
         .set({ requestStatus: 'EDIT_REQUEST_REJECTED', resolvedAt: now })
         .where(eq(questEditRequest.id, requestId));
+      await notifyAdminQuestUpdated(transaction, request.questId);
       await applyQuestStateTransition(transaction, {
         questId: request.questId,
         from: current.questStatus,
@@ -1333,6 +1343,7 @@ export const respondToQuestEditRequest = async (
       .update(questEditRequest)
       .set({ requestStatus: 'EDIT_REQUEST_APPROVED', resolvedAt: now })
       .where(eq(questEditRequest.id, requestId));
+    await notifyAdminQuestUpdated(transaction, request.questId);
     await applyQuestStateTransition(transaction, {
       questId: request.questId,
       from: current.questStatus,
@@ -1433,6 +1444,7 @@ export const addQuestImages = async (
       });
     }
 
+    await notifyAdminQuestUpdated(transaction, questId);
     return { images: await selectQuestImages(transaction, questId) };
   });
 
@@ -1490,6 +1502,7 @@ export const deleteQuestImage = async (
       positionOffset: maxQuestImages,
     });
 
+    await notifyAdminQuestUpdated(transaction, questId);
     return { outcome: 'deleted', bucket: image.bucket, objectKey: image.objectKey };
   });
 

@@ -18,6 +18,7 @@ import {
 import { file } from '@/database/schema/file.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { chatConversation } from '@/database/schema/work-chat.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import {
   isRedFlagActive,
   isMemberRedFlagged,
@@ -29,6 +30,7 @@ import {
   notifyQuestBoardInvalidated,
   notifyQuestUpdate,
 } from '@/modules/quest/v2/realtime';
+import { notifyAdminQuestAndMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
 import { loadMemberSummaries } from '../../shared/member-summary';
 import {
   getEffectiveFundingReservationPolicy,
@@ -1378,6 +1380,8 @@ const addQuestV2ImagesInTransaction = async (
     });
   }
 
+  await notifyAdminQuestUpdated(transaction, context.questId);
+
   const imageReferences = await selectQuestV2Images(transaction, context.questId);
   const response = materializeQuestV2ImageResponse(imageReferences);
   const completed = await completeQuestCommand({
@@ -1862,6 +1866,7 @@ const deleteQuestV2ImageInTransaction = async (
         deletedAt: now,
         positionOffset: maxQuestV2Images,
       });
+      await notifyAdminQuestUpdated(transaction, context.questId);
 
       const images = await selectQuestV2Images(transaction, context.questId);
       const response = materializeQuestV2ImageResponse(images);
@@ -2322,6 +2327,8 @@ const createQuestInTransaction = async (
       if (!createdRow) throw new Error(`Created Quest ${createdQuest.id} could not be read back`);
       const canonicalQuest = await buildCanonicalQuest(transaction, createdRow);
       await notifyHirerQuestCreated(transaction, createdQuest.id);
+      await notifyAdminQuestUpdated(transaction, createdQuest.id);
+      await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
 
       return {
         kind: 'success',
@@ -2623,6 +2630,7 @@ const editQuestV2InTransaction = async (
         editedAt: now,
         editedByUserId: userId,
       });
+      await notifyAdminQuestAndMembersUpdated(transaction, questId);
       if (current.questStatus === questStatus.open) {
         await notifyQuestUpdate(transaction, {
           questId,
