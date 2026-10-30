@@ -14,6 +14,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
+import { settleDueQuestV2RewardAllocation } from '@/modules/quest/v2/reward-allocation';
 import { type QuestTransaction, type QuestWorkChatMembershipTransition } from '@/modules/quest';
 import {
   ensureInitialMoneyPolicy,
@@ -618,7 +619,99 @@ describe('Quest API v2 Hirer cancellation', () => {
     ).toBe('COMPLETION_CONFIRMATION_PENDING');
   });
 
-  it('uses the active Worker allocation for GROUP + FCFS and pays only the Team Leader for GROUP + CANDIDATE', async () => {
+  it('lets the Team Leader split the 20% pool after a GROUP + CANDIDATE cancellation from QUEST_ASSIGNED', async () => {
+    if (!postgresAvailable) return;
+    const [memberId, leaderId] = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_ASSIGNED',
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      workers: [memberId, leaderId],
+    });
+    await selectCandidateTeam(questId, leaderId, [memberId, leaderId]);
+    const leaderBefore = (await readTestWallet(leaderId)).earningsBalanceSatang;
+    const memberBefore = (await readTestWallet(memberId)).earningsBalanceSatang;
+    const hirerBefore = await readTestWallet(hirerId);
+
+    const cancelled = await request(questId, hirerId, `cancel-v2-split-${questId}`);
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({
+      paidSatang: 400,
+      refundedSatang: 1_640,
+    });
+    expect((await readTestWallet(leaderId)).earningsBalanceSatang).toBe(leaderBefore);
+    expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(
+      hirerBefore.spendingBalanceSatang
+    );
+
+    const allocationUrl = `http://localhost/api/v2/quests/${questId}/reward-allocation`;
+    const read = await app.handle(
+      new Request(allocationUrl, { headers: { 'x-member-id': memberId } })
+    );
+    expect(read.status).toBe(200);
+    expect((await read.json()).data).toMatchObject({ status: 'PENDING', viewerIsLeader: false });
+
+    const submitted = await app.handle(
+      new Request(allocationUrl, {
+        method: 'POST',
+        headers: {
+          'x-member-id': leaderId,
+          'content-type': 'application/json',
+          'idempotency-key': `split-${questId}`,
+        },
+        body: JSON.stringify({
+          teammateShares: [{ memberId, percentageBasisPoints: 2_500 }],
+        }),
+      })
+    );
+    expect(submitted.status).toBe(200);
+
+    expect((await readTestWallet(leaderId)).earningsBalanceSatang).toBe(leaderBefore + 300);
+    expect((await readTestWallet(memberId)).earningsBalanceSatang).toBe(memberBefore + 100);
+    expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(
+      hirerBefore.spendingBalanceSatang + 1_640
+    );
+    const [current] = await db
+      .select({ questStatus: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    expect(current?.questStatus).toBe('QUEST_CANCELLED');
+  });
+
+  it('splits the full pool equally when the Team Leader does not act after a QUEST_IN_PROGRESS cancellation', async () => {
+    if (!postgresAvailable) return;
+    const [memberId, leaderId] = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      workers: [memberId, leaderId],
+    });
+    await selectCandidateTeam(questId, leaderId, [memberId, leaderId]);
+    const leaderBefore = (await readTestWallet(leaderId)).earningsBalanceSatang;
+    const memberBefore = (await readTestWallet(memberId)).earningsBalanceSatang;
+    const hirerBefore = await readTestWallet(hirerId);
+
+    const cancelledAt = new Date();
+    const cancelled = await request(questId, hirerId, `cancel-v2-timeout-${questId}`);
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({ paidSatang: 2_000, refundedSatang: 0 });
+    expect((await readTestWallet(leaderId)).earningsBalanceSatang).toBe(leaderBefore);
+
+    await settleDueQuestV2RewardAllocation(
+      questId,
+      new Date(cancelledAt.getTime() + 25 * 60 * 60 * 1000)
+    );
+
+    expect((await readTestWallet(leaderId)).earningsBalanceSatang).toBe(leaderBefore + 1_000);
+    expect((await readTestWallet(memberId)).earningsBalanceSatang).toBe(memberBefore + 1_000);
+    expect((await readTestWallet(hirerId)).spendingBalanceSatang).toBe(
+      hirerBefore.spendingBalanceSatang
+    );
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.remainingSatang).toBe(0);
+  });
+
+  it('uses the active Worker allocation for GROUP + FCFS', async () => {
     if (!postgresAvailable) return;
     const fcfsQuestId = await createV2Quest({
       status: 'QUEST_ASSIGNED',
@@ -633,59 +726,6 @@ describe('Quest API v2 Hirer cancellation', () => {
       paidSatang: 600,
       refundedSatang: 2_463,
     });
-
-    const candidateWorkers = [workerIds[0], workerIds[1]];
-    const candidateAssignedQuestId = await createV2Quest({
-      status: 'QUEST_ASSIGNED',
-      mode: 'CANDIDATE',
-      participation: 'GROUP',
-      workers: candidateWorkers,
-    });
-    await selectCandidateTeam(candidateAssignedQuestId, candidateWorkers[1], candidateWorkers);
-    const leaderBefore = (await readTestWallet(candidateWorkers[1])).earningsBalanceSatang;
-    const memberBefore = (await readTestWallet(candidateWorkers[0])).earningsBalanceSatang;
-    const candidateResponse = await request(
-      candidateAssignedQuestId,
-      hirerId,
-      `cancel-v2-candidate-${candidateAssignedQuestId}`
-    );
-    expect(candidateResponse.status).toBe(200);
-    expect((await candidateResponse.json()).data).toMatchObject({
-      paidSatang: 400,
-      refundedSatang: 1_640,
-    });
-    expect((await readTestWallet(candidateWorkers[1])).earningsBalanceSatang).toBe(
-      leaderBefore + 400
-    );
-    expect((await readTestWallet(candidateWorkers[0])).earningsBalanceSatang).toBe(memberBefore);
-
-    const candidateInProgressQuestId = await createV2Quest({
-      status: 'QUEST_IN_PROGRESS',
-      mode: 'CANDIDATE',
-      participation: 'GROUP',
-      workers: candidateWorkers,
-    });
-    await selectCandidateTeam(candidateInProgressQuestId, candidateWorkers[1], candidateWorkers);
-    const inProgressLeaderBefore = (await readTestWallet(candidateWorkers[1]))
-      .earningsBalanceSatang;
-    const inProgressMemberBefore = (await readTestWallet(candidateWorkers[0]))
-      .earningsBalanceSatang;
-    const inProgressResponse = await request(
-      candidateInProgressQuestId,
-      hirerId,
-      `cancel-v2-candidate-progress-${candidateInProgressQuestId}`
-    );
-    expect(inProgressResponse.status).toBe(200);
-    expect((await inProgressResponse.json()).data).toMatchObject({
-      paidSatang: 2_000,
-      refundedSatang: 0,
-    });
-    expect((await readTestWallet(candidateWorkers[1])).earningsBalanceSatang).toBe(
-      inProgressLeaderBefore + 2_000
-    );
-    expect((await readTestWallet(candidateWorkers[0])).earningsBalanceSatang).toBe(
-      inProgressMemberBefore
-    );
   });
 
   it('uses the completed underfilled allocation for GROUP + FCFS cancellation', async () => {

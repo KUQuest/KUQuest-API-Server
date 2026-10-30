@@ -31,7 +31,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - The Hirer must confirm an approval or non-approval in a Popup. Closing without a decision leaves the status `PROOF_PENDING`.
 - `PROOF_NOT_APPROVED` requires a reason of at most 1,000 characters. The reason is visible to the Hirer, submitting Worker, and authorized Admins through the Admin Review Item. Other participants see only a summary.
 - The first confirmed decision is final. Multiple Hirer devices use the first decision accepted by the Server.
-- If no decision exists 24 hours after sending, the Server records `PROOF_APPROVED` automatically.
+- The `reviewDeadlineAt` is the later of Quest `dueAt` and 24 hours after the Worker sends the Proof Submission (`submittedAt`). If no decision exists at that time, the Server records `PROOF_APPROVED` automatically. The auto-approval worker must not approve the Proof before `reviewDeadlineAt`.
 
 ## Completion Confirmation review
 

@@ -146,7 +146,7 @@ const proofSubmissionSchema = t.Object({
     t.String({
       format: 'date-time',
       description:
-        'Exact instant the Server auto-approves this Proof Submission. Non-null only while status is PROOF_PENDING, even when later than the Quest dueAt. Not reset by any edit: a sent Proof Submission is locked.',
+        'Exact instant the Server auto-approves this Proof Submission: the later of Quest dueAt and 24 hours after submittedAt. Non-null only while status is PROOF_PENDING. Not reset by any edit: a sent Proof Submission is locked.',
     })
   ),
   reviewReason: t.Nullable(

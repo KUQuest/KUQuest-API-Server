@@ -16,7 +16,7 @@ Workers start assigned work through authenticated `/api/v1/quests/:questId/start
 or `/api/v2/quests/:questId/start-work` commands; the lifecycle worker never
 starts an assigned Quest automatically.
 
-1. **Auto-approve Proofs**: Records `PROOF_APPROVED` when the 24-hour Proof Review Window expires without Hirer action.
+1. **Auto-approve Proof Submissions**: Records `PROOF_APPROVED` when `reviewDeadlineAt` arrives without Hirer action. This is the later of Quest `dueAt` and 24 hours after send. The worker must leave an on-time pending Proof Submission pending before both times have arrived.
 2. **Fail Overdue Quests**: Moves a Quest to `QUEST_FAILED` when `dueAt` expires before its required Start Work, proof, or confirmation action.
 3. **Release Failure Holds**: Releases the Hirer's Funding Reservation after the dispute window expires.
 4. **Time Out Edit Requests**: Expires pending Quest Edit requests past their deadline.
@@ -112,15 +112,25 @@ WHERE quest_status = 'QUEST_IN_PROGRESS'
   AND due_at < NOW();
 ```
 
-### Invariant 2: No Overdue Pending Proofs
+### Invariant 2: No Due Pending Proof Submissions
 
 This query must return zero rows:
 
 ```sql
-SELECT id, quest_id, sent_at
-FROM quest_v2_proof_submission
-WHERE submission_status = 'PROOF_PENDING'
-  AND sent_at < NOW() - INTERVAL '24 hours';
+SELECT 'v2' AS api_version, p.id, p.quest_id, p.sent_at AS submitted_at
+FROM quest_v2_proof_submission AS p
+JOIN quest AS q ON q.id = p.quest_id
+WHERE p.submission_status = 'PROOF_PENDING'
+  AND p.sent_at <= NOW() - INTERVAL '24 hours'
+  AND p.sent_at <= q.due_at
+  AND q.due_at <= NOW()
+UNION ALL
+SELECT 'v1' AS api_version, p.id, p.quest_id, p.submitted_at
+FROM proof_submission AS p
+JOIN quest AS q ON q.id = p.quest_id
+WHERE p.submission_status = 'PROOF_PENDING'
+  AND p.submitted_at <= NOW() - INTERVAL '24 hours'
+  AND (q.due_at IS NULL OR (p.submitted_at <= q.due_at AND q.due_at <= NOW()));
 ```
 
 ### Invariant 3: No Unhandled Assigned Start Deadlines

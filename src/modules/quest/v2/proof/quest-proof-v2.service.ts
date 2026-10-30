@@ -88,7 +88,7 @@ export type QuestV2ProofSubmission = {
   workerMessage: string | null;
   status: QuestV2ProofStatus | null;
   submittedAt: Date | null;
-  /** Exact instant the auto-approval job acts; non-null only while PROOF_PENDING. */
+  /** Auto-approval deadline; non-null only while PROOF_PENDING. */
   reviewDeadlineAt: Date | null;
   /** Hirer's reason; visible only with FULL visibility. */
   reviewReason: string | null;
@@ -270,6 +270,7 @@ type SubmissionRow = {
   reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   createdAt: Date;
   updatedAt: Date;
+  dueAt?: Date | null;
 };
 
 const submissionFields = {
@@ -866,9 +867,18 @@ const attachmentRowsFor = async (database: typeof db | QuestTransaction, submiss
     .where(eq(questV2ProofSubmissionFile.proofSubmissionId, submissionId))
     .orderBy(asc(questV2ProofSubmissionFile.position));
 
-const reviewDeadlineFor = (status: string | null, sentAt: Date | null): Date | null =>
+const reviewDeadlineFor = (
+  status: string | null,
+  sentAt: Date | null,
+  dueAt: Date | null
+): Date | null =>
   status === 'PROOF_PENDING' && sentAt
-    ? new Date(sentAt.getTime() + proofAutoApprovalWindowMs)
+    ? new Date(
+        Math.max(
+          sentAt.getTime() + proofAutoApprovalWindowMs,
+          dueAt?.getTime() ?? Number.NEGATIVE_INFINITY
+        )
+      )
     : null;
 
 const proofFileLinkFor = (attachment: Awaited<ReturnType<typeof attachmentRowsFor>>[number]) => {
@@ -898,6 +908,7 @@ const toSubmission = async (
   database: typeof db | QuestTransaction,
   row: SubmissionRow,
   visibility: 'FULL' | 'SUMMARY' = 'FULL',
+  dueAt: Date | null = row.dueAt ?? null,
   includeFileLinks = false
 ): Promise<QuestV2ProofSubmission> => {
   if (row.submissionStatus !== null && !isProofStatus(row.submissionStatus)) {
@@ -917,7 +928,7 @@ const toSubmission = async (
         ? (row.submissionStatus as QuestV2ProofStatus | null)
         : (row.submissionStatus as QuestV2ProofStatus),
     submittedAt: row.sentAt,
-    reviewDeadlineAt: reviewDeadlineFor(row.submissionStatus, row.sentAt),
+    reviewDeadlineAt: reviewDeadlineFor(row.submissionStatus, row.sentAt, dueAt),
     reviewReason: visibility === 'FULL' ? row.reviewReason : null,
     reviewedAt: row.reviewedAt,
     reviewedBy: row.reviewedBy,
@@ -1002,7 +1013,11 @@ const submissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefi
       snapshot.workerMessage === undefined ? null : (snapshot.workerMessage as string | null),
     status: snapshot.status as QuestV2ProofStatus | null,
     submittedAt,
-    reviewDeadlineAt: reviewDeadlineFor(snapshot.status as QuestV2ProofStatus | null, submittedAt),
+    reviewDeadlineAt:
+      snapshot.status === 'PROOF_PENDING'
+        ? (dateFromSnapshot(snapshot.reviewDeadlineAt) ??
+          reviewDeadlineFor(snapshot.status, submittedAt, null))
+        : null,
     reviewReason: typeof snapshot.reviewReason === 'string' ? snapshot.reviewReason : null,
     reviewedAt: dateFromSnapshot(snapshot.reviewedAt) ?? null,
     reviewedBy:
@@ -1321,9 +1336,21 @@ const mergeEditAttachments = async (
  * The fromSnapshot helpers mark replayed results with `replayed: true`, so the
  * controller can clean up request-scoped uploads a replay must not persist.
  */
-const replayedSubmissionFromSnapshot = (value: unknown): QuestV2ProofSubmission | undefined => {
+const replayedSubmissionFromSnapshot = (
+  value: unknown,
+  dueAt?: Date | null
+): QuestV2ProofSubmission | undefined => {
   const submission = submissionFromSnapshot(value);
-  return submission ? { ...submission, replayed: true } : undefined;
+  if (!submission) return undefined;
+  return {
+    ...submission,
+    ...(dueAt === undefined
+      ? {}
+      : {
+          reviewDeadlineAt: reviewDeadlineFor(submission.status, submission.submittedAt, dueAt),
+        }),
+    replayed: true,
+  };
 };
 
 const deletionFromSnapshot = (
@@ -1901,7 +1928,7 @@ export const submitQuestV2ProofSubmission = async (
           )
           .returning(submissionFields);
         if (!sent) return { kind: 'rejected', rejection: 'already-sent' };
-        const result = await toSubmission(transaction, sent);
+        const result = await toSubmission(transaction, sent, 'FULL', current.dueAt);
         await emitQuestUpdate(transaction, questId, 'PROOF_SUBMITTED', [
           current.hirerId,
           ...(await proofParticipantIds(transaction, sent)),
@@ -1914,7 +1941,7 @@ export const submitQuestV2ProofSubmission = async (
         };
       },
       toSnapshot: snapshotFor,
-      fromSnapshot: replayedSubmissionFromSnapshot,
+      fromSnapshot: (snapshot) => replayedSubmissionFromSnapshot(snapshot, current.dueAt),
     });
     if ('outcome' in command) return { outcome: command.outcome };
     if (command.kind === 'success') return command.result;
@@ -1948,8 +1975,9 @@ export const listQuestV2ProofSubmissions = async (
   }
 
   const rows = await db
-    .select(submissionFields)
+    .select({ ...submissionFields, dueAt: quest.dueAt })
     .from(questV2ProofSubmission)
+    .innerJoin(quest, eq(quest.id, questV2ProofSubmission.questId))
     .where(eq(questV2ProofSubmission.questId, questId))
     .orderBy(asc(questV2ProofSubmission.createdAt), asc(questV2ProofSubmission.id));
   const submissions = await Promise.all(
@@ -1957,7 +1985,7 @@ export const listQuestV2ProofSubmissions = async (
       const isAuthor = row.submittedByUserId === memberId;
       if (row.sentAt === null && !isAuthor) return undefined;
       const full = isAuthor || (current.hirerId === memberId && row.sentAt !== null);
-      return toSubmission(db, row, full ? 'FULL' : 'SUMMARY', full);
+      return toSubmission(db, row, full ? 'FULL' : 'SUMMARY', row.dueAt, full);
     })
   );
   return submissions.filter(
@@ -3424,7 +3452,9 @@ export const autoApproveDueQuestV2Proofs = async (
         eq(quest.apiVersion, questApiVersion.v2),
         inArray(quest.questStatus, ['QUEST_IN_PROGRESS', 'QUEST_FAILED']),
         eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
-        lte(questV2ProofSubmission.sentAt, sentBefore)
+        lte(questV2ProofSubmission.sentAt, sentBefore),
+        lte(quest.dueAt, now),
+        lte(questV2ProofSubmission.sentAt, quest.dueAt)
       )
     )
     .orderBy(asc(questV2ProofSubmission.sentAt), asc(questV2ProofSubmission.id))

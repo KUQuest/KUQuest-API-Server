@@ -52,7 +52,7 @@ For a proof-free Quest, the required submitter creates a Completion Confirmation
 5. **Proof & Completion**:
    - Worker sends a Proof Submission or creates a proof-free Completion Confirmation before `dueAt`.
    - Hirer approval completes the Assignment and settles its Reward. Non-approval fails the Quest, creates one Admin Review Item, and starts the 7-day money hold.
-   - A pending Proof Submission or Completion Confirmation is auto-approved 24 hours after it is sent or created.
+   - A pending Proof Submission is auto-approved at the later of Quest `dueAt` and 24 hours after it is sent. A pending Completion Confirmation is auto-approved 24 hours after it is created.
 6. **Conduct Reports**:
    - Hirer can file `CONDUCT_ABANDONED` against Worker if no proof/confirmation was sent.
    - Worker can file `CONDUCT_OUT_OF_SCOPE` against Hirer from `QUEST_ASSIGNED` onward.
@@ -72,7 +72,7 @@ For a proof-free Quest, the required submitter creates a Completion Confirmation
 3. **Start Work & Execution**:
    - The selected Worker must press Start Work between `startTime` and `dueAt` &rarr; `QUEST_IN_PROGRESS`.
 4. **Quest Edit, Proof, and Settlement**:
-   - Same execution, 10-minute edit response, Proof Submission or proof-free Completion Confirmation, 24-hour review timeout, failure hold, and 3-tier cancellation matrix as Quadrant 1.
+   - Same execution, 10-minute edit response, Proof Submission or proof-free Completion Confirmation, their review deadlines, failure hold, and 3-tier cancellation matrix as Quadrant 1.
 5. **Conduct Reports**:
    - Hirer &rarr; Worker: `CONDUCT_ABANDONED` (if work missing at `dueAt`).
    - Worker &rarr; Hirer: `CONDUCT_OUT_OF_SCOPE`.

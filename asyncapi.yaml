@@ -339,8 +339,10 @@ components:
       description: |
         The event carries no data; read REST after each event. See hirerQuestUpdated for the
         failure and dispute types. PROOF_REVIEWED means the Hirer reviewed a Proof and
-        PROOF_AUTO_APPROVED means the 24-hour review window ended; read
-        `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.
+        PROOF_AUTO_APPROVED means the Proof Submission review deadline arrived. That deadline is
+        the later of Quest `dueAt` and 24 hours after `submittedAt`. Proof-free Completion
+        Confirmations keep their separate 24-hour review window. Read `reviewedBy`, `reviewReason`,
+        and `reviewedAt` on the Proof Submission.
       payload:
         type: object
         additionalProperties: false

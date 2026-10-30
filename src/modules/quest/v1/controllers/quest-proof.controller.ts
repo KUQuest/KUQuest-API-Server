@@ -27,11 +27,13 @@ import { proofStorage } from '../services/quest-proof.storage';
 
 const serialize = (row: {
   submittedAt: Date;
+  reviewDeadlineAt: Date | null;
   reviewedAt: Date | null;
   [key: string]: unknown;
 }) => ({
   ...row,
   submittedAt: row.submittedAt.toISOString(),
+  reviewDeadlineAt: row.reviewDeadlineAt?.toISOString() ?? null,
   reviewedAt: row.reviewedAt?.toISOString() ?? null,
 });
 

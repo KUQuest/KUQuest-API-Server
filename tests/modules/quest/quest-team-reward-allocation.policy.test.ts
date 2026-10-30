@@ -77,6 +77,9 @@ describe('Candidate Team reward allocation policy', () => {
     };
     expect(isReadableCandidateTeamRoster(selectedTeamQuest)).toBe(true);
     expect(
+      isReadableCandidateTeamRoster({ ...selectedTeamQuest, questState: 'QUEST_CANCELLED' })
+    ).toBe(true);
+    expect(
       isReadableCandidateTeamRoster({ ...selectedTeamQuest, questState: 'QUEST_FAILED' })
     ).toBe(false);
     expect(isReadableCandidateTeamRoster({ ...selectedTeamQuest, v2Participation: 'SINGLE' })).toBe(

@@ -1,6 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
@@ -14,9 +15,14 @@ import {
   reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
 } from '@/modules/quest';
-import { createAdminDisputeCaseInTransaction, summaryFromRecord } from '@/modules/quest/admin';
+import {
+  createAdminDisputeCaseInTransaction,
+  resolveAdminDisputeCase,
+  summaryFromRecord,
+} from '@/modules/quest/admin';
 import { disputeAdminActionCatalog } from '@/modules/quest/admin/quest-dispute-admin.policy';
 import {
+  disputeDecisionWindowMs,
   readQuestDisputeSummary,
   readQuestMoneyHold,
 } from '@/modules/quest/admin/quest-dispute-admin.service';
@@ -42,7 +48,7 @@ import {
 } from '../wallet/wallet-test-fixtures';
 
 import { afterAll, beforeAll, describe, expect, it, spyOn } from 'bun:test';
-import { and, count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, sql as drizzleSql } from 'drizzle-orm';
 import { Elysia } from 'elysia';
 
 let postgresAvailable = false;
@@ -231,6 +237,23 @@ const readAdminSseEvent = async (
 
 const expectAdminSseEventMetadataOnly = (event: Record<string, unknown>) => {
   expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+};
+
+const waitForPostgresLockWait = async (blockingPid: number) => {
+  const timeoutAt = Date.now() + 5_000;
+  while (Date.now() < timeoutAt) {
+    const [blocked] = await sql`
+      select exists (
+        select 1
+        from pg_stat_activity
+        where wait_event_type = 'Lock'
+          and ${blockingPid} = any(pg_blocking_pids(pid))
+      ) as waiting
+    `;
+    if (blocked?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for the Admin decision to block on the Case row.');
 };
 
 const readAdminSseEventsForResources = async (
@@ -1246,6 +1269,398 @@ describe('Admin Dispute API', () => {
     ).toMatchObject({ status: 'SETTLED', remainingSatang: 0 });
   });
 
+  it('times out a pending Dispute Case at its deadline after the separate Funding hold ends', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const now = new Date();
+    const failedAt = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+    const openedAt = new Date(failedAt.getTime() + 24 * 60 * 60 * 1000);
+    const holdDeadline = new Date(failedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const decisionDeadline = new Date(openedAt.getTime() + disputeDecisionWindowMs);
+    const delayedWorkerAt = new Date(decisionDeadline.getTime() + 24 * 60 * 60 * 1000);
+
+    await db
+      .update(quest)
+      .set({ failedAt, moneyHoldStartedAt: failedAt })
+      .where(eq(quest.id, fixture.questId));
+    await db
+      .update(adminDisputeCase)
+      .set({ createdAt: openedAt, updatedAt: openedAt })
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+
+    const holdRelease = await runQuestLifecycleWorker({
+      clock: { now: () => holdDeadline },
+      autoApprove: async () => [],
+    });
+    expect(holdRelease.errors.filter(({ id }) => id === fixture.questId)).toEqual([]);
+    expect(holdRelease.releasedFailedQuestIds).toContain(fixture.questId);
+    expect(holdRelease.timedOutDisputeCaseIds).not.toContain(fixture.disputeCaseId);
+    expect(
+      await db
+        .select({ status: adminDisputeCase.status })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+    ).toEqual([{ status: 'DISPUTE_CASE_PENDING' }]);
+
+    const [walletBeforeTimeout, workerWalletBeforeTimeout] = await Promise.all([
+      readTestWallet(fixture.hirerId),
+      readTestWallet(fixture.workerId),
+    ]);
+    const escrowBeforeTimeout = await readTestQuestEscrow({
+      ownerUserId: fixture.hirerId,
+      questId: fixture.questId,
+    });
+    const operationsBeforeTimeout = await listTestQuestEscrowOperations(fixture.reservationId);
+    const settlementsBeforeTimeout = await listTestQuestEscrowSettlements(fixture.reservationId);
+
+    const timeout = await runQuestLifecycleWorker({
+      clock: { now: () => delayedWorkerAt },
+      autoApprove: async () => [],
+    });
+    expect(timeout.timedOutDisputeCaseIds).toContain(fixture.disputeCaseId);
+    expect(
+      await db
+        .select({
+          status: adminDisputeCase.status,
+          version: adminDisputeCase.version,
+          resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
+          resolvedAt: adminDisputeCase.resolvedAt,
+        })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+    ).toEqual([
+      {
+        status: 'DISPUTE_CASE_DISMISSED',
+        version: 2,
+        resolvedByAdminId: null,
+        resolvedAt: delayedWorkerAt,
+      },
+    ]);
+    const auditRows = await db
+      .select()
+      .from(auditRecord)
+      .where(
+        and(
+          eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+          eq(auditRecord.resourceId, fixture.disputeCaseId)
+        )
+      );
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      actorType: 'SYSTEM',
+      actorUserId: null,
+      actorAdminId: null,
+      action: 'DISPUTE_CASE_AUTO_DISMISSED',
+      resourceType: 'DISPUTE_CASE',
+      resourceId: fixture.disputeCaseId,
+      oldValue: { status: 'DISPUTE_CASE_PENDING' },
+      newValue: { status: 'DISPUTE_CASE_DISMISSED' },
+      reason: 'The 7-day Dispute Case decision window expired.',
+      createdAt: delayedWorkerAt,
+    });
+    expect(await readTestWallet(fixture.hirerId)).toEqual(walletBeforeTimeout);
+    expect(await readTestWallet(fixture.workerId)).toEqual(workerWalletBeforeTimeout);
+    expect(
+      await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId })
+    ).toEqual(escrowBeforeTimeout);
+    expect(await listTestQuestEscrowOperations(fixture.reservationId)).toEqual(
+      operationsBeforeTimeout
+    );
+    expect(await listTestQuestEscrowSettlements(fixture.reservationId)).toEqual(
+      settlementsBeforeTimeout
+    );
+
+    const retry = await runQuestLifecycleWorker({
+      clock: { now: () => decisionDeadline },
+      autoApprove: async () => [],
+    });
+    expect(retry.timedOutDisputeCaseIds).not.toContain(fixture.disputeCaseId);
+    expect(
+      await db
+        .select({ id: auditRecord.id })
+        .from(auditRecord)
+        .where(
+          and(
+            eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+            eq(auditRecord.resourceId, fixture.disputeCaseId)
+          )
+        )
+    ).toHaveLength(1);
+  });
+
+  it('allows an Admin decision just before the seven-day deadline and auto-dismisses at the deadline', async () => {
+    if (!postgresAvailable) return;
+    const timelyFixture = await createDisputeFixture();
+    const [timelyCase] = await db
+      .select({ createdAt: adminDisputeCase.createdAt })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, timelyFixture.disputeCaseId));
+    const deadline = new Date(timelyCase!.createdAt.getTime() + disputeDecisionWindowMs);
+    const timelyResult = await resolveAdminDisputeCase({
+      adminId,
+      disputeCaseId: timelyFixture.disputeCaseId,
+      expectedVersion: 1,
+      requestKey: `dispute-before-deadline-${timelyFixture.disputeCaseId}`,
+      reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+      outcome: 'DISPUTE_CASE_DISMISSED',
+      now: new Date(deadline.getTime() - 1),
+    });
+    expect(timelyResult.resourceSummary).toMatchObject({
+      status: 'DISPUTE_CASE_DISMISSED',
+      resolvedByAdminId: adminId,
+    });
+
+    const overdueFixture = await createDisputeFixture();
+    const [overdueCase] = await db
+      .select({ createdAt: adminDisputeCase.createdAt })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, overdueFixture.disputeCaseId));
+    const overdueDeadline = new Date(overdueCase!.createdAt.getTime() + disputeDecisionWindowMs);
+    const requestKey = `dispute-at-deadline-${overdueFixture.disputeCaseId}`;
+    await expect(
+      resolveAdminDisputeCase({
+        adminId,
+        disputeCaseId: overdueFixture.disputeCaseId,
+        expectedVersion: 1,
+        requestKey,
+        reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+        outcome: 'DISPUTE_CASE_DISMISSED',
+        now: overdueDeadline,
+      })
+    ).rejects.toMatchObject({ code: 'DISPUTE_CASE_WINDOW_EXPIRED' });
+    expect(
+      await db
+        .select({
+          status: adminDisputeCase.status,
+          resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
+        })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, overdueFixture.disputeCaseId))
+    ).toEqual([{ status: 'DISPUTE_CASE_DISMISSED', resolvedByAdminId: null }]);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
+    expect(
+      await db
+        .select({ action: auditRecord.action, actorType: auditRecord.actorType })
+        .from(auditRecord)
+        .where(
+          and(
+            eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+            eq(auditRecord.resourceId, overdueFixture.disputeCaseId)
+          )
+        )
+    ).toEqual([{ action: 'DISPUTE_CASE_AUTO_DISMISSED', actorType: 'SYSTEM' }]);
+    expect(await listTestQuestEscrowSettlements(overdueFixture.reservationId)).toHaveLength(0);
+  });
+
+  it('dismisses a Dispute Case when the Admin waits on its lock past the deadline', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const [walletBefore, workerWalletBefore] = await Promise.all([
+      readTestWallet(fixture.hirerId),
+      readTestWallet(fixture.workerId),
+    ]);
+    const escrowBefore = await readTestQuestEscrow({
+      ownerUserId: fixture.hirerId,
+      questId: fixture.questId,
+    });
+    const operationsBefore = await listTestQuestEscrowOperations(fixture.reservationId);
+    const settlementsBefore = await listTestQuestEscrowSettlements(fixture.reservationId);
+
+    const deadline = new Date('2100-01-01T00:00:00.000Z');
+    const createdAt = new Date(deadline.getTime() - disputeDecisionWindowMs);
+    const failedAt = new Date(createdAt.getTime() - 1_000);
+    let controlledNow = new Date(deadline.getTime() - 1);
+    await db
+      .update(quest)
+      .set({ failedAt, moneyHoldStartedAt: failedAt })
+      .where(eq(quest.id, fixture.questId));
+    await db
+      .update(adminDisputeCase)
+      .set({ createdAt, updatedAt: createdAt })
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+
+    let signalCaseLock!: () => void;
+    let releaseCaseLock!: () => void;
+    const caseLocked = new Promise<void>((resolve) => {
+      signalCaseLock = resolve;
+    });
+    const lockReleased = new Promise<void>((resolve) => {
+      releaseCaseLock = resolve;
+    });
+    let caseLockPid = 0;
+    const lockTransaction = db.transaction(async (transaction) => {
+      const [lockedCase] = await transaction
+        .select({
+          id: adminDisputeCase.id,
+          backendPid: drizzleSql<number>`pg_backend_pid()`,
+        })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+        .for('update');
+      caseLockPid = lockedCase!.backendPid;
+      signalCaseLock();
+      await lockReleased;
+    });
+    await caseLocked;
+
+    const requestKey = `dispute-delayed-admin-${fixture.disputeCaseId}`;
+    let decision: ReturnType<typeof resolveAdminDisputeCase>;
+    try {
+      decision = resolveAdminDisputeCase({
+        adminId,
+        disputeCaseId: fixture.disputeCaseId,
+        expectedVersion: 1,
+        requestKey,
+        reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+        outcome: 'DISPUTE_CASE_RESOLVED',
+        workerId: fixture.workerId,
+        amountSatang: 300,
+        now: () => controlledNow,
+      });
+      await waitForPostgresLockWait(caseLockPid);
+      controlledNow = new Date(deadline.getTime() + 25);
+    } finally {
+      releaseCaseLock();
+      await lockTransaction;
+    }
+
+    await expect(decision).rejects.toMatchObject({ code: 'DISPUTE_CASE_WINDOW_EXPIRED' });
+    expect(
+      await db
+        .select({
+          status: adminDisputeCase.status,
+          resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
+          resolvedAt: adminDisputeCase.resolvedAt,
+        })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+    ).toMatchObject([{ status: 'DISPUTE_CASE_DISMISSED', resolvedByAdminId: null }]);
+    const [systemAudit] = await db
+      .select({
+        action: auditRecord.action,
+        actorType: auditRecord.actorType,
+        createdAt: auditRecord.createdAt,
+      })
+      .from(auditRecord)
+      .where(
+        and(
+          eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+          eq(auditRecord.resourceId, fixture.disputeCaseId)
+        )
+      );
+    expect(systemAudit).toMatchObject({
+      action: 'DISPUTE_CASE_AUTO_DISMISSED',
+      actorType: 'SYSTEM',
+    });
+    expect(systemAudit!.createdAt.getTime()).toBeGreaterThanOrEqual(deadline.getTime());
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
+    expect(await readTestWallet(fixture.hirerId)).toEqual(walletBefore);
+    expect(await readTestWallet(fixture.workerId)).toEqual(workerWalletBefore);
+    expect(
+      await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId })
+    ).toEqual(escrowBefore);
+    expect(await listTestQuestEscrowOperations(fixture.reservationId)).toEqual(operationsBefore);
+    expect(await listTestQuestEscrowSettlements(fixture.reservationId)).toEqual(settlementsBefore);
+    await expect(
+      resolveAdminDisputeCase({
+        adminId,
+        disputeCaseId: fixture.disputeCaseId,
+        expectedVersion: 1,
+        requestKey,
+        reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+        outcome: 'DISPUTE_CASE_RESOLVED',
+        workerId: fixture.workerId,
+        amountSatang: 300,
+      })
+    ).rejects.toMatchObject({ code: 'DISPUTE_CASE_WINDOW_EXPIRED' });
+    expect(
+      await db
+        .select({ id: auditRecord.id })
+        .from(auditRecord)
+        .where(
+          and(
+            eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+            eq(auditRecord.resourceId, fixture.disputeCaseId)
+          )
+        )
+    ).toHaveLength(1);
+  });
+
+  it('serializes an Admin decision at the deadline with timeout processing', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const [disputeCase] = await db
+      .select({ createdAt: adminDisputeCase.createdAt })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    const deadline = new Date(disputeCase!.createdAt.getTime() + disputeDecisionWindowMs);
+    await db.transaction((transaction) =>
+      releaseFundingReservation(transaction, {
+        ownerUserId: fixture.hirerId,
+        reservationId: fixture.reservationId,
+        operationReference: `dispute-timeout-concurrency-${fixture.disputeCaseId}`,
+      })
+    );
+    const [hirerWalletBefore, workerWalletBefore] = await Promise.all([
+      readTestWallet(fixture.hirerId),
+      readTestWallet(fixture.workerId),
+    ]);
+    const requestKey = `dispute-timeout-concurrent-admin-${fixture.disputeCaseId}`;
+    const [workerResult, adminResult] = await Promise.allSettled([
+      runQuestLifecycleWorker({ clock: { now: () => deadline }, autoApprove: async () => [] }),
+      resolveAdminDisputeCase({
+        adminId,
+        disputeCaseId: fixture.disputeCaseId,
+        expectedVersion: 1,
+        requestKey,
+        reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+        outcome: 'DISPUTE_CASE_DISMISSED',
+        now: deadline,
+      }),
+    ]);
+    expect(workerResult.status).toBe('fulfilled');
+    expect(adminResult.status).toBe('rejected');
+    if (adminResult.status === 'rejected') {
+      expect(adminResult.reason).toMatchObject({ code: 'DISPUTE_CASE_WINDOW_EXPIRED' });
+    }
+    expect(
+      await db
+        .select({ status: adminDisputeCase.status, version: adminDisputeCase.version })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+    ).toEqual([{ status: 'DISPUTE_CASE_DISMISSED', version: 2 }]);
+    expect(
+      await db
+        .select({ id: auditRecord.id })
+        .from(auditRecord)
+        .where(
+          and(
+            eq(auditRecord.resourceType, 'DISPUTE_CASE'),
+            eq(auditRecord.resourceId, fixture.disputeCaseId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey))
+    ).toHaveLength(0);
+    expect(await listTestDisputeSettlements(fixture.reservationId)).toHaveLength(0);
+    expect(await readTestWallet(fixture.hirerId)).toEqual(hirerWalletBefore);
+    expect(await readTestWallet(fixture.workerId)).toEqual(workerWalletBefore);
+  });
+
   it('serializes concurrent resolutions so one current Case version wins', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
@@ -1277,9 +1692,25 @@ describe('Admin Dispute API', () => {
     expect(caseRow).toEqual({ status: 'DISPUTE_CASE_RESOLVED', version: 2 });
   });
 
-  it('uses Hirer Spending Balance after the seven-day Funding hold releases', async () => {
+  it('uses Hirer Spending Balance after the hold releases and before the Dispute Case deadline', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
+    const now = new Date();
+    const failedAt = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+    const openedAt = new Date(failedAt.getTime() + 5 * 24 * 60 * 60 * 1000);
+    const holdDeadline = new Date(failedAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+    const decisionDeadline = new Date(openedAt.getTime() + disputeDecisionWindowMs);
+    await db
+      .update(quest)
+      .set({ failedAt, moneyHoldStartedAt: failedAt })
+      .where(eq(quest.id, fixture.questId));
+    await db
+      .update(adminDisputeCase)
+      .set({ openedByAdminId: adminId, createdAt: openedAt, updatedAt: openedAt })
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    expect(holdDeadline.getTime()).toBeLessThan(now.getTime());
+    expect(now.getTime()).toBeLessThan(decisionDeadline.getTime());
+
     await db.transaction((transaction) =>
       releaseFundingReservation(transaction, {
         ownerUserId: fixture.hirerId,
@@ -1348,6 +1779,9 @@ describe('Admin Dispute API', () => {
       runQuestLifecycleWorker(options),
       runQuestLifecycleWorker(options),
     ]);
+    expect(first.errors.concat(second.errors).filter(({ id }) => id === fixture.questId)).toEqual(
+      []
+    );
     expect(
       first.releasedFailedQuestIds
         .concat(second.releasedFailedQuestIds)
@@ -1750,10 +2184,11 @@ describe('Admin Dispute API', () => {
       heldSatang: null,
     });
 
-    await runQuestLifecycleWorker({
+    const released = await runQuestLifecycleWorker({
       clock: { now: () => releasesAt },
       autoApprove: async () => [],
     });
+    expect(released.errors.filter(({ id }) => id === fixture.questId)).toEqual([]);
     expect(await readQuestMoneyHold(fixture.hirerId, fixture.questId)).toEqual({
       status: 'RELEASED',
       releasesAt,

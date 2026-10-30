@@ -370,11 +370,14 @@ afterAll(async () => {
 describe('Quest Proof Submission v2 behavior', () => {
   it('creates, edits, sends, replays, and role-filters a Proof Submission', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     const { questId } = await createQuest({
       v2Participation: 'GROUP',
       headcount: 2,
       questFundingTotalSatang: 2_000,
       questEscrowSatang: 2_040,
+      startTime: new Date(Date.now() - 60 * 60 * 1000),
+      dueAt,
     });
     const firstFileId = await createFile(worker.id);
     const secondFileId = await createFile(worker.id);
@@ -459,9 +462,51 @@ describe('Quest Proof Submission v2 behavior', () => {
     const sentData = (await sent.json()).data;
     expect(sentData.status).toBe('PROOF_PENDING');
     expect(new Date(sentData.reviewDeadlineAt).getTime()).toBe(
-      new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000
+      Math.max(new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000, dueAt.getTime())
     );
     expect(sentData.reviewReason).toBeNull();
+    const [submitCommand] = await db
+      .select({ id: questCommand.id, resultData: questCommand.resultData })
+      .from(questCommand)
+      .where(
+        and(eq(questCommand.questId, questId), eq(questCommand.key, 'proof-v2-behavior-submit'))
+      )
+      .limit(1);
+    if (!submitCommand) throw new Error('Proof Submission submit command was not recorded');
+    const savedResult = submitCommand.resultData as {
+      kind?: unknown;
+      result?: unknown;
+    } | null;
+    if (
+      savedResult?.kind !== 'success' ||
+      !savedResult.result ||
+      typeof savedResult.result !== 'object' ||
+      Array.isArray(savedResult.result)
+    ) {
+      throw new Error('Proof Submission submit command has no saved success result');
+    }
+    const staleDeadline = new Date(
+      new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000
+    ).toISOString();
+    expect(new Date(staleDeadline).getTime()).toBeLessThan(dueAt.getTime());
+    await db
+      .update(questCommand)
+      .set({
+        resultData: {
+          ...savedResult,
+          result: { ...savedResult.result, reviewDeadlineAt: staleDeadline },
+        },
+      })
+      .where(eq(questCommand.id, submitCommand.id));
+    const sentReplay = await request(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${createdData.id}/submit`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': 'proof-v2-behavior-submit' }
+    );
+    expect(sentReplay.status).toBe(200);
+    expect((await sentReplay.json()).data.reviewDeadlineAt).toBe(sentData.reviewDeadlineAt);
 
     const hirerSent = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, hirer.id);
     expect((await hirerSent.json()).data.items).toEqual([
@@ -907,9 +952,32 @@ describe('Quest Proof Submission v2 behavior', () => {
     ).toBe('PROOF_PENDING');
   });
 
-  it('auto-approves a pending Proof at exactly 24 hours after send', async () => {
+  it('auto-approves pending Proofs at the later of dueAt and 24 hours after send', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
-    const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const reviewWindowMs = 24 * 60 * 60 * 1000;
+    const sentAt = new Date(Date.now() - 50 * 60 * 60 * 1000);
+    const verifyDeadline = async (dueOffsetMs: number, label: string) => {
+      const dueAt = new Date(sentAt.getTime() + dueOffsetMs);
+      const approvalAt = new Date(Math.max(sentAt.getTime() + reviewWindowMs, dueAt.getTime()));
+      const { questId } = await createQuest({
+        questFundingTotalSatang: 1_020,
+        questEscrowSatang: 1_020,
+        startTime: new Date(sentAt.getTime() - 60 * 60 * 1000),
+        dueAt,
+      });
+      await reserveQuest(questId, 1_020);
+      const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id, sentAt);
+
+      expect(
+        await autoApproveDueQuestV2Proofs(new Date(approvalAt.getTime() - 1), 10),
+        label
+      ).not.toContain(proofSubmissionId);
+      expect(await autoApproveDueQuestV2Proofs(approvalAt, 10), label).toContain(proofSubmissionId);
+    };
+    await verifyDeadline(48 * 60 * 60 * 1000, 'dueAt later than 24 hours');
+    await verifyDeadline(8 * 60 * 60 * 1000, '24 hours later than dueAt');
+    await verifyDeadline(reviewWindowMs, 'equal deadlines');
+
     const { questId } = await createQuest({
       questFundingTotalSatang: 1_020,
       questEscrowSatang: 1_020,
@@ -920,13 +988,11 @@ describe('Quest Proof Submission v2 behavior', () => {
     const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id, sentAt);
     const fixtureEscrow = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     expect(fixtureEscrow?.status).toBe('ACTIVE');
-
+    const dueAt = new Date(sentAt.getTime() + 48 * 60 * 60 * 1000);
     expect(
-      await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000 - 1), 10)
-    ).toEqual([]);
-    expect(
-      await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000), 10)
-    ).toEqual([proofSubmissionId]);
+      await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + reviewWindowMs), 10)
+    ).not.toContain(proofSubmissionId);
+    expect(await autoApproveDueQuestV2Proofs(dueAt, 10)).toContain(proofSubmissionId);
     expect(
       (
         await db
@@ -951,6 +1017,42 @@ describe('Quest Proof Submission v2 behavior', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_COMPLETED');
+  });
+
+  it('keeps an early Hirer decision final when the auto-approval deadline arrives', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const sentAt = new Date(Date.now() - 50 * 60 * 60 * 1000);
+    const dueAt = new Date(sentAt.getTime() + 48 * 60 * 60 * 1000);
+    const hirerDecisionAt = new Date(sentAt.getTime() + 12 * 60 * 60 * 1000);
+    const { questId } = await createQuest({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+      startTime: new Date(sentAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    await reserveQuest(questId, 1_020);
+    const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id, sentAt);
+
+    const decision = await reviewQuestV2ProofSubmission(
+      hirer.id,
+      questId,
+      proofSubmissionId,
+      'PROOF_APPROVED',
+      null,
+      `proof-v2-behavior-early-hirer-decision-${questId}`,
+      hirerDecisionAt
+    );
+    expect(decision).toMatchObject({ proof: { status: 'PROOF_APPROVED', reviewedBy: 'HIRER' } });
+    expect(await autoApproveDueQuestV2Proofs(dueAt, 10)).not.toContain(proofSubmissionId);
+    expect(
+      await db
+        .select({
+          status: questV2ProofSubmission.submissionStatus,
+          reviewedBy: questV2ProofSubmission.reviewedBy,
+        })
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.id, proofSubmissionId))
+    ).toEqual([{ status: 'PROOF_APPROVED', reviewedBy: 'HIRER' }]);
   });
 
   it('fails a Quest at dueAt when required Proof or proof-free confirmation is missing', async () => {

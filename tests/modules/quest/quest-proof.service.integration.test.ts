@@ -3,7 +3,7 @@ import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { proofSubmission, quest, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
+import { autoApproveDueProofs, listProofs, reviewProof } from '@/modules/quest/v1';
 
 import { randomUUID } from 'node:crypto';
 
@@ -19,7 +19,8 @@ const questIds: string[] = [];
 const proofIds: string[] = [];
 
 const createFixture = async (
-  status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | 'QUEST_COMPLETED'
+  status: 'QUEST_IN_PROGRESS' | 'QUEST_SUBMITTED' | 'QUEST_COMPLETED',
+  dueAt: Date | null = null
 ) => {
   const questId = randomUUID();
   const proofId = randomUUID();
@@ -36,6 +37,7 @@ const createFixture = async (
     rewardSatang: 100,
     tagId,
     startTime: new Date('2026-08-27T08:00:00.000Z'),
+    dueAt,
   });
   await db
     .insert(questAssignment)
@@ -161,5 +163,18 @@ describe('Quest Proof lifecycle gates', () => {
     });
 
     expect(await autoApproveDueProofs(now)).toContain(candidateProofId);
+  });
+
+  it('waits until the later of dueAt and 24 hours and exposes that deadline', async () => {
+    const dueAt = new Date(now.getTime() + 4 * 60 * 60 * 1000);
+    const pending = await createFixture('QUEST_SUBMITTED', dueAt);
+
+    const rows = await listProofs(hirerId, pending.questId);
+    expect(rows[0]?.reviewDeadlineAt).toEqual(dueAt);
+    expect(await autoApproveDueProofs(now)).not.toContain(pending.proofId);
+    expect(await autoApproveDueProofs(new Date(dueAt.getTime() - 1))).not.toContain(
+      pending.proofId
+    );
+    expect(await autoApproveDueProofs(dueAt)).toContain(pending.proofId);
   });
 });

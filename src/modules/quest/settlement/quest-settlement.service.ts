@@ -299,7 +299,11 @@ export const settleV2TeamRewardAllocationInTransaction = async (
     .limit(1)
     .for('update');
   if (!allocation) return { outcome: 'not-found' };
-  if (current.questStatus !== questStatus.completed || allocation.status !== 'PENDING') {
+  const cancelled = current.questStatus === questStatus.cancelled;
+  if (
+    (current.questStatus !== questStatus.completed && !cancelled) ||
+    allocation.status !== 'PENDING'
+  ) {
     return { outcome: 'not-pending' };
   }
   if (source === 'SUBMITTED' && now.getTime() >= allocation.deadlineAt.getTime()) {
@@ -321,7 +325,10 @@ export const settleV2TeamRewardAllocationInTransaction = async (
   if (
     members.length === 0 ||
     assignments.length !== members.length ||
-    assignments.some(({ status }) => status !== assignmentStatus.completed) ||
+    assignments.some(
+      ({ status }) =>
+        status !== (cancelled ? assignmentStatus.cancelled : assignmentStatus.completed)
+    ) ||
     !memberIds.includes(allocation.leaderId)
   ) {
     return { outcome: 'invalid-allocation' };
@@ -362,7 +369,14 @@ export const settleV2TeamRewardAllocationInTransaction = async (
     (_amount, workerId) => Promise.resolve(satang(feeByMember.get(workerId ?? '') ?? 0)),
     `quest-v2-team-reward-allocation:${allocation.id}`
   );
-  if (remaining !== 0) {
+  if (cancelled) {
+    // A cancelled Quest kept its refund in Quest Escrow until the Team split settled.
+    await releaseQuestEscrow(tx, {
+      ownerUserId: current.hirerId,
+      reservationId: reservation.reservationId,
+      operationReference: `quest-v2-team-reward-allocation-release:${allocation.id}`,
+    });
+  } else if (remaining !== 0) {
     throw new MoneyDomainError(
       'FUNDING_SETTLEMENT_FAILED',
       'Quest Escrow does not match the Candidate Team Reward Allocation.'
@@ -1545,9 +1559,9 @@ type V2RewardAllocation = {
   feeSatang: number;
 };
 
-const selectedV2TeamLeader = async (tx: QuestTransaction, questId: string) => {
+const selectedV2Team = async (tx: QuestTransaction, questId: string) => {
   const [team] = await tx
-    .select({ leaderId: questCandidateTeamV2.leaderId })
+    .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
     .from(questCandidateTeamV2)
     .where(
       and(
@@ -1557,7 +1571,7 @@ const selectedV2TeamLeader = async (tx: QuestTransaction, questId: string) => {
     )
     .limit(1)
     .for('update');
-  return team?.leaderId ?? null;
+  return team ?? null;
 };
 
 const v2UnderfilledAllocations = async (
@@ -1828,6 +1842,12 @@ const applyV2CancellationInTransaction = async (
   let payoutWorkers: Array<{ workerId: string; amountSatang: number }> = [];
   let payoutFee: (amountSatang: number, workerId?: string) => Promise<Satang | 0> = () =>
     Promise.resolve(fee);
+  let teamAllocation: {
+    teamId: string;
+    leaderId: string;
+    rewardSatang: number;
+    platformFeeSatang: number;
+  } | null = null;
 
   if (current.questStatus === questStatus.assigned) {
     if (workers.length === 0) return discard('invalid-state');
@@ -1847,17 +1867,22 @@ const applyV2CancellationInTransaction = async (
           'Quest Escrow does not match the cancellation payout.'
         );
       }
-      const leaderId = await selectedV2TeamLeader(tx, current.id);
-      if (!leaderId || !workers.some(({ workerId }) => workerId === leaderId)) {
+      const team = await selectedV2Team(tx, current.id);
+      if (!team || !workers.some(({ workerId }) => workerId === team.leaderId)) {
         throw new MoneyDomainError(
           'FUNDING_SETTLEMENT_FAILED',
           'Selected Team Leader Assignment is missing.'
         );
       }
-      payoutWorkers = scaledCancellationAllocations(
-        [{ workerId: leaderId, amountSatang: rewardSatang * current.headcount }],
-        rewardSatang * current.headcount
-      );
+      const poolSatang = Math.floor((rewardSatang * current.headcount * 20) / 100);
+      if (poolSatang > 0) {
+        teamAllocation = {
+          teamId: team.id,
+          leaderId: team.leaderId,
+          rewardSatang: poolSatang,
+          platformFeeSatang: 0,
+        };
+      }
     } else {
       const activeRewardAllocations = rewardAllocations?.filter(
         ({ assignmentStatus: status }) => status === assignmentStatus.active
@@ -1894,18 +1919,20 @@ const applyV2CancellationInTransaction = async (
       return discard('invalid-state');
     }
     if (groupCandidate) {
-      const leaderId = await selectedV2TeamLeader(tx, current.id);
-      if (!leaderId || !workers.some(({ workerId }) => workerId === leaderId)) {
+      const team = await selectedV2Team(tx, current.id);
+      if (!team || !workers.some(({ workerId }) => workerId === team.leaderId)) {
         throw new MoneyDomainError(
           'FUNDING_SETTLEMENT_FAILED',
           'Selected Team Leader Assignment is missing.'
         );
       }
       if (!pendingTeamConfirmation) {
-        payoutWorkers = Array.from({ length: current.headcount }, () => ({
-          workerId: leaderId,
-          amountSatang: rewardSatang,
-        }));
+        teamAllocation = {
+          teamId: team.id,
+          leaderId: team.leaderId,
+          rewardSatang: rewardSatang * current.headcount,
+          platformFeeSatang: Number(fee) * current.headcount,
+        };
       }
       expectedRemainingSatang = expectedEscrowSatang;
     } else {
@@ -1988,11 +2015,34 @@ const applyV2CancellationInTransaction = async (
       'Quest Escrow does not match the cancellation payout.'
     );
   }
-  const { releasedSatang: refundedSatang } = await releaseQuestEscrow(tx, {
-    ownerUserId: current.hirerId,
-    reservationId: reservation.reservationId,
-    operationReference: `quest-v2-cancel-release:${commandId}`,
-  });
+  let refundedSatang: number;
+  if (teamAllocation) {
+    // The Team Leader splits the pool first, so Quest Escrow keeps the Hirer refund until then.
+    refundedSatang =
+      remainingBeforeRelease - teamAllocation.rewardSatang - teamAllocation.platformFeeSatang;
+    if (refundedSatang < 0) {
+      throw new MoneyDomainError(
+        'FUNDING_SETTLEMENT_FAILED',
+        'Quest Escrow does not match the cancellation payout.'
+      );
+    }
+    await createPendingTeamRewardAllocation(tx, { questId: current.id, ...teamAllocation, now });
+    paidSatang = teamAllocation.rewardSatang;
+    await recordAudit(tx, {
+      ...auditActor,
+      action: 'QUEST_TEAM_REWARD_ALLOCATION_PENDING',
+      resourceType: 'QUEST_REWARD',
+      resourceId: current.id,
+      newValue: { state: 'QUEST_TEAM_REWARD_ALLOCATION_PENDING', paidSatang },
+      createdAt: now,
+    });
+  } else {
+    ({ releasedSatang: refundedSatang } = await releaseQuestEscrow(tx, {
+      ownerUserId: current.hirerId,
+      reservationId: reservation.reservationId,
+      operationReference: `quest-v2-cancel-release:${commandId}`,
+    }));
+  }
   if (pendingConfirmations.length > 0) {
     const cancelledConfirmations = await tx
       .update(questV2CompletionConfirmation)
@@ -2049,7 +2099,7 @@ const applyV2CancellationInTransaction = async (
       recipientMemberIds: [
         ...new Set([current.hirerId, ...workers.map(({ workerId }) => workerId)]),
       ],
-      closeMemberIds: workers.map(({ workerId }) => workerId),
+      closeMemberIds: teamAllocation ? [] : workers.map(({ workerId }) => workerId),
       changeType: 'QUEST_CANCELLED',
     });
   }

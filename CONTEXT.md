@@ -69,9 +69,10 @@ A Member's account being made temporarily or permanently unable to sign in, reac
 _Avoid_: Wallet Freeze/Suspend alone (a Wallet hold does not by itself block sign-in), Admin disabling another Admin (a separate, out-of-scope capability).
 
 **Proof Review Window**:
-The 24-hour period after a required submitter sends Proof Submission during
-which the Hirer may decide the outcome. If the Hirer does not decide, the
-Server records `PROOF_APPROVED`.
+The period after a required submitter sends Proof Submission during which the
+Hirer may decide the outcome. The `reviewDeadlineAt` is the later of the Quest
+`dueAt` and 24 hours after `submittedAt`. If the Hirer does not decide by this
+time, the Server records `PROOF_APPROVED`.
 _Avoid_: mode-specific review deadlines.
 
 **Completion Confirmation**:

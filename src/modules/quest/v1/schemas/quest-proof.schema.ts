@@ -43,6 +43,13 @@ const proofSchema = t.Object({
   submissionStatus: statusSchema,
   reviewNote: t.Nullable(t.String()),
   submittedAt: t.String({ format: 'date-time' }),
+  reviewDeadlineAt: t.Nullable(
+    t.String({
+      format: 'date-time',
+      description:
+        'Exact instant the Server auto-approves this pending Proof Submission: the later of dueAt and 24 hours after submittedAt.',
+    })
+  ),
   reviewedAt: t.Nullable(t.String({ format: 'date-time' })),
   images: t.Array(t.String({ format: 'uuid' })),
 });
