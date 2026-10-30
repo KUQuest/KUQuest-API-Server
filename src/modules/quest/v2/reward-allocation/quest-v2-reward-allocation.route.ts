@@ -27,9 +27,9 @@ export const questV2RewardAllocationRoute = new Elysia({
     response: responses(questV2RewardAllocationResponseSchema, 401, 404, 409, 500),
     detail: {
       tags: ['Quest Reward Allocation v2'],
-      summary: 'Read a completed Candidate Team Reward Allocation',
+      summary: 'Read a Candidate Team Reward Allocation',
       description:
-        'A selected Candidate Team Member can read the pending or settled Reward Allocation after the Quest completes. The response shows the Worker Reward pool and each Member share, but no Platform Fee or Wallet details.',
+        'A selected Candidate Team Member can read the pending or settled Reward Allocation after the Quest completes or is cancelled with a Worker Reward pool. The response shows the Worker Reward pool and each Member share, but no Platform Fee or Wallet details.',
       operationId: 'getQuestV2RewardAllocation',
       security: betterAuthSecurity,
     },
@@ -44,7 +44,7 @@ export const questV2RewardAllocationRoute = new Elysia({
       tags: ['Quest Reward Allocation v2'],
       summary: 'Submit a Candidate Team Reward Allocation',
       description:
-        'Only the Team Leader can submit percentages for every teammate within 24 hours after successful completion. The Leader receives the remaining percentage and the Server settles the full Quest Reward pool atomically.',
+        'Only the Team Leader can submit percentages for every teammate within 24 hours after successful completion, or after a cancellation that leaves a Worker Reward pool. The Leader receives the remaining percentage and the Server settles the pool atomically.',
       operationId: 'submitQuestV2RewardAllocation',
       security: betterAuthSecurity,
     },

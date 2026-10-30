@@ -157,6 +157,13 @@ const questUpdateAccessPolicy: readonly QuestUpdateAccessRule[] = [
   {
     role: 'WORKER',
     mode: 'LIVE',
+    questStates: [questStatus.cancelled],
+    assignments: [assignmentStatus.cancelled],
+    check: holdsTeamRewardAllocation,
+  },
+  {
+    role: 'WORKER',
+    mode: 'LIVE',
     questStates: [questStatus.completed],
     assignments: [assignmentStatus.incomplete],
     moneyHolds: ['HELD'],
