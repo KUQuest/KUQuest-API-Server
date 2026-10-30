@@ -101,17 +101,20 @@ const createAdminSseEventReader = (reader: ReadableStreamDefaultReader<Uint8Arra
   let pendingEvent: Promise<Record<string, unknown>> | undefined;
 
   const nextEvent = async (timeoutMs = 5_000) => {
-    const pending = (pendingEvent ??= readAdminSseEvent(reader).finally(() => {
-      pendingEvent = undefined;
-    }));
+    const pending = (pendingEvent ??= readAdminSseEvent(reader));
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await Promise.race([
+      const event = await Promise.race([
         pending,
         new Promise<undefined>((resolve) => {
           timeout = setTimeout(() => resolve(undefined), timeoutMs);
         }),
       ]);
+      if (event !== undefined && pendingEvent === pending) pendingEvent = undefined;
+      return event;
+    } catch (error) {
+      if (pendingEvent === pending) pendingEvent = undefined;
+      throw error;
     } finally {
       if (timeout !== undefined) clearTimeout(timeout);
     }
