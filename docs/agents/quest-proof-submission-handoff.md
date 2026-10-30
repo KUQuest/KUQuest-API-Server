@@ -55,6 +55,9 @@ The Quest remains `QUEST_IN_PROGRESS`.
 The relevant Assignment remains `ASSIGNMENT_ACTIVE`.
 The Proof becomes locked.
 No Reward is settled at send time.
+The response includes `reviewDeadlineAt`: the later of Quest `dueAt` and 24
+hours after `submittedAt`. The lifecycle worker approves a Proof only when that
+deadline has arrived.
 
 ## 3. Common HTTP rules
 
@@ -178,16 +181,23 @@ Team Leader, and the send must arrive before `dueAt`.
 
 Success returns the locked Proof:
 
+For example, when Quest `dueAt` is `2026-09-25T10:00:00.000Z`:
+
 ```json
 {
   "success": true,
   "data": {
     "id": "proof-uuid",
     "status": "PROOF_PENDING",
-    "submittedAt": "2026-09-23T10:00:00.000Z"
+    "submittedAt": "2026-09-23T10:00:00.000Z",
+    "reviewDeadlineAt": "2026-09-25T10:00:00.000Z"
   }
 }
 ```
+
+`reviewDeadlineAt` is non-null while status is `PROOF_PENDING`. The same value
+is returned in the Proof list to the Hirer and permitted Members. It is null
+for Drafts and final decisions.
 
 ### 4.5 List Proof Submissions — Hirer or permitted Member
 
@@ -334,8 +344,9 @@ the work passed review.
 
 ### Automatic approval
 
-If the Hirer does not decide within 24 hours after `submittedAt`, the lifecycle
-worker records `PROOF_APPROVED` and uses the same approval settlement path.
+If the Hirer has not decided, the lifecycle worker records `PROOF_APPROVED` at
+the later of the Quest `dueAt` and 24 hours after `submittedAt`. A Hirer decision
+before that deadline remains final.
 
 ## 7. Error handling
 
