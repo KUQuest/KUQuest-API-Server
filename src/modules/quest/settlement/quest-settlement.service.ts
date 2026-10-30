@@ -2304,27 +2304,6 @@ const cancelInTransaction = async (
   const reservation = await readQuestEscrow(tx, { ownerUserId: current.hirerId, questId });
   if (!reservation || reservation.status !== 'ACTIVE') return { outcome: 'invalid-state' };
   const workers = await activeAssignments(tx, questId);
-  const pendingConfirmations =
-    actor.adminId && current.apiVersion === 'v2' && current.questStatus === questStatus.inProgress
-      ? await tx
-          .select({
-            id: questV2CompletionConfirmation.id,
-            workerId: questV2CompletionConfirmation.workerId,
-            teamId: questV2CompletionConfirmation.teamId,
-          })
-          .from(questV2CompletionConfirmation)
-          .where(
-            and(
-              eq(questV2CompletionConfirmation.questId, questId),
-              eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
-            )
-          )
-          .for('update')
-      : [];
-  const pendingWorkerIds = new Set(
-    pendingConfirmations.flatMap(({ workerId }) => (workerId ? [workerId] : []))
-  );
-  const pendingTeamConfirmation = pendingConfirmations.some(({ teamId }) => teamId !== null);
   const rewardSatang = requireQuestReward(current.rewardSatang);
   const groupCandidate = current.mode === 'CANDIDATE' && current.participation === 'GROUP';
   const requiresTeamLeader = groupCandidate && current.questStatus !== questStatus.open;
@@ -2363,15 +2342,11 @@ const cancelInTransaction = async (
   } else if (current.questStatus === questStatus.inProgress) {
     const fee = await platformFeeForQuest(tx, current, reservation, rewardSatang);
     const payoutWorkers = leaderId
-      ? pendingTeamConfirmation
-        ? []
-        : Array.from({ length: current.headcount }, () => ({
-            workerId: leaderId,
-            amountSatang: rewardSatang,
-          }))
-      : workers
-          .filter(({ workerId }) => !pendingWorkerIds.has(workerId))
-          .map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
+      ? Array.from({ length: current.headcount }, () => ({
+          workerId: leaderId,
+          amountSatang: rewardSatang,
+        }))
+      : workers.map(({ workerId }) => ({ workerId, amountSatang: rewardSatang }));
     paid = payoutWorkers.reduce((total, { amountSatang }) => total + amountSatang, 0);
     await settleQuestWorkers(
       tx,
@@ -2387,30 +2362,6 @@ const cancelInTransaction = async (
     reservationId: reservation.reservationId,
     operationReference: `quest-cancel-release:${commandId}`,
   });
-  if (pendingConfirmations.length > 0) {
-    const cancelledConfirmations = await tx
-      .update(questV2CompletionConfirmation)
-      .set({ reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' })
-      .where(
-        and(
-          eq(questV2CompletionConfirmation.questId, questId),
-          eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
-        )
-      )
-      .returning({ id: questV2CompletionConfirmation.id });
-    for (const confirmation of cancelledConfirmations) {
-      await recordAudit(tx, {
-        actorType: 'ADMIN',
-        actorAdminId: actor.adminId!,
-        action: 'COMPLETION_CONFIRMATION_CANCELLED',
-        resourceType: 'COMPLETION_CONFIRMATION',
-        resourceId: confirmation.id,
-        oldValue: { status: 'COMPLETION_CONFIRMATION_PENDING' },
-        newValue: { status: 'COMPLETION_CONFIRMATION_CANCELLED' },
-        createdAt: now,
-      });
-    }
-  }
   await tx
     .update(questAssignment)
     .set({ assignmentStatus: assignmentStatus.cancelled })
