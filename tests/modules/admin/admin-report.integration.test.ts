@@ -358,8 +358,10 @@ const createReportFixture = async (reportedMemberId = randomUUID()) => {
     caseId,
     evidenceRefId,
     messageId: messageIds[4]!,
+    messageIds,
     attachmentId,
     assignmentId,
+    senderMembershipId,
     conversationId,
     questId,
     reportedMemberId,
@@ -1086,6 +1088,12 @@ describe('Admin Report Case API', () => {
     expect(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get?.operationId).toBe(
       'getAdminReportEvidence'
     );
+    expect(JSON.stringify(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get)).toContain(
+      'nextCursor'
+    );
+    expect(JSON.stringify(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get)).toContain(
+      'reportedMessageId'
+    );
 
     const listSchema = listOperation?.responses?.['200']?.content?.['application/json']?.schema;
     const detailSchema = detailOperation?.responses?.['200']?.content?.['application/json']?.schema;
@@ -1404,11 +1412,12 @@ describe('Admin Report Case API', () => {
       caseId: fixture.caseId,
       evidenceRefId: fixture.evidenceRefId,
       reportedMessageId: fixture.messageId,
-      truncated: true,
+      truncated: false,
+      nextCursor: null,
     });
     expect(
       firstEvidenceBody.data.messages.map((message: { sequence: number }) => message.sequence)
-    ).toEqual([2, 3, 4, 5, 6, 7, 8]);
+    ).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
     expect(
       firstEvidenceBody.data.messages.find(
         (message: { id: string }) => message.id === fixture.messageId
@@ -1455,6 +1464,184 @@ describe('Admin Report Case API', () => {
         (message: { id: string }) => message.id === fixture.messageId
       ).attachments
     ).toEqual([expect.objectContaining({ url: null, urlExpiresAt: null })]);
+  });
+
+  it('pages full Report Case history with a scoped cursor and safe Admin Actions', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createReportFixture(senderId);
+    const otherCaseFixture = await createReportFixture(senderId);
+    const contextAttachmentId = randomUUID();
+    const contextFileId = randomUUID();
+    const attachmentEvidenceRefId = randomUUID();
+    const contextAttachmentCreatedAt = new Date('2020-02-01T10:00:00.000Z');
+    fixtureAttachmentIds.push(contextAttachmentId);
+    fixtureFileIds.push(contextFileId);
+
+    await db
+      .update(chatMessage)
+      .set({ createdAt: contextAttachmentCreatedAt })
+      .where(inArray(chatMessage.id, fixture.messageIds));
+    await db.insert(file).values({
+      id: contextFileId,
+      bucket: 'admin-report-fixture',
+      objectKey: `admin-report-fixture/${contextFileId}`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: senderId,
+      createdAt: contextAttachmentCreatedAt,
+    });
+    await db.insert(chatAttachment).values({
+      id: contextAttachmentId,
+      conversationId: fixture.conversationId,
+      uploadedByMemberId: fixture.senderMembershipId,
+      fileId: contextFileId,
+      status: 'CONSUMED',
+      originalFilename: 'context-only.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      validatedAt: contextAttachmentCreatedAt,
+      consumedAt: contextAttachmentCreatedAt,
+      createdAt: contextAttachmentCreatedAt,
+      updatedAt: contextAttachmentCreatedAt,
+    });
+    await db.insert(chatMessageAttachment).values({
+      messageId: fixture.messageIds[0]!,
+      attachmentId: contextAttachmentId,
+      position: 1,
+      attachedAt: contextAttachmentCreatedAt,
+    });
+    await db.insert(adminEvidenceReference).values({
+      id: attachmentEvidenceRefId,
+      reportCaseId: fixture.caseId,
+      attachmentId: fixture.attachmentId,
+    });
+
+    const pages: Array<{
+      adminActionId: string;
+      caseId: string;
+      evidenceRefId: string;
+      reportedMessageId: string;
+      truncated: boolean;
+      messages: Array<{
+        id: string;
+        sequence: number;
+        attachments: Array<{ id: string; originalFilename: string; url: string | null }>;
+      }>;
+      nextCursor: string | null;
+    }> = [];
+    let cursor: string | null = null;
+    for (let index = 0; index < 10; index += 1) {
+      const query = new URLSearchParams({ limit: '1' });
+      if (cursor) query.set('cursor', cursor);
+      // eslint-disable-next-line no-await-in-loop
+      const response = await adminRequest(
+        `/api/v1/admin/evidence/${fixture.evidenceRefId}?${query}`,
+        { headers: { 'idempotency-key': `report-history-${index}-${fixture.caseId}` } }
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()).data;
+      expect(body).toMatchObject({
+        caseId: fixture.caseId,
+        evidenceRefId: fixture.evidenceRefId,
+        reportedMessageId: fixture.messageId,
+      });
+      pages.push(body);
+      cursor = body.nextCursor;
+      if (cursor === null) break;
+    }
+
+    expect(pages).toHaveLength(9);
+    expect(pages.map((page) => page.messages.map((message) => message.sequence))).toEqual(
+      Array.from({ length: 9 }, (_, index) => [index + 1])
+    );
+    expect(pages.map((page) => page.truncated)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+    ]);
+    expect(pages[8]!.nextCursor).toBeNull();
+    const messages = pages.flatMap((page) => page.messages);
+    expect(messages.map((message) => message.id)).toEqual(fixture.messageIds);
+    expect(new Set(messages.map((message) => message.id)).size).toBe(messages.length);
+    expect(messages.find((message) => message.id === fixture.messageId)?.attachments).toEqual([
+      expect.objectContaining({
+        id: fixture.attachmentId,
+        originalFilename: 'reported.png',
+        url: 'https://storage.example/report-evidence',
+      }),
+    ]);
+    expect(messages.find((message) => message.id === fixture.messageIds[0]!)?.attachments).toEqual(
+      []
+    );
+
+    const firstCursor = pages[0]!.nextCursor!;
+    const cursorOnDifferentEvidenceRef = await adminRequest(
+      `/api/v1/admin/evidence/${attachmentEvidenceRefId}?limit=1&cursor=${encodeURIComponent(firstCursor)}`,
+      { headers: { 'idempotency-key': `report-history-other-ref-${fixture.caseId}` } }
+    );
+    expect(cursorOnDifferentEvidenceRef.status).toBe(400);
+    expect((await cursorOnDifferentEvidenceRef.json()).error.code).toBe('INVALID_CURSOR');
+
+    const cursorOnDifferentReportCase = await adminRequest(
+      `/api/v1/admin/evidence/${otherCaseFixture.evidenceRefId}?limit=1&cursor=${encodeURIComponent(firstCursor)}`,
+      { headers: { 'idempotency-key': `report-history-other-case-${fixture.caseId}` } }
+    );
+    expect(cursorOnDifferentReportCase.status).toBe(400);
+    expect((await cursorOnDifferentReportCase.json()).error.code).toBe('INVALID_CURSOR');
+
+    const overLimit = await adminRequest(
+      `/api/v1/admin/evidence/${fixture.evidenceRefId}?limit=51`,
+      { headers: { 'idempotency-key': `report-history-over-limit-${fixture.caseId}` } }
+    );
+    expect(overLimit.status).toBe(400);
+    expect((await overLimit.json()).error.code).toBe('VALIDATION');
+
+    const conversationRead = await adminRequest(
+      `/api/v1/admin/evidence/${fixture.conversationId}`,
+      { headers: { 'idempotency-key': `report-history-conversation-${fixture.caseId}` } }
+    );
+    expect(conversationRead.status).toBe(404);
+    const memberCountBefore = await db
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(eq(chatMembership.conversationId, fixture.conversationId));
+    const writeRequest = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
+      method: 'POST',
+      headers: { 'idempotency-key': `report-history-write-${fixture.caseId}` },
+    });
+    expect(writeRequest.status).toBe(404);
+    expect(
+      await db
+        .select({ id: chatMembership.id })
+        .from(chatMembership)
+        .where(eq(chatMembership.conversationId, fixture.conversationId))
+    ).toEqual(memberCountBefore);
+
+    const actions = await db
+      .select({
+        action: adminAction.action,
+        metadata: adminAction.metadata,
+        resultData: adminAction.resultData,
+      })
+      .from(adminAction)
+      .where(
+        and(
+          eq(adminAction.adminId, adminId),
+          eq(adminAction.action, 'REPORT_CASE_EVIDENCE_ACCESS'),
+          eq(adminAction.resourceId, fixture.caseId)
+        )
+      );
+    expect(actions).toHaveLength(9);
+    expect(JSON.stringify(actions)).not.toContain('The reported Message content.');
+    expect(JSON.stringify(actions)).not.toContain('https://storage.example/report-evidence');
+    expect(JSON.stringify(actions)).not.toContain('admin-report-fixture/');
   });
 
   it('returns earlier Report Cases and Conduct Reports in Member moderation context', async () => {

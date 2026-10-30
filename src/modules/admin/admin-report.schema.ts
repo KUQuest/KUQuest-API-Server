@@ -507,7 +507,16 @@ const adminReportCaseEvidenceSchema = t.Object({
   caseId: uuid,
   evidenceRefId: uuid,
   reportedMessageId: uuid,
-  truncated: t.Boolean(),
+  nextCursor: t.Nullable(
+    t.String({
+      description:
+        'Stable cursor for the next chronological page. The cursor is scoped to this Evidence Reference and Report Case.',
+    })
+  ),
+  truncated: t.Boolean({
+    description:
+      'True when another page of retained, non-deleted Conversation Messages is available.',
+  }),
   messages: t.Array(adminReportEvidenceMessageSchema),
 });
 
