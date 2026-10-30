@@ -157,7 +157,7 @@ export const questProofV2Route = new Elysia({
         tags: ['Quest Proof v2'],
         summary: 'Review a v2 Proof Submission',
         description:
-          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission.',
+          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission. Non-approval makes the Assignment ASSIGNMENT_INCOMPLETE. In GROUP + FIRST_COME_FIRST_SERVED, `questStatus` stays QUEST_IN_PROGRESS while another Worker is Active; when the last Active Worker has a result, the Quest becomes QUEST_COMPLETED if one Worker completed, otherwise QUEST_FAILED. In every other mode, non-approval makes the Quest QUEST_FAILED.',
         operationId: 'reviewQuestV2ProofSubmission',
         security: betterAuthSecurity,
       },

@@ -1985,7 +1985,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(rejectedReview.status).toBe(200);
     expect((await rejectedReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_NOT_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_IN_PROGRESS',
     });
     expect(
       (
@@ -2013,8 +2013,11 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(pendingReview.status).toBe(200);
     expect((await pendingReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_COMPLETED',
     });
+    expect(
+      await readTestQuestEscrow({ ownerUserId: hirer.id, questId: failedQuest.questId })
+    ).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_020 });
 
     const autoQuest = await createInProgressQuest({
       mode: 'FIRST_COME_FIRST_SERVED',
