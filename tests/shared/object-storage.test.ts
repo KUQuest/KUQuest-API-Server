@@ -291,6 +291,48 @@ describe('object storage image-pdf-video policy', () => {
     expect(writes[0]?.key).toMatch(/^test-work-chat\/member-1\/.+\.png$/);
   });
 
+  it.each(['', 'application/octet-stream'])(
+    'accepts a valid PDF file declared with generic type %p',
+    async (declaredType) => {
+      const pdf = validPdfBytes();
+      const pdfStorage = createObjectStorage({
+        keyPrefix: 'test-docs',
+        policy: 'image-pdf-video',
+        bucket: 'kuquest-test',
+        client: {
+          write: async () => pdf.byteLength,
+          delete: async () => undefined,
+          presign: () => '',
+        },
+      });
+
+      const stored = await pdfStorage.upload(
+        'member-1',
+        new File([pdf], 'doc.pdf', { type: declaredType })
+      );
+
+      expect(stored).toMatchObject({ contentType: 'application/pdf' });
+    }
+  );
+
+  it('rejects unknown content declared with a generic type', async () => {
+    const pdfStorage = createObjectStorage({
+      keyPrefix: 'test-docs',
+      policy: 'image-pdf-video',
+      bucket: 'kuquest-test',
+      client: { write: async () => 0, delete: async () => undefined, presign: () => '' },
+    });
+
+    await expect(
+      pdfStorage.upload(
+        'member-1',
+        new File([new TextEncoder().encode('plain text')], 'note.txt', {
+          type: 'application/octet-stream',
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedFileTypeError);
+  });
+
   it('accepts a valid PDF file', async () => {
     const pdf = validPdfBytes();
     const pdfStorage = createObjectStorage({
