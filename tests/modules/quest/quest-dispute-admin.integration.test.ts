@@ -10,6 +10,8 @@ import {
   questCandidateTeamV2,
   questCandidateTeamV2Member,
   proofSubmission,
+  questV2ProofSubmission,
+  questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
@@ -18,6 +20,7 @@ import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
 import {
   createQuestV2ProofSubmission,
+  questV2ProofStorage,
   reviewQuestV2ProofSubmission,
   submitQuestV2ProofSubmission,
 } from '@/modules/quest';
@@ -683,64 +686,180 @@ describe('Admin Dispute API', () => {
   it('serves bounded queue, detail, and audited case-scoped evidence', async () => {
     if (!postgresAvailable) return;
     const fixture = await createDisputeFixture();
-    const queue = await adminRequest('/api/v1/admin/disputes?limit=1&sort=newest');
-    const queueBody = (await queue.json()) as {
-      data: { items: Array<{ id: string; displayId: string }>; nextCursor: string | null };
-    };
-    expect(queue.status).toBe(200);
-    expect(queueBody.data.items).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: fixture.disputeCaseId, category: 'PROOF_REVIEW' }),
-      ])
-    );
-    expect(queueBody.data.items[0]?.displayId).toEqual(expect.stringMatching(/^DSP-\d{6,}$/));
-
-    const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
-    const detailBody = (await detail.json()) as { data: Record<string, unknown> };
-    expect(detail.status).toBe(200);
-    expect(detailBody.data).toMatchObject({
-      id: fixture.disputeCaseId,
-      displayId: expect.stringMatching(/^DSP-\d{6,}$/),
-      questId: fixture.questId,
-      status: 'DISPUTE_CASE_PENDING',
-      decision: { reasonCode: null, decisionReasonText: null },
-      quest: { id: fixture.questId, questStatus: 'QUEST_FAILED' },
-      memberStatus: expect.any(String),
-      previousReportCount: 0,
-      confirmedViolationCount: 0,
-      previousModerationActions: [],
-      member: { status: expect.any(String) },
-    });
-    expect(JSON.stringify(detailBody)).not.toContain(`${fixture.hirerId}@ku.th`);
-
-    const evidence = await adminRequest(
-      `/api/v1/admin/disputes/${fixture.disputeCaseId}/evidence`,
-      {
-        headers: { 'idempotency-key': `dispute-evidence-${fixture.disputeCaseId}` },
-      }
-    );
-    const evidenceBody = (await evidence.json()) as { data: Record<string, unknown> };
-    expect(evidence.status).toBe(200);
-    expect(evidenceBody.data).toMatchObject({
-      caseId: fixture.disputeCaseId,
-      questId: fixture.questId,
-      truncated: false,
-      assignments: [expect.objectContaining({ workerId: fixture.workerId })],
-    });
-    expect(evidenceBody.data).not.toHaveProperty('messages');
-    const [evidenceAction] = await db
-      .select({ action: adminAction.action, resourceId: adminAction.resourceId })
-      .from(adminAction)
-      .where(
-        and(
-          eq(adminAction.resourceId, fixture.disputeCaseId),
-          eq(adminAction.action, 'DISPUTE_CASE_EVIDENCE_ACCESS')
-        )
+    await db
+      .update(quest)
+      .set({
+        apiVersion: 'v2',
+        v2Mode: 'FIRST_COME_FIRST_SERVED',
+        v2Participation: 'SINGLE',
+      })
+      .where(eq(quest.id, fixture.questId));
+    const proofSubmissionId = crypto.randomUUID();
+    const proofFileId = crypto.randomUUID();
+    const workerMessage = 'The attached report contains the result.';
+    const signedUrl = 'https://storage.test/dispute-proof.pdf?signature=temporary-token';
+    const urlExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const originalLinkForWithExpiry = questV2ProofStorage.linkForWithExpiry;
+    try {
+      questV2ProofStorage.linkForWithExpiry = () => ({ url: signedUrl, expiresAt: urlExpiresAt });
+      await db.insert(questV2ProofSubmission).values({
+        id: proofSubmissionId,
+        questId: fixture.questId,
+        workerId: fixture.workerId,
+        submittedByUserId: fixture.workerId,
+        workerMessage,
+        submissionStatus: 'PROOF_PENDING',
+        sentAt: new Date(),
+      });
+      await db.insert(file).values({
+        id: proofFileId,
+        bucket: 'dispute-evidence-test',
+        objectKey: `${proofFileId}.pdf`,
+        contentType: 'application/pdf',
+        sizeBytes: 4096,
+        uploadedByUserId: fixture.workerId,
+      });
+      await db.insert(questV2ProofSubmissionFile).values({
+        proofSubmissionId,
+        fileId: proofFileId,
+        position: 0,
+        uploadStatus: 'PROOF_FILE_READY',
+      });
+      const queue = await adminRequest('/api/v1/admin/disputes?limit=1&sort=newest');
+      const queueBody = (await queue.json()) as {
+        data: { items: Array<{ id: string; displayId: string }>; nextCursor: string | null };
+      };
+      expect(queue.status).toBe(200);
+      expect(queueBody.data.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: fixture.disputeCaseId, category: 'PROOF_REVIEW' }),
+        ])
       );
-    expect(evidenceAction).toEqual({
-      action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
-      resourceId: fixture.disputeCaseId,
-    });
+      expect(queueBody.data.items[0]?.displayId).toEqual(expect.stringMatching(/^DSP-\d{6,}$/));
+
+      const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
+      const detailBody = (await detail.json()) as { data: Record<string, unknown> };
+      expect(detail.status).toBe(200);
+      expect(detailBody.data).toMatchObject({
+        id: fixture.disputeCaseId,
+        displayId: expect.stringMatching(/^DSP-\d{6,}$/),
+        questId: fixture.questId,
+        status: 'DISPUTE_CASE_PENDING',
+        decision: { reasonCode: null, decisionReasonText: null },
+        quest: { id: fixture.questId, questStatus: 'QUEST_FAILED' },
+        memberStatus: expect.any(String),
+        previousReportCount: 0,
+        confirmedViolationCount: 0,
+        previousModerationActions: [],
+        member: { status: expect.any(String) },
+      });
+      expect(JSON.stringify(detailBody)).not.toContain(`${fixture.hirerId}@ku.th`);
+
+      const evidencePath = `/api/v1/admin/disputes/${fixture.disputeCaseId}/evidence`;
+      const requestKey = `dispute-evidence-${fixture.disputeCaseId}`;
+      const evidence = await adminRequest(evidencePath, {
+        headers: { 'idempotency-key': requestKey },
+      });
+      const evidenceBody = (await evidence.json()) as {
+        data: {
+          adminActionId: string;
+          proofSubmissions: Array<{
+            id: string;
+            workerMessage: string | null;
+            files: Array<{
+              fileId: string;
+              contentType: string;
+              sizeBytes: number;
+              position: number;
+              url: string;
+              urlExpiresAt: string;
+            }>;
+          }>;
+          [key: string]: unknown;
+        };
+      };
+      expect(evidence.status).toBe(200);
+      expect(evidenceBody.data).toMatchObject({
+        caseId: fixture.disputeCaseId,
+        questId: fixture.questId,
+        truncated: false,
+        assignments: [expect.objectContaining({ workerId: fixture.workerId })],
+        proofSubmissions: [
+          {
+            id: proofSubmissionId,
+            workerId: fixture.workerId,
+            workerMessage,
+            submissionStatus: 'PROOF_PENDING',
+            files: [
+              {
+                fileId: proofFileId,
+                contentType: 'application/pdf',
+                sizeBytes: 4096,
+                position: 0,
+                url: signedUrl,
+                urlExpiresAt: urlExpiresAt.toISOString(),
+              },
+            ],
+          },
+        ],
+      });
+      expect(evidenceBody.data).not.toHaveProperty('messages');
+
+      const replay = await adminRequest(evidencePath, {
+        headers: { 'idempotency-key': requestKey },
+      });
+      const replayBody = (await replay.json()) as { data: Record<string, any> };
+      expect(replay.status).toBe(200);
+      expect(replayBody.data.proofSubmissions[0]).toMatchObject({
+        id: proofSubmissionId,
+        workerMessage,
+        files: [expect.objectContaining({ fileId: proofFileId, url: signedUrl })],
+      });
+      expect(replayBody.data.adminActionId).toBe(evidenceBody.data.adminActionId);
+
+      const [evidenceAction] = await db
+        .select({
+          action: adminAction.action,
+          resourceId: adminAction.resourceId,
+          resultData: adminAction.resultData,
+        })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.resourceId, fixture.disputeCaseId),
+            eq(adminAction.action, 'DISPUTE_CASE_EVIDENCE_ACCESS')
+          )
+        );
+      expect(evidenceAction).toMatchObject({
+        action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
+        resourceId: fixture.disputeCaseId,
+        resultData: {
+          caseId: fixture.disputeCaseId,
+          questId: fixture.questId,
+          truncated: false,
+          assignmentCount: 1,
+          proofSubmissionCount: 1,
+        },
+      });
+      const auditJson = JSON.stringify(evidenceAction?.resultData);
+      expect(auditJson).not.toContain(workerMessage);
+      expect(auditJson).not.toContain(proofFileId);
+      expect(auditJson).not.toContain(signedUrl);
+      expect(auditJson).not.toContain('sizeBytes');
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(
+            and(
+              eq(adminAction.resourceId, fixture.disputeCaseId),
+              eq(adminAction.action, 'DISPUTE_CASE_EVIDENCE_ACCESS')
+            )
+          )
+      ).toHaveLength(1);
+    } finally {
+      questV2ProofStorage.linkForWithExpiry = originalLinkForWithExpiry;
+    }
   });
 
   it('returns a null Category in an Admin list summary when no Category is stored', async () => {
