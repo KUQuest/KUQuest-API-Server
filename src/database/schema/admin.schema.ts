@@ -578,7 +578,7 @@ export const adminDisputeCase = pgTable(
       'admin_dispute_cases_terminal_fields_check',
       sql`(
         (${table.status} = 'DISPUTE_CASE_PENDING' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 0)
-        OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND num_nonnulls(${table.resolvedByAdminId}, ${table.resolvedAt}) = 2)
+        OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND ${table.resolvedAt} IS NOT NULL)
         OR (${table.status} = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 4)
       )`
     ),
