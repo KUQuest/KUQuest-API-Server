@@ -17,7 +17,10 @@ Part of the [Admin Rulebook](admin-rulebook.md). Defines accepted policy for mes
 ## Admin access boundaries
 
 - Admin may read a Message's content and Attachments **only** through the Evidence Reference of a Report Case that names it. Admin has no general browse access to Work Chat or Candidate Inquiry Conversations.
-- Every Admin read of evidence is recorded as an immutable **Admin Action**.
+- Through a Report Case Evidence Reference, Admin may read every retained, non-deleted Message in the single Conversation that contains the reported Message. This access returns bounded cursor pages in stable chronological order. Each page carries the `reportedMessageId`; `nextCursor` is scoped to that Evidence Reference and Report Case and is `null` after the final page. A cursor from another Evidence Reference or Report Case is invalid.
+- The evidence read is read-only. It does not add Conversation Members, subscribe an Admin to the Conversation, or allow an Admin to send Messages.
+- Expanding Message history does not expand Attachment access. Admin may access only Attachments authorized by the Report Case under the existing Attachment rules. Other Messages in the Conversation do not expose Attachments through this history read.
+- Every successful page read is recorded as an immutable **Admin Action**. Audit data does not store Message text, file bytes, signed URLs, credentials, or tokens.
 
 ## Decisions and strike linkage
 

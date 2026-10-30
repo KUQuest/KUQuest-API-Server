@@ -105,7 +105,7 @@ export const adminReportRoute = new Elysia({
       tags: ['Admin Reports'],
       summary: 'Read case-scoped Report evidence or Conduct Report Chat history',
       description:
-        'Returns Report Case context or one bounded chronological page from a Conduct Report Conversation. Conduct Report evidence handles are scoped to their Report and permitted Conversation. Every page read is recorded as an Admin Action.',
+        'For a Report Case Evidence Reference, returns one bounded chronological page of retained, non-deleted Messages from the single Conversation that contains the reported Message. The reportedMessageId is present on each page. Its nextCursor is scoped to that Evidence Reference and Report Case, and is null on the final page. For a Conduct Report, returns one bounded chronological page from its permitted Conversation. Attachment access remains limited to evidence authorized by the Report Case. Every page read is recorded as an immutable Admin Action.',
       operationId: 'getAdminReportEvidence',
       security: betterAuthSecurity,
     },
