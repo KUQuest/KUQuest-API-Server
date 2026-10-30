@@ -8,7 +8,7 @@ export {
   registerAndroidPushDevice,
   PushServiceError,
 } from './push.service';
-export type { EnqueuePushDeliveryInput, PushDeviceSummary } from './push.service';
+export type { EnqueuePushDeliveryInput, PushDeviceSummary, PushTransaction } from './push.service';
 export { createFcmPushProvider } from './push-fcm.service';
 export type {
   AndroidPushMessage,

@@ -95,3 +95,12 @@ Fully automatic system evaluation (not Admin-triggered):
 
 - `GET /api/v1/profile/penalty-status` returns the Member's own strike count and next result for each ladder, and `redFlagExpiresAt` when a Red Flag is active. The strike count excludes `PENALTY_EXEMPT` rows, reversed rows, and Admin-added rows.
 - A `403 MEMBER_BANNED` response includes `memberBan` with `permanent` and `bannedUntil`, on sign-in and on an existing session.
+
+## 5. Member notifications
+
+- Each applied or ended Red Flag and Member Ban sends a Member-level Push and creates a notification inbox item for the penalized Member. The types are `PENALTY_RED_FLAG_APPLIED`, `PENALTY_RED_FLAG_EXPIRED`, `PENALTY_BAN_APPLIED`, and `PENALTY_BAN_ENDED`. Both ladders and direct Admin actions use them.
+- The payload carries `result`, `ladder`, `source`, and `expiresAt` from `memberPenaltyRecord`. It never names the reporter or includes Message text or proof.
+- `redFlagged` on Member data and `hirerRedFlagged` on Quest data mean "a Red Flag is active now". The Server computes both from `redFlagExpiresAt` and the current time (`isRedFlagActive`). They are not stored. A Red Flag that has passed `expiresAt` reads as `false` before the expiry Event is sent.
+- A banned Member cannot sign in and cannot reach the inbox until the ban ends.
+
+The full payload and inbox contract is in the [Notification and Audit Contract](../quest/notification-audit-contract.md#member-penalty-notifications).

@@ -65,8 +65,14 @@ and does not replace the filed Conduct Report reason or decision code.
 
 ## Notifications and privacy
 
-- `CONDUCT_REPORT_UPHELD` sends an Android Push Notification naming the filed
-  reason and result. The Admin decision note is not included in the notification.
+- `CONDUCT_REPORT_UPHELD` sends a Member-level Android Push Notification to the
+  reported Member and creates a notification inbox item. The data-only payload
+  carries `type`, `notificationId`, `transitionId`, `result`, `ladder`
+  (`MISCONDUCT`), `source` (`CONDUCT_REPORT`), and `expiresAt` (omitted for a
+  permanent ban). It does not include the filed reason, the Admin decision note,
+  or the filer. The result of the Misconduct ladder also creates the matching
+  `PENALTY_*` Event. See the
+  [Notification and Audit Contract](../quest/notification-audit-contract.md#member-penalty-notifications).
 - Filing and dismissals send no notification.
 - The filer's identity is never revealed to the reported Member.
 

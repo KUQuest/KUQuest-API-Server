@@ -60,6 +60,7 @@ import {
   recordMemberConfirmedViolationInTransaction,
   reverseReportCaseViolationInTransaction,
 } from '@/modules/admin/member-penalty';
+import { recordMemberNotificationInTransaction } from '@/modules/notification';
 import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -1791,6 +1792,7 @@ const decideAdminConductReport = async (
           publicSequence: adminConductReport.publicSequence,
           reason: adminConductReport.reason,
           reportedMemberId: adminConductReport.reportedMemberId,
+          questId: adminConductReport.questId,
         })
         .from(adminConductReport)
         .where(eq(adminConductReport.id, input.reportId))
@@ -1834,6 +1836,24 @@ const decideAdminConductReport = async (
                 decision: 'UPHELD',
                 penaltyResult: penaltyRecord.result,
               },
+              now,
+            });
+            // The Push above owns this event key, so this call adds only the inbox row.
+            // It carries codes only: no reporter, Message text, Proof, or Admin note.
+            await recordMemberNotificationInTransaction(database, {
+              memberId: current.reportedMemberId,
+              type: 'CONDUCT_REPORT_UPHELD',
+              eventKey: `conduct-report-upheld:${current.id}`,
+              transitionId: current.id,
+              questId: current.questId,
+              result:
+                penaltyRecord.result === 'PENALTY_PERMANENT_BAN'
+                  ? 'PERMANENT_BAN'
+                  : penaltyRecord.result === 'PENALTY_RED_FLAG'
+                    ? 'RED_FLAG'
+                    : 'TEMPORARY_BAN',
+              ladder: 'MISCONDUCT',
+              source: 'CONDUCT_REPORT',
               now,
             });
           }

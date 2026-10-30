@@ -36,6 +36,7 @@ import {
   questV2Route,
 } from '@/modules/quest';
 import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+import { notificationRoute } from '@/modules/notification/notification.route';
 import { pushRoute } from '@/modules/push';
 import { finishRequestLog, startRequestLog } from '@/shared/request-log';
 
@@ -87,6 +88,7 @@ export const createApp = () => {
     .use(academicRegistrationRoute)
     .use(profileRoute)
     .use(pushRoute)
+    .use(notificationRoute)
     .use(questAssignmentRoute)
     .use(questCandidateRoute)
     .use(questProofRoute)
