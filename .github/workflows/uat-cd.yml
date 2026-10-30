@@ -2,7 +2,7 @@ name: Backend UAT CD
 
 # Manual promotion of an image that Backend Staging CD already built.
 # This workflow never builds an image or resets the UAT database.
-# A successful deploy seeds the first Admin; rollback does not seed.
+# A successful deploy seeds the configured Admin if its email is absent; rollback does not seed.
 on:
   workflow_dispatch:
     inputs:

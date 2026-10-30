@@ -336,6 +336,24 @@ jobs:
              bash -s -- deploy" \
             < scripts/staging-operations.sh
 
+      - name: Seed staging Admin account
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend &&
+             APP_IMAGE='$IMAGE_TAG' \
+             docker compose run --rm --no-deps -T \
+             api bun scripts/seed-admin.ts"
+
       - name: Seed demo Members and funded Quests
         shell: bash
         env:
