@@ -2,6 +2,7 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
+import { memberNotification } from '@/database/schema/notification.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
@@ -13,6 +14,7 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
+import { pushDelivery } from '@/database/schema/push.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { createAdminActionService } from '@/modules/admin';
@@ -32,6 +34,7 @@ import {
 } from '@/modules/quest/admin';
 import { disputeAdminActionCatalog } from '@/modules/quest/admin/quest-dispute-admin.policy';
 import {
+  autoDismissOverdueDisputeCase,
   disputeDecisionWindowMs,
   readQuestDisputeSummary,
   readQuestMoneyHold,
@@ -2612,5 +2615,169 @@ describe('Admin Dispute API', () => {
     expect(schemaText).toContain('maxLength');
     expect(operation?.description).toContain('DISPUTE_CASE_DISMISSED reasonCode is');
     expect(operation?.description).toContain('decisionReasonText');
+  });
+});
+
+describe('Dispute Case Member Notifications', () => {
+  const readInbox = (disputeCaseId: string) =>
+    db.select().from(memberNotification).where(eq(memberNotification.disputeCaseId, disputeCaseId));
+
+  const decide = (
+    fixture: DisputeFixture,
+    outcome: 'DISPUTE_CASE_DISMISSED' | 'DISPUTE_CASE_RESOLVED'
+  ) =>
+    resolveAdminDisputeCase({
+      adminId,
+      disputeCaseId: fixture.disputeCaseId,
+      expectedVersion: 1,
+      requestKey: `dispute-note-${fixture.disputeCaseId}`,
+      reasonCode:
+        outcome === 'DISPUTE_CASE_DISMISSED'
+          ? 'DISPUTE_INSUFFICIENT_EVIDENCE'
+          : 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+      decisionReasonText: 'Secret Admin note.',
+      outcome,
+      workerId: outcome === 'DISPUTE_CASE_RESOLVED' ? fixture.workerId : undefined,
+    });
+
+  it('tells the Hirer when a Worker files, with no Push and no filed text', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const rows = await readInbox(fixture.disputeCaseId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      memberId: fixture.hirerId,
+      type: 'DISPUTE_CASE_FILED_AGAINST_YOU',
+      eventKey: `dispute-filed:${fixture.disputeCaseId}:${fixture.hirerId}`,
+      questId: fixture.questId,
+      questTitle: 'Dispute Quest',
+      actorRole: 'HIRER',
+      disputeStatus: null,
+      viewerWon: null,
+    });
+    expect(JSON.stringify(rows)).not.toContain('Proof meets');
+    expect(JSON.stringify(rows)).not.toContain('PROOF_REVIEW');
+    expect(JSON.stringify(rows)).not.toContain(fixture.workerId);
+    expect(
+      await db
+        .select()
+        .from(pushDelivery)
+        .where(eq(pushDelivery.recipientMemberId, fixture.hirerId))
+    ).toEqual([]);
+  });
+
+  it('tells every assigned Worker when the Hirer files', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    const created = await createAdminDisputeCase({
+      questId: fixture.questId,
+      filerUserId: fixture.hirerId,
+      category: 'PROOF_REVIEW',
+      submittedDetail: 'The Worker did not finish the task.',
+    });
+    const rows = await readInbox(created.id);
+    expect(rows.map((row) => row.memberId)).toEqual([fixture.workerId]);
+    expect(rows[0]).toMatchObject({
+      type: 'DISPUTE_CASE_FILED_AGAINST_YOU',
+      actorRole: 'WORKER',
+      eventKey: `dispute-filed:${created.id}:${fixture.workerId}`,
+    });
+  });
+
+  it('tells both sides a resolved case: filer wins, respondent loses, no leaked fields', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await decide(fixture, 'DISPUTE_CASE_RESOLVED');
+    const decided = (await readInbox(fixture.disputeCaseId)).filter(
+      (row) => row.type === 'DISPUTE_CASE_DECIDED'
+    );
+    expect(decided).toHaveLength(2);
+    const byMember = new Map(decided.map((row) => [row.memberId, row]));
+    expect(byMember.get(fixture.workerId)).toMatchObject({
+      disputeStatus: 'DISPUTE_CASE_RESOLVED',
+      actorRole: 'WORKER',
+      viewerWon: true,
+      eventKey: `dispute-decided:${fixture.disputeCaseId}:${fixture.workerId}`,
+      questTitle: 'Dispute Quest',
+    });
+    expect(byMember.get(fixture.hirerId)).toMatchObject({
+      disputeStatus: 'DISPUTE_CASE_RESOLVED',
+      actorRole: 'HIRER',
+      viewerWon: false,
+    });
+    const text = JSON.stringify(decided);
+    expect(text).not.toContain('Secret Admin note');
+    expect(text).not.toContain('1000');
+    expect(text).not.toContain('PROOF_REVIEW');
+    expect(
+      await db
+        .select()
+        .from(pushDelivery)
+        .where(inArray(pushDelivery.recipientMemberId, [fixture.hirerId, fixture.workerId]))
+    ).toEqual([]);
+  });
+
+  it('tells both sides a dismissed case: filer loses, respondent wins', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await decide(fixture, 'DISPUTE_CASE_DISMISSED');
+    const decided = (await readInbox(fixture.disputeCaseId)).filter(
+      (row) => row.type === 'DISPUTE_CASE_DECIDED'
+    );
+    const byMember = new Map(decided.map((row) => [row.memberId, row]));
+    expect(byMember.get(fixture.workerId)).toMatchObject({
+      disputeStatus: 'DISPUTE_CASE_DISMISSED',
+      viewerWon: false,
+    });
+    expect(byMember.get(fixture.hirerId)).toMatchObject({
+      disputeStatus: 'DISPUTE_CASE_DISMISSED',
+      viewerWon: true,
+    });
+  });
+
+  it('writes the same rows on a timeout dismissal and on a replay', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const late = new Date(Date.now() + disputeDecisionWindowMs + 60_000);
+    await autoDismissOverdueDisputeCase(fixture.disputeCaseId, late);
+    await autoDismissOverdueDisputeCase(fixture.disputeCaseId, late);
+    const decided = (await readInbox(fixture.disputeCaseId)).filter(
+      (row) => row.type === 'DISPUTE_CASE_DECIDED'
+    );
+    expect(decided).toHaveLength(2);
+    expect(decided.every((row) => row.disputeStatus === 'DISPUTE_CASE_DISMISSED')).toBe(true);
+    expect(decided.find((row) => row.memberId === fixture.hirerId)?.viewerWon).toBe(true);
+    expect(decided.find((row) => row.memberId === fixture.workerId)?.viewerWon).toBe(false);
+    expect(await readInbox(fixture.disputeCaseId)).toHaveLength(3);
+  });
+
+  it('rolls the filed inbox row back with a failed filing', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    await db
+      .delete(memberNotification)
+      .where(eq(memberNotification.disputeCaseId, fixture.disputeCaseId));
+    let createdId = '';
+    await expect(
+      db.transaction(async (transaction) => {
+        const created = await createAdminDisputeCaseInTransaction(transaction, {
+          questId: fixture.questId,
+          filerUserId: fixture.workerId,
+          category: 'PROOF_REVIEW',
+          submittedDetail: 'The submitted Proof meets the Quest Condition.',
+        });
+        createdId = created.id;
+        expect(
+          await transaction
+            .select()
+            .from(memberNotification)
+            .where(eq(memberNotification.disputeCaseId, created.id))
+        ).toHaveLength(1);
+        throw new Error('force rollback');
+      })
+    ).rejects.toThrow('force rollback');
+    expect(await readInbox(createdId)).toEqual([]);
   });
 });

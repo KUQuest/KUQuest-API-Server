@@ -10,6 +10,7 @@ import {
   questV2UnderfilledDecision,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
+import { memberNotification } from '@/database/schema/notification.schema';
 import { pushDelivery, pushDevice } from '@/database/schema/push.schema';
 import {
   chatAttachment,
@@ -956,7 +957,19 @@ describe('Quest underfilled GROUP + FCFS API v2', () => {
       type: 'UNDERFILLED_DECISION_PENDING',
       expiresAt: decisionView.decision.expiresAt,
       transitionId: hirerPushes[0]?.eventKey,
+      category: 'QUEST',
+      route: `/quest/${questId}`,
     });
+    const hirerRows = (
+      await db.select().from(memberNotification).where(eq(memberNotification.memberId, hirer.id))
+    ).filter((row) => row.questId === questId);
+    expect(hirerRows).toHaveLength(1);
+    expect(hirerRows[0]).toMatchObject({
+      type: 'UNDERFILLED_DECISION_PENDING',
+      actorRole: 'HIRER',
+    });
+    expect(hirerPushes[0]?.data.notificationId).toBe(hirerRows[0]?.id);
+    expect(hirerPushes[0]?.deepLink).toStartWith('kuquestmobile://');
 
     const summary = (
       await (await request('/api/v2/assignments/mine', 'GET', workers[0].id)).json()

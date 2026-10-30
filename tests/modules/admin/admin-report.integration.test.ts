@@ -3036,7 +3036,7 @@ describe('Admin Report Case API', () => {
       'Your Conduct Report was upheld for work outside the agreed scope. The result is a 7-day Red Flag.'
     );
     expect(delivery?.body).not.toContain(decisionReasonText);
-    expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
+    expect(delivery?.deepLink).toMatch(/^kuquestmobile:\/\/conduct-reports\/CND-\d{6}$/);
 
     const notifications = await db
       .select()
@@ -3052,6 +3052,11 @@ describe('Admin Report Case API', () => {
       transitionId: fixture.reportId,
     });
     expect(JSON.stringify(notifications[0])).not.toContain(reporterId);
+    expect(delivery?.data).toMatchObject({
+      notificationId: notifications[0]?.id,
+      category: 'PENALTY',
+      route: expect.any(String),
+    });
 
     const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
     expect(detail.status).toBe(200);

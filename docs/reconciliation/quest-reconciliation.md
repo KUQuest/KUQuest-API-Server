@@ -384,6 +384,7 @@ the server implementation with the Quest and Work Chat Rulebook:
 - [ ] Wire Work Chat membership writer to Assignment lifecycle transactions to eliminate `WORK_CHAT_UNAVAILABLE` runtime blocks.
 - [ ] Implement Candidate Team Server Join Code generation (24-hour expiry/regeneration) and team selection/rejection lifecycle.
 - [x] Wire direct FCM data-only Push delivery with retryable state and a stable `eventKey` for upheld Conduct Reports and underfilled `GROUP + FCFS` transitions. Android client display/deduplication and other Quest and Membership event coverage remain open.
+- [ ] Write a Quest Event inbox row in the same transaction as each of the eight Quest Push types, add `notificationId`, `category`, and `route` to every inbox-type Push, and use the `kuquestmobile://` scheme (ADR 0037).
 - [ ] Extend Rating Review creation to open after `QUEST_COMPLETED`, `QUEST_FAILED`, and `QUEST_CANCELLED`.
 - [ ] Ensure non-approval creates exactly one Admin Review Item idempotently without reopening or changing the failed Quest.
 - [ ] Enforce inclusive Quest Funding Total calculation and integer-satang escrow reservation per slot.

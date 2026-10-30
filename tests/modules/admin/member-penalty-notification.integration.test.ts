@@ -170,18 +170,27 @@ describe('Member Penalty Notifications', () => {
         expect(rows[0]).toMatchObject({ source: 'REPORT_CASE', ladder: 'MISCONDUCT' });
         expect(Object.keys(rows[0]!).sort()).toEqual(
           [
+            'actorRole',
+            'assignmentId',
+            'cancellationReason',
             'createdAt',
+            'dismissedAt',
+            'disputeCaseId',
+            'disputeStatus',
             'eventKey',
             'expiresAt',
+            'failureReason',
             'id',
             'ladder',
             'memberId',
             'questId',
+            'questTitle',
             'readAt',
             'result',
             'source',
             'transitionId',
             'type',
+            'viewerWon',
           ].sort()
         );
         const [push] = await transaction
@@ -190,10 +199,12 @@ describe('Member Penalty Notifications', () => {
           .where(eq(pushDelivery.recipientMemberId, memberId));
         expect(Object.keys(push!.data as object).sort()).toEqual(
           [
+            'category',
             'expiresAt',
             'ladder',
             'notificationId',
             'result',
+            'route',
             'source',
             'transitionId',
             'type',

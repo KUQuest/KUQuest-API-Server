@@ -1,7 +1,6 @@
-import { enqueuePushDeliveryInTransaction } from '@/modules/push';
-
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import type { QuestV2UnderfilledCancellationReason } from '../core/quest-v2.contract';
+import { enqueueQuestMemberNotificationPush } from './quest-member-notification-v2.push';
 
 type UnderfilledPushInput = {
   recipientMemberIds: string[];
@@ -71,12 +70,17 @@ export const enqueueUnderfilledPush = async (
     ...('reason' in input ? { cancellationReason: input.reason } : {}),
   };
   for (const recipientMemberId of new Set(input.recipientMemberIds)) {
-    await enqueuePushDeliveryInTransaction(transaction, {
+    await enqueueQuestMemberNotificationPush(transaction, {
       recipientMemberId,
+      type: input.type,
+      // Only the Hirer gets the decision prompt. Every other recipient is a Worker.
+      actorRole: input.type === 'UNDERFILLED_DECISION_PENDING' ? 'HIRER' : 'WORKER',
+      questId: input.questId,
       eventKey: transitionId,
-      eventType: input.type,
+      ...('expiresAt' in input ? { expiresAt: input.expiresAt } : {}),
+      ...('reason' in input ? { cancellationReason: input.reason } : {}),
       ...text,
-      deepLink: `kuquest://quest/${input.questId}${isConsent ? '/partial-start' : ''}`,
+      deepLink: `kuquestmobile://quest/${input.questId}${isConsent ? '/partial-start' : ''}`,
       data,
       now: input.now,
     });

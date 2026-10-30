@@ -60,7 +60,10 @@ import {
   recordMemberConfirmedViolationInTransaction,
   reverseReportCaseViolationInTransaction,
 } from '@/modules/admin/member-penalty';
-import { recordMemberNotificationInTransaction } from '@/modules/notification';
+import {
+  insertMemberNotificationInTransaction,
+  notificationPushData,
+} from '@/modules/notification';
 import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -1821,26 +1824,9 @@ const decideAdminConductReport = async (
               now,
             });
             const displayId = formatConductReportDisplayId(current.publicSequence);
-            await enqueuePushDeliveryInTransaction(database, {
-              recipientMemberId: current.reportedMemberId,
-              eventKey: `conduct-report-upheld:${current.id}`,
-              eventType: 'CONDUCT_REPORT_UPHELD',
-              title: 'Conduct Report decision',
-              body: `Your Conduct Report was upheld for ${conductReportReasonLabel(current.reason)}. The result is ${memberPenaltyResultLabel(penaltyRecord.result)}.`,
-              deepLink: `kuquest://conduct-reports/${displayId}`,
-              data: {
-                eventType: 'CONDUCT_REPORT_UPHELD',
-                reportId: current.id,
-                reportDisplayId: displayId,
-                reasonCode: current.reason,
-                decision: 'UPHELD',
-                penaltyResult: penaltyRecord.result,
-              },
-              now,
-            });
-            // The Push above owns this event key, so this call adds only the inbox row.
+            // The inbox row comes first so the Push data always carries its `notificationId`.
             // It carries codes only: no reporter, Message text, Proof, or Admin note.
-            await recordMemberNotificationInTransaction(database, {
+            const inbox = await insertMemberNotificationInTransaction(database, {
               memberId: current.reportedMemberId,
               type: 'CONDUCT_REPORT_UPHELD',
               eventKey: `conduct-report-upheld:${current.id}`,
@@ -1854,6 +1840,29 @@ const decideAdminConductReport = async (
                     : 'TEMPORARY_BAN',
               ladder: 'MISCONDUCT',
               source: 'CONDUCT_REPORT',
+              now,
+            });
+            // The Push event key is the same, so a replay queues no second Push.
+            await enqueuePushDeliveryInTransaction(database, {
+              recipientMemberId: current.reportedMemberId,
+              eventKey: `conduct-report-upheld:${current.id}`,
+              eventType: 'CONDUCT_REPORT_UPHELD',
+              title: 'Conduct Report decision',
+              body: `Your Conduct Report was upheld for ${conductReportReasonLabel(current.reason)}. The result is ${memberPenaltyResultLabel(penaltyRecord.result)}.`,
+              deepLink: `kuquestmobile://conduct-reports/${displayId}`,
+              data: {
+                eventType: 'CONDUCT_REPORT_UPHELD',
+                reportId: current.id,
+                reportDisplayId: displayId,
+                reasonCode: current.reason,
+                decision: 'UPHELD',
+                penaltyResult: penaltyRecord.result,
+                ...notificationPushData({
+                  notificationId: inbox.notificationId,
+                  type: 'CONDUCT_REPORT_UPHELD',
+                  questId: current.questId,
+                }),
+              },
               now,
             });
           }

@@ -17,6 +17,8 @@ describe('AsyncAPI document', () => {
     expect(document).toContain('address: /api/v2/quests/{questId}/candidate-roster/events');
     expect(document).toContain('address: /api/v1/chat/conversations/{conversationId}/events');
     expect(document).toContain('address: /api/v1/chat/candidate-inquiries/{conversationId}/events');
+    expect(document).toContain('address: /api/v1/notifications/events');
+    expect(document).toContain('name: NOTIFICATIONS_CHANGED');
     expect(document).toContain('name: WORK_CONVERSATION_MESSAGE');
     expect(document).toContain('name: CANDIDATE_INQUIRY_MESSAGE');
     expect(document).toContain('?traceId=<uuid>');

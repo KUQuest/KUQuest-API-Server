@@ -100,3 +100,12 @@ their recorded catalog version and code.
 An Admin may also provide an optional `decisionReasonText` of up to 200
 characters. The note is stored separately on the immutable Admin Action and
 does not replace `reasonCode` or change the money movement.
+
+## Dispute inbox Events
+
+Two Dispute Case Events go to the Member notification inbox ([ADR 0037](../../adr/0037-notification-inbox-v2.md)). They have inbox and realtime only. They send no Push.
+
+- `DISPUTE_CASE_FILED_AGAINST_YOU`: goes to the respondent when a Dispute Case is filed against that Member.
+- `DISPUTE_CASE_DECIDED`: goes to the filer and to the respondent when an Admin decides the Dispute Case (`DISPUTE_CASE_RESOLVED` or `DISPUTE_CASE_DISMISSED`).
+- **`viewerWon`**: The filer wins when the decision is `RESOLVED`. The respondent wins when the decision is `DISMISSED`.
+- **Privacy**: An item holds `questTitle`, `disputeCaseId`, `disputeStatus`, `actorRole`, and `viewerWon`. It never holds the amount, the decision reason code, the Admin note, the category, or the filed reason.
