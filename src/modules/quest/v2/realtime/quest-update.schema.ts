@@ -59,6 +59,7 @@ export type QuestUpdateNotification = typeof questUpdateNotificationSchema.stati
 export type QuestUpdateAccess = {
   role: 'HIRER' | 'WORKER' | 'PROSPECTIVE_WORKER';
   mode: 'LIVE' | 'PENDING_PROOF';
+  accessEndsAt?: Date;
 };
 const candidateRosterHirerScopeSchema = t.Object(
   { kind: t.Literal('HIRER') },

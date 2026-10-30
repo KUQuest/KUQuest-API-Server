@@ -14,6 +14,7 @@ import {
   questTeamInvitation,
   questTeamMember,
 } from '@/database/schema/quest.schema';
+import { notifyAdminQuestUpdated } from '@/modules/quest/shared';
 
 import { and, asc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
 
@@ -181,6 +182,7 @@ export const createApplication = async (
       .insert(questApplication)
       .values({ questId, workerId, reworkLimit: data.reworkLimit ?? 0, appliedAt: now })
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(row);
   });
 
@@ -270,6 +272,7 @@ export const updateApplication = async (
       .set({ reworkLimit: data.reworkLimit })
       .where(eq(questApplication.id, applicationId))
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(updated);
   });
 
@@ -306,6 +309,7 @@ export const withdrawApplication = async (
       .set({ applicationStatus: applicationStatus.withdrawn })
       .where(eq(questApplication.id, applicationId))
       .returning(applicationFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return applicationResult(updated);
   });
 
@@ -385,6 +389,7 @@ export const createTeam = async (
       })
       .returning(teamFields);
     await tx.insert(questTeamMember).values({ teamId: team.id, userId: leaderId, joinedAt: now });
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, team);
   });
 
@@ -474,6 +479,7 @@ export const updateTeam = async (
       })
       .where(eq(questTeam.id, teamId))
       .returning(teamFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, updated);
   });
 
@@ -531,6 +537,7 @@ export const leaveTeam = async (
     await tx
       .delete(questTeamMember)
       .where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, userId)));
+    await notifyAdminQuestUpdated(tx, questId);
     const remaining = members.filter((member) => member.userId !== userId);
     if (remaining.length === 0) {
       await revokePendingTeamInvitations(tx, teamId, now);
@@ -576,6 +583,7 @@ export const removeTeamMember = async (
     await tx
       .delete(questTeamMember)
       .where(and(eq(questTeamMember.teamId, teamId), eq(questTeamMember.userId, memberId)));
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, row);
   });
 
@@ -617,6 +625,7 @@ export const submitTeam = async (
       .set({ teamStatus: teamStatus.submitted })
       .where(and(eq(questTeam.id, teamId), eq(questTeam.teamStatus, teamStatus.forming)))
       .returning(teamFields);
+    await notifyAdminQuestUpdated(tx, questId);
     return withMembers(tx, updated);
   });
 
@@ -845,6 +854,7 @@ const respondToInvitation = async (
       .set({ invitationStatus: response, respondedAt: now })
       .where(eq(questTeamInvitation.id, invitationId))
       .returning(invitationFields);
+    await notifyAdminQuestUpdated(tx, identity.questId);
     return invitationResult(updated);
   });
 

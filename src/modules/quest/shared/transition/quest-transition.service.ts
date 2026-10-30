@@ -23,6 +23,7 @@ import {
   WorkChatTransitionError,
   type QuestTransaction,
 } from '../work-chat/quest-work-chat.port';
+import { notifyAdminQuestAndMembersUpdated } from '../admin-updates';
 
 /**
  * Every legal Quest State transition, keyed by the State being entered. A pair
@@ -190,6 +191,9 @@ export const applyQuestStateTransition = async (
     });
   }
   await applyWorkChat(tx, input, entries);
+  if (input.actor.actorType !== 'ADMIN') {
+    await notifyAdminQuestAndMembersUpdated(tx, input.questId);
+  }
   if (input.from === questStatus.open && input.to === questStatus.assigned) {
     await notifyQuestRosterUpdate(tx, input.questId);
   }

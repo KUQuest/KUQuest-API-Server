@@ -110,6 +110,99 @@ const adminRequest = (path: string, options: RequestInit = {}) =>
     })
   );
 
+const adminEventsRequest = () =>
+  app.handle(
+    new Request('http://localhost/api/v1/admin/events', {
+      headers: { cookie: adminCookie },
+    })
+  );
+
+const readAdminSseFrame = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs?: number
+) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const frame =
+    timeoutMs === undefined
+      ? await reader.read()
+      : await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error('Timed out waiting for Admin SSE data.')),
+              timeoutMs
+            );
+          }),
+        ]).finally(() => {
+          if (timeout !== undefined) clearTimeout(timeout);
+        });
+  if (frame.done) throw new Error('Admin SSE stream closed before the expected frame.');
+  return new TextDecoder().decode(frame.value);
+};
+
+const readAdminSseEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  while (true) {
+    const frame = await readAdminSseFrame(reader);
+    const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+    if (dataLine) return JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+  }
+};
+
+type AdminSseEventKey = { subjectType: string; subjectId: string };
+
+const adminSseEventKey = (event: Record<string, unknown>) =>
+  `${String(event.subjectType)}:${String(event.subjectId)}`;
+
+const createAdminSseEventReader = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  let pendingEvent: Promise<Record<string, unknown>> | undefined;
+
+  const nextEvent = async (timeoutMs = 5_000) => {
+    const pending = (pendingEvent ??= readAdminSseEvent(reader));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const event = await Promise.race([
+        pending,
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), timeoutMs);
+        }),
+      ]);
+      if (event !== undefined && pendingEvent === pending) pendingEvent = undefined;
+      return event;
+    } catch (error) {
+      if (pendingEvent === pending) pendingEvent = undefined;
+      throw error;
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  };
+
+  const expectEvents = async (expected: Record<string, unknown>[]) => {
+    const expectedKeys = new Set(expected.map(adminSseEventKey));
+    const deadline = Date.now() + 5_000;
+    const actual: Record<string, unknown>[] = [];
+    while (actual.length < expected.length) {
+      const event = await nextEvent(Math.max(0, deadline - Date.now()));
+      if (!event) throw new Error('Timed out waiting for expected Admin SSE events.');
+      if (expectedKeys.has(adminSseEventKey(event))) actual.push(event);
+    }
+    expect(actual).toEqual(expected);
+  };
+
+  const expectNoEventsFor = async (keys: AdminSseEventKey[], timeoutMs = 500) => {
+    const expectedKeys = new Set(keys.map((key) => `${key.subjectType}:${key.subjectId}`));
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const event = await nextEvent(deadline - Date.now());
+      if (!event) return;
+      if (expectedKeys.has(adminSseEventKey(event))) {
+        throw new Error(`Received an unexpected Admin SSE event: ${JSON.stringify(event)}`);
+      }
+    }
+  };
+
+  return { expectEvents, expectNoEventsFor };
+};
+
 const memberAuthentication = (memberId: string) =>
   spyOn(auth.api, 'getSession').mockImplementation((async () => ({
     user: { id: memberId },
@@ -1128,6 +1221,110 @@ describe('Admin Report Case API', () => {
       expect((await response.json()).error.code).toBe('FORBIDDEN');
     }
   });
+
+  it('invalidates Report Case and Conduct Report reads with related Member and Admin Action IDs', async () => {
+    if (!postgresAvailable) return;
+    const reportCase = await createReportFixture();
+    const conductReport = await createConductReportFixture();
+    const response = await adminEventsRequest();
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const eventStream = createAdminSseEventReader(reader);
+
+    try {
+      expect(await readAdminSseFrame(reader, 5_000)).toContain(': connected');
+
+      const reportCaseDecision = await adminRequest(
+        `/api/v1/admin/reports/${reportCase.caseId}/decide`,
+        {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `sse-report-case-${reportCase.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_SPAM_CONFIRMED',
+          }),
+        }
+      );
+      expect(reportCaseDecision.status).toBe(200);
+      const reportCaseCommand = (await reportCaseDecision.json()).data as {
+        adminActionId: string;
+      };
+      const reportCaseEvents = [
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'REPORT_CASE',
+          subjectId: reportCase.caseId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'MEMBER',
+          subjectId: reportCase.reportedMemberId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'ADMIN_ACTIVITY_LOG',
+          subjectId: reportCaseCommand.adminActionId,
+        },
+      ];
+      await eventStream.expectEvents(reportCaseEvents);
+      await eventStream.expectNoEventsFor(
+        reportCaseEvents.map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+      );
+
+      const conductDecision = await adminRequest(
+        `/api/v1/admin/reports/${conductReport.reportId}/decide`,
+        {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `sse-conduct-report-${conductReport.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_UPHELD',
+            decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+          }),
+        }
+      );
+      expect(conductDecision.status).toBe(200);
+      const conductCommand = (await conductDecision.json()).data as { adminActionId: string };
+      const conductEvents = [
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'CONDUCT_REPORT',
+          subjectId: conductReport.reportId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'MEMBER',
+          subjectId: conductReport.reportedMemberId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'ADMIN_ACTIVITY_LOG',
+          subjectId: conductCommand.adminActionId,
+        },
+      ];
+      await eventStream.expectEvents(conductEvents);
+      await eventStream.expectNoEventsFor(
+        conductEvents.map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+      );
+
+      expect(JSON.stringify([...reportCaseEvents, ...conductEvents])).not.toContain(
+        'The Message repeats an unwanted promotion.'
+      );
+      expect(JSON.stringify([...reportCaseEvents, ...conductEvents])).not.toContain(
+        'The Quest record requires Admin review.'
+      );
+      for (const event of [...reportCaseEvents, ...conductEvents]) {
+        expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  }, 15_000);
 
   it('returns Report Case Member and Quest summaries without Message content', async () => {
     if (!postgresAvailable) return;
@@ -3463,6 +3660,11 @@ describe('Admin Report Case API', () => {
   it('rolls back a Conduct Report dismissal when AdminAction persistence fails', async () => {
     if (!postgresAvailable) return;
     const fixture = await createConductReportFixture();
+    const eventResponse = await adminEventsRequest();
+    expect(eventResponse.status).toBe(200);
+    const eventReader = eventResponse.body!.getReader();
+    const eventStream = createAdminSseEventReader(eventReader);
+    expect(await readAdminSseFrame(eventReader, 5_000)).toContain(': connected');
     await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_dismiss() RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
         IF NEW.action = 'CONDUCT_REPORT_DISMISS' THEN
@@ -3513,7 +3715,11 @@ describe('Admin Report Case API', () => {
           .from(adminAction)
           .where(eq(adminAction.resourceId, fixture.reportId))
       ).toHaveLength(0);
+      await eventStream.expectNoEventsFor([
+        { subjectType: 'CONDUCT_REPORT', subjectId: fixture.reportId },
+      ]);
     } finally {
+      await eventReader.cancel();
       expectedFailureLog.mockRestore();
       await sql`DROP TRIGGER IF EXISTS admin_report_test_fail_conduct_dismiss_trigger ON admin_action`;
       await sql`DROP FUNCTION IF EXISTS admin_report_test_fail_conduct_dismiss()`;

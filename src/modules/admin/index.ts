@@ -1,4 +1,6 @@
 export { adminActivityLogRoute } from './admin-activity-log.route';
+export { adminUpdateRoute } from './admin-update.route';
+export { ensureAdminUpdateListener, notifyAdminResourceUpdated } from './admin-update.delivery';
 export { adminOverviewRoute } from './admin-overview.route';
 export { adminFinanceRoute } from './admin-finance.route';
 export { adminMemberRoute } from './admin-member.route';

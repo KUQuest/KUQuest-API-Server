@@ -2206,6 +2206,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
       let questStatus: QuestV2State = current.questState as QuestV2State;
       let allocationPending = false;
       let holdsRemainder = false;
+      let changedAssignmentIds: string[] = [];
       if (input.decision === 'PROOF_APPROVED') {
         const settlement = await settleApprovedQuestV2ProofInTransaction(
           transaction,
@@ -2218,6 +2219,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
         questStatus = settlement.questStatus as QuestV2State;
         allocationPending = settlement.allocationPending;
         holdsRemainder = settlement.holdsRemainder;
+        changedAssignmentIds = settlement.completedAssignmentIds;
         await recordAssignmentAudits(
           transaction,
           input.actor,
@@ -2267,6 +2269,7 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
             );
         questStatus = failure.questStatus;
         holdsRemainder = failure.questStatus === 'QUEST_COMPLETED';
+        changedAssignmentIds = failure.incompleteAssignmentIds;
         const attachments = await attachmentRowsFor(transaction, proof.id);
         const evidenceReferences = attachments
           .filter(
@@ -2395,12 +2398,21 @@ const reviewQuestV2ProofSubmissionInTransaction = async (
           now: input.now,
         });
       }
+      let relatedMemberIds: string[] = [];
+      if (changedAssignmentIds.length > 0) {
+        const assignments = await transaction
+          .select({ workerId: questAssignment.workerId })
+          .from(questAssignment)
+          .where(inArray(questAssignment.id, [...new Set(changedAssignmentIds)]));
+        relatedMemberIds = [...new Set(assignments.map(({ workerId }) => workerId))];
+      }
 
       return {
         kind: 'success',
         result: { proof, questStatus },
         resourceType: 'quest-v2-proof-command',
         resourceId: proof.id,
+        relatedMemberIds,
       };
     },
     toSnapshot: reviewSnapshotFor,

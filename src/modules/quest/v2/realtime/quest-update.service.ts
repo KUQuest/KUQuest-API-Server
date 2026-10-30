@@ -11,7 +11,16 @@ import {
   questV2TeamRewardAllocation,
   questV2ProofSubmission,
 } from '@/database/schema/quest.schema';
-import { isMoneyHoldOpen, type QuestTransaction } from '@/modules/quest/shared';
+import {
+  assignmentStatus,
+  assignmentStatuses,
+  isMoneyHoldOpen,
+  moneyHoldDurationMs,
+  questStatus,
+  type AssignmentStatus,
+  type QuestStatus,
+  type QuestTransaction,
+} from '@/modules/quest/shared';
 
 import { and, eq, gt, isNotNull, lte, ne, or } from 'drizzle-orm';
 
@@ -42,6 +51,140 @@ export const getQuestUpdateRoster = async (transaction: QuestTransaction, questI
   return { hirerId: current.hirerId, workerIds: assignments.map(({ workerId }) => workerId) };
 };
 
+type QuestUpdateAccessFacts = {
+  memberId: string;
+  questId: string;
+  isHirer: boolean;
+  questState: QuestStatus;
+  assignment: string | undefined;
+  moneyHold: 'NONE' | 'HELD' | 'ENDED';
+  dueAt: Date | null;
+};
+
+type QuestUpdateAccessRule = Omit<QuestUpdateAccess, 'accessEndsAt'> & {
+  questStates: readonly QuestStatus[];
+  assignments?: readonly AssignmentStatus[];
+  moneyHolds?: readonly QuestUpdateAccessFacts['moneyHold'][];
+  closesAtMoneyHoldEnd?: true;
+  check?: (facts: QuestUpdateAccessFacts) => Promise<boolean>;
+};
+
+const holdsTeamRewardAllocation = async ({ memberId, questId }: QuestUpdateAccessFacts) => {
+  const [allocation] = await db
+    .select({ id: questV2TeamRewardAllocation.id })
+    .from(questV2TeamRewardAllocation)
+    .innerJoin(
+      questCandidateTeamV2Member,
+      eq(questCandidateTeamV2Member.teamId, questV2TeamRewardAllocation.teamId)
+    )
+    .where(
+      and(
+        eq(questV2TeamRewardAllocation.questId, questId),
+        eq(questCandidateTeamV2Member.memberId, memberId)
+      )
+    )
+    .limit(1);
+  return allocation !== undefined;
+};
+
+const hasOpenCandidateInquiry = async ({ memberId, questId }: QuestUpdateAccessFacts) => {
+  const [inquiry] = await db
+    .select({ id: chatConversation.id })
+    .from(chatConversation)
+    .where(
+      and(
+        eq(chatConversation.questId, questId),
+        eq(chatConversation.candidateWorkerId, memberId),
+        eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
+        eq(chatConversation.state, 'INQUIRY_OPEN')
+      )
+    )
+    .limit(1);
+  return inquiry !== undefined;
+};
+
+const hasOnTimePendingProof = async ({ memberId, questId, dueAt }: QuestUpdateAccessFacts) => {
+  if (dueAt === null) return false;
+  const [pendingProof] = await db
+    .select({ id: questV2ProofSubmission.id })
+    .from(questV2ProofSubmission)
+    .leftJoin(
+      questCandidateTeamV2Member,
+      eq(questCandidateTeamV2Member.teamId, questV2ProofSubmission.teamId)
+    )
+    .where(
+      and(
+        eq(questV2ProofSubmission.questId, questId),
+        eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
+        isNotNull(questV2ProofSubmission.sentAt),
+        lte(questV2ProofSubmission.sentAt, dueAt),
+        or(
+          eq(questV2ProofSubmission.workerId, memberId),
+          eq(questCandidateTeamV2Member.memberId, memberId)
+        )
+      )
+    )
+    .limit(1);
+  return pendingProof !== undefined;
+};
+
+const questUpdateAccessPolicy: readonly QuestUpdateAccessRule[] = [
+  {
+    role: 'HIRER',
+    mode: 'LIVE',
+    questStates: [
+      questStatus.open,
+      questStatus.assigned,
+      questStatus.inProgress,
+      questStatus.completed,
+      questStatus.failed,
+      questStatus.cancelled,
+    ],
+  },
+  {
+    role: 'WORKER',
+    mode: 'LIVE',
+    questStates: [questStatus.open, questStatus.assigned, questStatus.inProgress],
+    assignments: [assignmentStatus.active],
+  },
+  {
+    role: 'WORKER',
+    mode: 'LIVE',
+    questStates: [questStatus.completed],
+    assignments: [assignmentStatus.completed],
+    check: holdsTeamRewardAllocation,
+  },
+  {
+    role: 'WORKER',
+    mode: 'LIVE',
+    questStates: [questStatus.completed],
+    assignments: [assignmentStatus.incomplete],
+    moneyHolds: ['HELD'],
+    closesAtMoneyHoldEnd: true,
+  },
+  {
+    role: 'PROSPECTIVE_WORKER',
+    mode: 'LIVE',
+    questStates: [questStatus.open],
+    check: hasOpenCandidateInquiry,
+  },
+  {
+    role: 'WORKER',
+    mode: 'PENDING_PROOF',
+    questStates: [questStatus.completed, questStatus.failed],
+    assignments: assignmentStatuses,
+    moneyHolds: ['HELD', 'ENDED'],
+    check: hasOnTimePendingProof,
+  },
+];
+
+const ruleMatches = async (rule: QuestUpdateAccessRule, facts: QuestUpdateAccessFacts) =>
+  (rule.role === 'HIRER') === facts.isHirer &&
+  rule.questStates.includes(facts.questState) &&
+  (rule.assignments?.some((status) => status === facts.assignment) ?? true) &&
+  (rule.moneyHolds?.includes(facts.moneyHold) ?? true) &&
+  (rule.check === undefined || (await rule.check(facts)));
+
 export const getQuestUpdateAccess = async (
   memberId: string,
   questId: string
@@ -57,94 +200,39 @@ export const getQuestUpdateAccess = async (
     .from(quest)
     .where(eq(quest.id, questId))
     .limit(1);
-
   if (!current || current.apiVersion !== questApiVersion.v2) return undefined;
 
-  // The only QUEST_OPEN subscribers are the Hirer and Members with active Assignments.
-  if (current.hirerId === memberId) {
-    if (
-      current.state === 'QUEST_OPEN' ||
-      current.state === 'QUEST_ASSIGNED' ||
-      current.state === 'QUEST_IN_PROGRESS' ||
-      current.state === 'QUEST_COMPLETED' ||
-      current.state === 'QUEST_FAILED' ||
-      current.state === 'QUEST_CANCELLED'
-    ) {
-      return { role: 'HIRER', mode: 'LIVE' };
-    }
-    return undefined;
-  }
+  const isHirer = current.hirerId === memberId;
+  const [assignment] = isHirer
+    ? []
+    : await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
+        .limit(1);
+  const moneyHoldEndsAt = isMoneyHoldOpen(current)
+    ? new Date(current.moneyHoldStartedAt.getTime() + moneyHoldDurationMs)
+    : undefined;
+  const facts: QuestUpdateAccessFacts = {
+    memberId,
+    questId,
+    isHirer,
+    questState: current.state,
+    assignment: assignment?.status,
+    moneyHold:
+      moneyHoldEndsAt === undefined ? 'NONE' : moneyHoldEndsAt > new Date() ? 'HELD' : 'ENDED',
+    dueAt: current.dueAt,
+  };
 
-  const [assignment] = await db
-    .select({ status: questAssignment.assignmentStatus })
-    .from(questAssignment)
-    .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
-    .limit(1);
-  if (
-    assignment?.status === 'ASSIGNMENT_ACTIVE' &&
-    (current.state === 'QUEST_OPEN' ||
-      current.state === 'QUEST_ASSIGNED' ||
-      current.state === 'QUEST_IN_PROGRESS')
-  ) {
-    return { role: 'WORKER', mode: 'LIVE' };
+  for (const rule of questUpdateAccessPolicy) {
+    if (!(await ruleMatches(rule, facts))) continue;
+    return {
+      role: rule.role,
+      mode: rule.mode,
+      ...(rule.closesAtMoneyHoldEnd ? { accessEndsAt: moneyHoldEndsAt } : {}),
+    };
   }
-  if (assignment?.status === 'ASSIGNMENT_COMPLETED' && current.state === 'QUEST_COMPLETED') {
-    const [allocation] = await db
-      .select({ id: questV2TeamRewardAllocation.id })
-      .from(questV2TeamRewardAllocation)
-      .innerJoin(
-        questCandidateTeamV2Member,
-        eq(questCandidateTeamV2Member.teamId, questV2TeamRewardAllocation.teamId)
-      )
-      .where(
-        and(
-          eq(questV2TeamRewardAllocation.questId, questId),
-          eq(questCandidateTeamV2Member.memberId, memberId)
-        )
-      )
-      .limit(1);
-    if (allocation) return { role: 'WORKER', mode: 'LIVE' };
-  }
-  if (current.state === 'QUEST_OPEN') {
-    const [inquiry] = await db
-      .select({ id: chatConversation.id })
-      .from(chatConversation)
-      .where(
-        and(
-          eq(chatConversation.questId, questId),
-          eq(chatConversation.candidateWorkerId, memberId),
-          eq(chatConversation.type, 'CONVERSATION_CANDIDATE_INQUIRY'),
-          eq(chatConversation.state, 'INQUIRY_OPEN')
-        )
-      )
-      .limit(1);
-    if (inquiry) return { role: 'PROSPECTIVE_WORKER', mode: 'LIVE' };
-  }
-  if (!assignment) return undefined;
-
-  if (!isMoneyHoldOpen(current) || current.dueAt === null) return undefined;
-  const [pendingProof] = await db
-    .select({ id: questV2ProofSubmission.id })
-    .from(questV2ProofSubmission)
-    .leftJoin(
-      questCandidateTeamV2Member,
-      eq(questCandidateTeamV2Member.teamId, questV2ProofSubmission.teamId)
-    )
-    .where(
-      and(
-        eq(questV2ProofSubmission.questId, questId),
-        eq(questV2ProofSubmission.submissionStatus, 'PROOF_PENDING'),
-        isNotNull(questV2ProofSubmission.sentAt),
-        lte(questV2ProofSubmission.sentAt, current.dueAt),
-        or(
-          eq(questV2ProofSubmission.workerId, memberId),
-          eq(questCandidateTeamV2Member.memberId, memberId)
-        )
-      )
-    )
-    .limit(1);
-
-  return pendingProof ? { role: 'WORKER', mode: 'PENDING_PROOF' } : undefined;
+  return undefined;
 };
 
 export const getCandidateRosterAccess = async (

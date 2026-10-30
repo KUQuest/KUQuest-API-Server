@@ -22,7 +22,8 @@ channels:
     address: /api/v2/quests/{questId}/events
     description: |
       Quest state and Assignment roster invalidations. The Server authorizes the Hirer or a Worker
-      with current access. This stream does not replay messages after reconnect.
+      with current access. An Incomplete Worker on a QUEST_COMPLETED Quest has access while the
+      7-day money hold is open. This stream does not replay messages after reconnect.
     parameters:
       questId:
         description: UUID of the Quest in this channel address.
@@ -122,7 +123,10 @@ operations:
       The Server sends SUBSCRIBED after it accepts the connection. It then sends QUEST_UPDATED
       when an authorized Quest change occurs. The message contains no Quest snapshot. Read the
       current Quest or Assignment state from the matching REST endpoint. The stream is read-only;
-      a client message closes the connection with code 1008.
+      a client message closes the connection with code 1008. When Quest access ends, the Server
+      closes the connection with code 1000. For an Incomplete Worker on a QUEST_COMPLETED Quest,
+      access ends when the money hold ends, 7 days after the hold starts. Read
+      GET /api/v2/quests/{questId}/participation after the close.
     messages:
       - $ref: '#/channels/questUpdates/messages/subscribed'
       - $ref: '#/channels/questUpdates/messages/questUpdated'
