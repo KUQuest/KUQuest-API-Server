@@ -1,3 +1,4 @@
+import { readMemberPenaltyStatus } from '@/modules/admin/member-penalty';
 import { serializeCertificate, listCertificates } from '@/modules/certificate';
 import type { AuthedContext } from '@/modules/auth';
 import { serializePortfolioItem, listPortfolio } from '@/modules/portfolio';
@@ -18,6 +19,7 @@ import type { Static } from 'elysia';
 
 import type {
   avatarUploadSchema,
+  penaltyStatusResponseSchema,
   publicProfileParamsSchema,
   publicProfileResponseSchema,
   profileResponseSchema,
@@ -98,6 +100,17 @@ export const getReputation = async ({
   session,
 }: AuthedContext): Promise<ApiResponse<Awaited<ReturnType<typeof getProfileReputation>>>> =>
   apiSuccess(await getProfileReputation(session.user.id));
+
+export const getOwnPenaltyStatus = async ({
+  session,
+}: AuthedContext): Promise<ApiResponse<Static<typeof penaltyStatusResponseSchema>['data']>> => {
+  const status = await readMemberPenaltyStatus(session.user.id);
+
+  return apiSuccess({
+    ...status,
+    redFlagExpiresAt: status.redFlagExpiresAt?.toISOString() ?? null,
+  });
+};
 
 type Reviews = Static<typeof reviewsResponseSchema>['data'];
 
