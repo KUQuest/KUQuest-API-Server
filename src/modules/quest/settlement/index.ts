@@ -12,7 +12,6 @@ export {
   failQuestInTransaction,
   failQuestV2InTransaction,
   markAssignmentIncompleteV2InTransaction,
-  rejectProofFreeQuestV2CompletionInTransaction,
   questV2CancellationOperationScope,
   settleApprovedLegacyQuestProofAfterFailureInTransaction,
   settleApprovedQuestInTransaction,
@@ -23,7 +22,6 @@ export {
   teamRewardAllocationWindowMs,
   terminateQuestInTransaction,
   type QuestSettlementOutcome,
-  type QuestV2CompletionNonApprovalSettlement,
 } from './quest-settlement.service';
 export {
   questCancellationResponseSchema,

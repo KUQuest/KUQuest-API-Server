@@ -3053,6 +3053,73 @@ describe('GROUP + FIRST_COME_FIRST_SERVED per-Worker Proof review', () => {
     }
   });
 
+  it('keeps a not-approved proof-free Worker stream open and sends that Worker the Dispute window', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, assignmentIdOf } = await createGroupFcfsQuest({ proofRequired: false });
+    const first = await createCompletionConfirmation(
+      questId,
+      worker.id,
+      `proof-v2-behavior-proof-free-hold-first-${questId}`
+    );
+    const second = await createCompletionConfirmation(
+      questId,
+      secondWorker.id,
+      `proof-v2-behavior-proof-free-hold-second-${questId}`
+    );
+    expect([first.response.status, second.response.status]).toEqual([200, 200]);
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      second.body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-proof-free-hold-approve-${questId}`
+    );
+    expect(approved.status).toBe(200);
+    const updates = await listenQuestUpdates(questId);
+    try {
+      const rejected = await reviewCompletionConfirmation(
+        questId,
+        first.body.data.id,
+        'COMPLETION_CONFIRMATION_NOT_APPROVED',
+        'The work is not complete',
+        `proof-v2-behavior-proof-free-hold-reject-${questId}`
+      );
+      expect(rejected.status).toBe(200);
+      expect((await rejected.json()).data.questStatus).toBe('QUEST_COMPLETED');
+      const hirerAndWorker = [hirer.id, worker.id].sort();
+      expect(await updates.next(3)).toEqual([
+        {
+          changeType: 'COMPLETION_REVIEWED',
+          recipientMemberIds: hirerAndWorker,
+          closeMemberIds: [],
+        },
+        { changeType: 'QUEST_COMPLETED', recipientMemberIds: hirerAndWorker, closeMemberIds: [] },
+        {
+          changeType: 'DISPUTE_WINDOW_OPENED',
+          recipientMemberIds: hirerAndWorker,
+          closeMemberIds: [],
+        },
+      ]);
+    } finally {
+      await updates.stop();
+    }
+    expect(await assignmentStatusesOf(questId)).toEqual({
+      [worker.id]: 'ASSIGNMENT_INCOMPLETE',
+      [secondWorker.id]: 'ASSIGNMENT_COMPLETED',
+    });
+    expect(
+      (await pushRowsOf(questId)).filter(
+        ({ eventType }) => eventType === 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN'
+      )
+    ).toEqual([
+      {
+        recipient: worker.id,
+        eventType: 'QUEST_COMPLETED_DISPUTE_WINDOW_OPEN',
+        eventKey: `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:${assignmentIdOf(worker.id)}`,
+      },
+    ]);
+  });
+
   it('fails the Quest when every Worker is not approved and alerts each Worker once', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId, assignmentIdOf } = await createGroupFcfsQuest();

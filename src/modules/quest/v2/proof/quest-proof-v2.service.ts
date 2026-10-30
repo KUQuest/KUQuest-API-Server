@@ -42,7 +42,6 @@ import {
 import {
   failQuestV2InTransaction,
   markAssignmentIncompleteV2InTransaction,
-  rejectProofFreeQuestV2CompletionInTransaction,
   settleApprovedQuestV2ProofInTransaction,
   settleProofFreeQuestV2InTransaction,
 } from '../../settlement';
@@ -2572,6 +2571,7 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
         return { kind: 'rejected', rejection: 'completion-confirmation-not-found' };
       }
       const allWorkerIds = await allQuestWorkerIds(transaction, input.questId);
+      const activeWorkerIds = await activeAssignmentWorkerIds(transaction, input.questId);
       const [updated] = await transaction
         .update(questV2CompletionConfirmation)
         .set({
@@ -2607,6 +2607,7 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
 
       let questStatus = current.questState as QuestV2State;
       let allocationPending = false;
+      let holdsRemainder = false;
       let changedAssignmentIds: string[] = [];
       if (input.decision === 'COMPLETION_CONFIRMATION_APPROVED') {
         const settlement = await settleProofFreeQuestV2InTransaction(
@@ -2619,6 +2620,7 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
         );
         questStatus = settlement.questStatus as QuestV2State;
         allocationPending = settlement.allocationPending === true;
+        holdsRemainder = settlement.holdsRemainder === true;
         changedAssignmentIds = groupFcfs ? [subject.assignmentId] : subject.assignmentIds;
         await recordAssignmentAudits(
           transaction,
@@ -2644,29 +2646,28 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
           createdAt: input.now,
         });
       } else {
-        if (groupFcfs) {
-          const failure = await rejectProofFreeQuestV2CompletionInTransaction(
-            transaction,
-            input.questId,
-            [subject.assignmentId],
-            commandId,
-            input.now,
-            input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
-          );
-          questStatus = failure.questStatus as QuestV2State;
-          changedAssignmentIds = failure.incompleteAssignmentIds;
-        } else {
-          const failure = await failQuestV2InTransaction(
-            transaction,
-            input.questId,
-            subject.assignmentIds,
-            commandId,
-            input.now,
-            input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
-          );
-          questStatus = failure.questStatus as QuestV2State;
-          changedAssignmentIds = failure.incompleteAssignmentIds;
-        }
+        const actorId = input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null;
+        const failure =
+          groupFcfs && current.questState === 'QUEST_IN_PROGRESS'
+            ? await markAssignmentIncompleteV2InTransaction(
+                transaction,
+                input.questId,
+                subject.assignmentId,
+                commandId,
+                input.now,
+                actorId
+              )
+            : await failQuestV2InTransaction(
+                transaction,
+                input.questId,
+                subject.assignmentIds,
+                commandId,
+                input.now,
+                actorId
+              );
+        questStatus = failure.questStatus;
+        holdsRemainder = failure.questStatus === 'QUEST_COMPLETED';
+        changedAssignmentIds = failure.incompleteAssignmentIds;
         await recordAssignmentAudits(
           transaction,
           input.actor,
@@ -2687,7 +2688,11 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
 
       const participants = await proofParticipantIds(transaction, confirmation);
       const closeReviewedParticipants =
-        groupFcfs && input.decision === 'COMPLETION_CONFIRMATION_NOT_APPROVED' ? participants : [];
+        groupFcfs &&
+        input.decision === 'COMPLETION_CONFIRMATION_NOT_APPROVED' &&
+        questStatus !== 'QUEST_COMPLETED'
+          ? participants
+          : [];
       await emitQuestUpdate(
         transaction,
         input.questId,
@@ -2721,6 +2726,26 @@ const reviewQuestV2CompletionConfirmationInTransaction = async (
           recipientMemberIds: allWorkerIds,
           questId: input.questId,
           reason: 'COMPLETION_NOT_APPROVED',
+          now: input.now,
+        });
+      } else if (questStatus === 'QUEST_COMPLETED' && holdsRemainder) {
+        // Not-approved Workers keep their Quest socket while the money hold is open.
+        const incomplete = await assignmentsWithStatus(transaction, input.questId, [
+          'ASSIGNMENT_INCOMPLETE',
+        ]);
+        const incompleteWorkerIds = incomplete.map(({ workerId }) => workerId);
+        const recipientIds = [current.hirerId, ...activeWorkerIds, ...incompleteWorkerIds];
+        await emitQuestUpdate(transaction, input.questId, 'QUEST_COMPLETED', recipientIds);
+        await emitQuestUpdate(
+          transaction,
+          input.questId,
+          'DISPUTE_WINDOW_OPENED',
+          recipientIds,
+          activeWorkerIds.filter((workerId) => !incompleteWorkerIds.includes(workerId))
+        );
+        await enqueueQuestCompletedDisputeWindowPush(transaction, {
+          recipients: incomplete,
+          questId: input.questId,
           now: input.now,
         });
       } else if (questStatus === 'QUEST_COMPLETED') {
