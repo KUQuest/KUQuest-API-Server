@@ -50,6 +50,10 @@ jobs:
           --health-retries 15
 
     env:
+      # A PR to develop gets only the basic checks. A PR or push to main gets every check.
+      FULL_CHECK: ${{ github.base_ref == 'main' || github.ref == 'refs/heads/main' }}
+      # Staging CD and UAT CD deploy from a develop push, so that run still proves the image.
+      IMAGE_CHECK: ${{ github.base_ref == 'main' || github.event_name == 'push' }}
       DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest
       S3_ENDPOINT: http://127.0.0.1:9000
       S3_REGION: us-east-1
@@ -80,6 +84,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Create CI S3 bucket
+        if: env.IMAGE_CHECK == 'true'
         run: |
           docker run \
             --rm \
@@ -124,7 +129,10 @@ jobs:
             --command 'ALTER SYSTEM SET full_page_writes = off' \
             --command 'SELECT pg_reload_conf()'
 
+      # The develop ruleset requires this check on an up-to-date PR, so a develop push has
+      # the same tree as the PR run.
       - name: Run validation
+        if: env.FULL_CHECK == 'true' || github.event_name == 'pull_request'
         shell: bash
         run: |
           set -uo pipefail
@@ -157,6 +165,10 @@ jobs:
             -regextype posix-extended -regex '.*[._](test|spec)\.(ts|tsx|js|jsx)' -printf '%s %p\n' |
             sort -k1,1rn -k2 |
             cut -d' ' -f2- >"$RUNNER_TEMP/test-files"
+          if [ "$FULL_CHECK" != true ]; then
+            grep -v integration "$RUNNER_TEMP/test-files" >"$RUNNER_TEMP/unit-test-files"
+            mv "$RUNNER_TEMP/unit-test-files" "$RUNNER_TEMP/test-files"
+          fi
           for group in $(seq 1 "$groups"); do
             folder="$RUNNER_TEMP/tests_$group"
             mkdir "$folder"
@@ -186,9 +198,11 @@ jobs:
           bun run build
 
       - name: Build production image
+        if: env.IMAGE_CHECK == 'true'
         run: docker build --tag kuquest-api:ci .
 
       - name: Apply complete migration chain from production image
+        if: env.IMAGE_CHECK == 'true'
         run: |
           docker run \
             --rm \
@@ -198,6 +212,7 @@ jobs:
             bun run db:migrate
 
       - name: Verify migration repeat execution
+        if: env.IMAGE_CHECK == 'true'
         run: |
           docker run \
             --rm \
@@ -207,6 +222,7 @@ jobs:
             bun run db:migrate
 
       - name: Verify production image health
+        if: env.IMAGE_CHECK == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -247,8 +263,9 @@ jobs:
           done
 
       - name: Verify browser test page
+        if: env.IMAGE_CHECK == 'true'
         run: curl --fail --silent http://localhost:5000/ | grep --fixed-strings '<title>KUQuest API Test Bench</title>'
 
       - name: Clean production image smoke-test container
-        if: always()
+        if: always() && env.IMAGE_CHECK == 'true'
         run: docker stop kuquest-api-ci 2>/dev/null || true
