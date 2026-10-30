@@ -2,7 +2,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
-import { readQuestTitles } from '@/modules/quest';
+import { readQuestTitles } from '@/modules/quest/shared/title';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 import type { Static } from 'elysia';
 
