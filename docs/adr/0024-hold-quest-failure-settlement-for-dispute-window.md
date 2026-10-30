@@ -33,8 +33,9 @@ Two payments draw on this reservation, not only a Dispute Case. A Hirer may
 approve a still-`PROOF_PENDING` Proof Submission after the Quest failed
 (`docs/rulebook/quest/quest-work-chat-rulebook.md` §Failure and partial success), and
 that Worker's Reward settles from this same reservation. Because a pending
-Proof Submission becomes `PROOF_APPROVED` automatically 24 hours after it is
-sent, that payment always falls inside the 7-day hold.
+Proof Submission becomes `PROOF_APPROVED` automatically at its review deadline
+(the later of `dueAt` and 24 hours after send), that payment remains inside the
+7-day hold when the Quest fails at `dueAt`.
 
 The hold releases automatically and unconditionally at 7 days, whether or
 not a Dispute Case for that Quest is still `DISPUTE_CASE_PENDING`. A

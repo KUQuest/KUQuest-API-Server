@@ -2038,18 +2038,24 @@ describe('Quest API v1 to v2 migration verification', () => {
       thirdWorker.id,
       'quest-migration-auto-proof'
     );
-    const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1_000);
+    const reviewWindowMs = 24 * 60 * 60 * 1_000;
+    const sentAt = new Date(Date.now() - reviewWindowMs);
+    const dueAt = new Date(sentAt.getTime() + reviewWindowMs - 1);
     await db
       .update(questV2ProofSubmission)
       .set({ sentAt })
       .where(eq(questV2ProofSubmission.id, autoProof.proofSubmissionId));
+    await db
+      .update(quest)
+      .set({ startTime: new Date(sentAt.getTime() - 60 * 60 * 1_000), dueAt })
+      .where(eq(quest.id, autoQuest.questId));
     const beforeAutoApproval = await autoApproveDueQuestV2Proofs(
-      new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000 - 1),
+      new Date(sentAt.getTime() + reviewWindowMs - 1),
       10
     );
     expect(beforeAutoApproval).not.toContain(autoProof.proofSubmissionId);
     const autoApproved = await autoApproveDueQuestV2Proofs(
-      new Date(sentAt.getTime() + 24 * 60 * 60 * 1_000),
+      new Date(sentAt.getTime() + reviewWindowMs),
       10
     );
     expect(autoApproved).toContain(autoProof.proofSubmissionId);

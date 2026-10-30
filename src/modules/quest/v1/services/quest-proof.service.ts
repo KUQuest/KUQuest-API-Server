@@ -13,7 +13,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { notifyAdminMembersUpdated, notifyAdminQuestUpdated } from '@/modules/quest/shared';
 
-import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm';
 
 import {
   failQuestInTransaction,
@@ -43,12 +43,28 @@ type QuestProofRow = {
   submissionStatus: string;
   reviewNote: string | null;
   submittedAt: Date;
+  reviewDeadlineAt: Date | null;
   reviewedAt: Date | null;
   images: string[];
 };
 
 const approvedProofStatuses = ['PROOF_APPROVED'] as const;
 const notApprovedProofStatuses = ['PROOF_NOT_APPROVED'] as const;
+const proofReviewWindowMs = 24 * 60 * 60 * 1000;
+
+const proofReviewDeadlineFor = (
+  status: string,
+  submittedAt: Date,
+  dueAt: Date | null
+): Date | null =>
+  status === 'PROOF_PENDING'
+    ? new Date(
+        Math.max(
+          submittedAt.getTime() + proofReviewWindowMs,
+          dueAt?.getTime() ?? Number.NEGATIVE_INFINITY
+        )
+      )
+    : null;
 
 const notifyAdminProofOwnerMembersUpdated = async (
   tx: Tx,
@@ -201,19 +217,23 @@ const loadProof = async (tx: Tx, id: string): Promise<QuestProofRow | undefined>
       reviewNote: proofSubmission.reviewNote,
       submittedAt: proofSubmission.submittedAt,
       reviewedAt: proofSubmission.reviewedAt,
+      dueAt: quest.dueAt,
     })
     .from(proofSubmission)
+    .innerJoin(quest, eq(quest.id, proofSubmission.questId))
     .where(eq(proofSubmission.id, id))
     .limit(1);
   if (!row) return undefined;
+  const { dueAt, ...proof } = row;
   const images = await tx
     .select({ fileId: proofSubmissionImage.fileId })
     .from(proofSubmissionImage)
     .where(eq(proofSubmissionImage.proofSubmissionId, id))
     .orderBy(asc(proofSubmissionImage.position));
   return {
-    ...row,
+    ...proof,
     submissionStatus: row.submissionStatus,
+    reviewDeadlineAt: proofReviewDeadlineFor(row.submissionStatus, row.submittedAt, dueAt),
     images: images.map((image) => image.fileId),
   };
 };
@@ -662,6 +682,7 @@ export const listProofs = async (userId: string, questId: string) => {
       reviewNote: proofSubmission.reviewNote,
       submittedAt: proofSubmission.submittedAt,
       reviewedAt: proofSubmission.reviewedAt,
+      dueAt: quest.dueAt,
     })
     .from(proofSubmission)
     .innerJoin(quest, eq(proofSubmission.questId, quest.id))
@@ -673,16 +694,20 @@ export const listProofs = async (userId: string, questId: string) => {
     )
     .orderBy(asc(proofSubmission.submittedAt));
   return Promise.all(
-    rows.map(async (row) => ({
-      ...row,
-      images: (
-        await db
-          .select({ fileId: proofSubmissionImage.fileId })
-          .from(proofSubmissionImage)
-          .where(eq(proofSubmissionImage.proofSubmissionId, row.id))
-          .orderBy(asc(proofSubmissionImage.position))
-      ).map(({ fileId }) => fileId),
-    }))
+    rows.map(async (row) => {
+      const { dueAt, ...proof } = row;
+      return {
+        ...proof,
+        reviewDeadlineAt: proofReviewDeadlineFor(row.submissionStatus, row.submittedAt, dueAt),
+        images: (
+          await db
+            .select({ fileId: proofSubmissionImage.fileId })
+            .from(proofSubmissionImage)
+            .where(eq(proofSubmissionImage.proofSubmissionId, row.id))
+            .orderBy(asc(proofSubmissionImage.position))
+        ).map(({ fileId }) => fileId),
+      };
+    })
   );
 };
 
@@ -743,7 +768,8 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
             questStatus.failed,
           ]),
           sql`${proofSubmission.submittedAt} <= ${now.toISOString()}::timestamptz - interval '24 hours'`,
-          or(isNull(quest.dueAt), sql`${proofSubmission.submittedAt} < ${quest.dueAt}`),
+          or(isNull(quest.dueAt), lte(quest.dueAt, now)),
+          or(isNull(quest.dueAt), lte(proofSubmission.submittedAt, quest.dueAt)),
           or(isNull(quest.failedAt), sql`${proofSubmission.submittedAt} < ${quest.failedAt}`)
         )
       )
@@ -775,7 +801,8 @@ export const autoApproveDueProofs = async (now = new Date()): Promise<string[]> 
         .limit(1)
         .for('update');
       if (!proof || proof.status !== 'PROOF_PENDING') continue;
-      if (current.dueAt && proof.submittedAt >= current.dueAt) continue;
+      if (current.dueAt && proof.submittedAt > current.dueAt) continue;
+      if (current.dueAt && current.dueAt > now) continue;
       if (
         current.questStatus === questStatus.failed &&
         (!current.failedAt || proof.submittedAt >= current.failedAt)
