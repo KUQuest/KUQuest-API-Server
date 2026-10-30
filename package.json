@@ -26,6 +26,7 @@
     "db:seed-demo-quests": "bun scripts/seed-demo-quests.ts",
     "db:seed-demo-frontend": "NODE_ENV=development DEPLOYMENT_ENV=development bun scripts/seed-demo-frontend.ts",
     "db:seed-staging": "bun scripts/seed-staging.ts",
+    "db:seed-uat-scenario": "bun scripts/seed-uat-scenario.ts",
     "db:verify-migration-journal": "bun scripts/verify-migration-journal.ts",
     "db:verify-staging-seed": "bun scripts/verify-staging-seed.ts",
     "db:reset-local": "bun scripts/reset-local-database.ts",
