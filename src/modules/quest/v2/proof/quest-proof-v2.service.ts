@@ -16,6 +16,7 @@ import {
 } from '@/database/schema/quest.schema';
 import {
   FileDimensionsTooLargeError,
+  FileLinkUnavailableError,
   FileTooLargeError,
   FileUploadError,
   UnsupportedFileTypeError,
@@ -104,6 +105,8 @@ export type QuestV2ProofSubmission = {
     position: number;
     uploadStatus: 'PROOF_FILE_READY' | 'PROOF_FILE_FAILED';
     failureCode: string | null;
+    url?: string | null;
+    urlExpiresAt?: string | null;
   }>;
   /** Internal marker used by the module to clean up replay-only uploads. */
   replayed?: boolean;
@@ -854,6 +857,9 @@ const attachmentRowsFor = async (database: typeof db | QuestTransaction, submiss
       position: questV2ProofSubmissionFile.position,
       uploadStatus: questV2ProofSubmissionFile.uploadStatus,
       failureCode: questV2ProofSubmissionFile.failureCode,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+      deletedAt: file.deletedAt,
     })
     .from(questV2ProofSubmissionFile)
     .leftJoin(file, eq(file.id, questV2ProofSubmissionFile.fileId))
@@ -865,10 +871,34 @@ const reviewDeadlineFor = (status: string | null, sentAt: Date | null): Date | n
     ? new Date(sentAt.getTime() + proofAutoApprovalWindowMs)
     : null;
 
+const proofFileLinkFor = (attachment: Awaited<ReturnType<typeof attachmentRowsFor>>[number]) => {
+  if (
+    attachment.uploadStatus !== 'PROOF_FILE_READY' ||
+    attachment.fileId === null ||
+    attachment.deletedAt !== null ||
+    attachment.bucket === null ||
+    attachment.objectKey === null
+  ) {
+    return { url: null, urlExpiresAt: null };
+  }
+
+  try {
+    const link = questV2ProofStorage.linkForWithExpiry({
+      bucket: attachment.bucket,
+      objectKey: attachment.objectKey,
+    });
+    return { url: link.url, urlExpiresAt: link.expiresAt.toISOString() };
+  } catch (error) {
+    if (error instanceof FileLinkUnavailableError) return { url: null, urlExpiresAt: null };
+    throw error;
+  }
+};
+
 const toSubmission = async (
   database: typeof db | QuestTransaction,
   row: SubmissionRow,
-  visibility: 'FULL' | 'SUMMARY' = 'FULL'
+  visibility: 'FULL' | 'SUMMARY' = 'FULL',
+  includeFileLinks = false
 ): Promise<QuestV2ProofSubmission> => {
   if (row.submissionStatus !== null && !isProofStatus(row.submissionStatus)) {
     throw new Error('Quest API v2 Proof Submission has an invalid status');
@@ -899,7 +929,17 @@ const toSubmission = async (
         (attachment) => attachment.uploadStatus === 'PROOF_FILE_READY' && attachment.fileId !== null
       )
       .map((attachment) => attachment.fileId!),
-    files: attachments,
+    files: await Promise.all(
+      attachments.map(async (attachment) => ({
+        fileId: attachment.fileId,
+        contentType: attachment.contentType,
+        sizeBytes: attachment.sizeBytes,
+        position: attachment.position,
+        uploadStatus: attachment.uploadStatus,
+        failureCode: attachment.failureCode,
+        ...(includeFileLinks ? proofFileLinkFor(attachment) : {}),
+      }))
+    ),
   };
 };
 
@@ -1917,7 +1957,7 @@ export const listQuestV2ProofSubmissions = async (
       const isAuthor = row.submittedByUserId === memberId;
       if (row.sentAt === null && !isAuthor) return undefined;
       const full = isAuthor || (current.hirerId === memberId && row.sentAt !== null);
-      return toSubmission(db, row, full ? 'FULL' : 'SUMMARY');
+      return toSubmission(db, row, full ? 'FULL' : 'SUMMARY', full);
     })
   );
   return submissions.filter(

@@ -198,5 +198,6 @@ describe('Quest Proof API v2 contract', () => {
     expect(openapiText).not.toContain('QUEST_REWORK');
     expect(openapiText).not.toContain('reworkLimit');
     expect(openapiText).toContain('COMPLETION_CONFIRMATION_PENDING');
+    expect(openapiText).toContain('urlExpiresAt');
   });
 });

@@ -105,6 +105,22 @@ const proofFileSchema = t.Object({
   position: t.Integer({ minimum: 0, maximum: 4 }),
   uploadStatus: t.Union([t.Literal('PROOF_FILE_READY'), t.Literal('PROOF_FILE_FAILED')]),
   failureCode: t.Nullable(t.String({ minLength: 1, maxLength: 64 })),
+  url: t.Optional(
+    t.Nullable(
+      t.String({
+        format: 'uri',
+        description: 'Short-lived file link for a ready Proof file; null when unavailable.',
+      })
+    )
+  ),
+  urlExpiresAt: t.Optional(
+    t.Nullable(
+      t.String({
+        format: 'date-time',
+        description: 'Expiry time for url; null when no file link is available.',
+      })
+    )
+  ),
 });
 
 const proofFileAccessSchema = t.Object({
