@@ -177,7 +177,7 @@ export const questProofV2Route = new Elysia({
       tags: ['Quest Proof v2'],
       summary: 'List v2 Proof Submissions',
       description:
-        'Returns role-filtered Proof Submission views. Drafts are visible only to their submitter.',
+        'Returns role-filtered Proof Submission views. Drafts are visible only to their submitter. FULL-visible file rows include a short-lived `url` and `urlExpiresAt`; both are null when the file is failed, missing, deleted, or its link is unavailable. SUMMARY views do not include file rows.',
       operationId: 'listQuestV2ProofSubmissions',
       security: betterAuthSecurity,
     },

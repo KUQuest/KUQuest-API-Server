@@ -42,6 +42,7 @@ import {
 } from '@/modules/wallet';
 import {
   FileDimensionsTooLargeError,
+  FileLinkUnavailableError,
   FileTooLargeError,
   UnsupportedFileTypeError,
 } from '@/shared/object-storage';
@@ -832,6 +833,103 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect(unauthorized.status).toBe(404);
   });
 
+  it('returns temporary file links in completed Proof history for the Worker and Hirer', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId, proofFileId } = await createHttpSentProof({
+      questFundingTotalSatang: 1_020,
+      questEscrowSatang: 1_020,
+    });
+    await reserveQuest(questId, 1_020);
+    const approval = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/review`,
+      hirer.id,
+      { decision: 'PROOF_APPROVED' },
+      { 'idempotency-key': `proof-v2-behavior-history-approval-${questId}` }
+    );
+    expect(approval.status).toBe(200);
+    expect((await approval.json()).data.questStatus).toBe('QUEST_COMPLETED');
+
+    const expiresAt = new Date('2030-01-01T00:15:00.000Z');
+    const link = spyOn(questV2ProofStorage, 'linkForWithExpiry').mockReturnValue({
+      url: 'https://storage.example/completed-proof',
+      expiresAt,
+    });
+
+    for (const memberId of [worker.id, hirer.id]) {
+      const response = await request(
+        'GET',
+        `/api/v2/quests/${questId}/proof-submissions`,
+        memberId
+      );
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.data.items).toEqual([
+        expect.objectContaining({
+          id: proofSubmissionId,
+          status: 'PROOF_APPROVED',
+          visibility: 'FULL',
+          files: [
+            {
+              fileId: proofFileId,
+              contentType: 'application/pdf',
+              sizeBytes: 100,
+              position: 0,
+              uploadStatus: 'PROOF_FILE_READY',
+              failureCode: null,
+              url: 'https://storage.example/completed-proof',
+              urlExpiresAt: expiresAt.toISOString(),
+            },
+          ],
+        }),
+      ]);
+    }
+    expect(link).toHaveBeenCalledTimes(2);
+
+    const unrelatedView = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      unrelated.id
+    );
+    expect(unrelatedView.status).toBe(404);
+  });
+
+  it('keeps Proof history available when a file is deleted or its temporary link is unavailable', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofFileId } = await createHttpSentProof();
+    const unavailableLink = spyOn(questV2ProofStorage, 'linkForWithExpiry').mockImplementation(
+      () => {
+        throw new FileLinkUnavailableError('File link could not be created');
+      }
+    );
+
+    const unavailable = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id
+    );
+    const unavailableBody = await unavailable.json();
+    expect(unavailable.status).toBe(200);
+    expect(unavailableBody.data.items[0].files[0]).toMatchObject({
+      fileId: proofFileId,
+      url: null,
+      urlExpiresAt: null,
+    });
+    expect(unavailableBody.data.items[0].files[0]).not.toHaveProperty('bucket');
+    expect(unavailableBody.data.items[0].files[0]).not.toHaveProperty('objectKey');
+
+    await db.update(file).set({ deletedAt: new Date() }).where(eq(file.id, proofFileId));
+    const deleted = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, hirer.id);
+    const deletedBody = await deleted.json();
+    expect(deleted.status).toBe(200);
+    expect(deletedBody.data.items[0].files[0]).toMatchObject({
+      fileId: proofFileId,
+      url: null,
+      urlExpiresAt: null,
+    });
+    expect(unavailableLink).toHaveBeenCalledTimes(1);
+  });
+
   it('requires a reason for a not-approved decision without changing the pending Proof', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId, proofSubmissionId } = await createHttpSentProof();
@@ -1203,6 +1301,28 @@ describe('Quest Proof Submission v2 behavior', () => {
       ])
     );
     expect(attachments).toHaveLength(4);
+
+    const history = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, worker.id);
+    const historyBody = await history.json();
+    expect(history.status).toBe(200);
+    expect(historyBody.data.items[0].files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          position: 1,
+          uploadStatus: 'PROOF_FILE_FAILED',
+          failureCode: 'PROOF_FILE_DIMENSIONS_TOO_LARGE',
+          url: null,
+          urlExpiresAt: null,
+        }),
+        expect.objectContaining({
+          position: 3,
+          uploadStatus: 'PROOF_FILE_FAILED',
+          failureCode: 'PROOF_FILE_TYPE_NOT_SUPPORTED',
+          url: null,
+          urlExpiresAt: null,
+        }),
+      ])
+    );
 
     const failedRetryForm = new FormData();
     failedRetryForm.append(
