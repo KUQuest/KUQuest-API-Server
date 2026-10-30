@@ -4,7 +4,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ## Proof requirement paths
 
-- **When `proofRequired=false`**: The required work submitter confirms completion before `dueAt`. No Proof Submission is created and no Hirer review is required.
+- **When `proofRequired=false`**: The required work submitter creates a Completion Confirmation before `dueAt`. The Confirmation is a separate resource. The Server does not create a Proof Submission for it. The Hirer must approve or not approve the Confirmation.
   - `SINGLE`: Worker confirms.
   - `GROUP + FCFS`: Every Active Worker confirms.
   - `GROUP + CANDIDATE`: Team Leader confirms the Team's work.
@@ -33,12 +33,23 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - The first confirmed decision is final. Multiple Hirer devices use the first decision accepted by the Server.
 - If no decision exists 24 hours after sending, the Server records `PROOF_APPROVED` automatically.
 
+## Completion Confirmation review
+
+- A Completion Confirmation has `COMPLETION_CONFIRMATION_PENDING`, `COMPLETION_CONFIRMATION_APPROVED`, `COMPLETION_CONFIRMATION_NOT_APPROVED`, or `COMPLETION_CONFIRMATION_CANCELLED` status. It has no Proof Submission, file, or evidence reference.
+- The Hirer receives a notification when a Worker creates a Completion Confirmation. The notification includes its 24-hour `reviewDeadlineAt`.
+- The Hirer reviews one Completion Confirmation at a time. The first final decision accepted by the Server wins.
+- `COMPLETION_CONFIRMATION_NOT_APPROVED` requires a non-blank reason of at most 1,000 characters. The reason is visible to the Hirer and the Worker who submitted the Confirmation. Other Workers see a summary only.
+- If the Hirer does not decide within 24 hours after `confirmedAt`, the Server records `COMPLETION_CONFIRMATION_APPROVED` automatically.
+- The Worker who submitted the Confirmation receives a notification when the Hirer or Server records the decision.
+- The Hirer and affected Workers receive real-time updates when the Confirmation becomes pending and when it receives a final decision.
+- If the Hirer cancels the Quest or an Admin terminates it while a Confirmation is pending, the Server changes it to `COMPLETION_CONFIRMATION_CANCELLED`. Do not pay its Reward; return its unsettled Reward and Platform Fee to the Hirer. The affected Worker or selected Team member can read the cancelled Confirmation after cancellation. Other Members cannot read it.
+
 ## Failure and Admin Review Item
 
-- A `PROOF_NOT_APPROVED` decision makes the Assignment `ASSIGNMENT_INCOMPLETE` and gives that Worker no Reward.
-- In `GROUP + FIRST_COME_FIRST_SERVED`, the decision does not change the Quest State. The other Workers can still send Proof until `dueAt`. The Quest ends only when every Worker has a final result: `QUEST_COMPLETED` if at least one Worker is `ASSIGNMENT_COMPLETED`, otherwise `QUEST_FAILED`.
-- In every other mode, the decision makes the Quest `QUEST_FAILED` immediately.
-- The same decision creates exactly one **Admin Review Item** automatically. It links the Quest, Assignment, Proof Submission, Hirer, Worker, decision reason, and evidence references, sending it to the Admin review queue.
+- A non-approval makes the affected Assignment `ASSIGNMENT_INCOMPLETE` and gives that Worker no Reward.
+- In `SINGLE` (both modes) and `GROUP + CANDIDATE`, non-approval makes the Quest `QUEST_FAILED` immediately. In `GROUP + CANDIDATE`, every Active Worker Assignment becomes `ASSIGNMENT_INCOMPLETE` and receives no Reward.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, non-approval affects only that Worker's Assignment. Other Active Workers can still complete work. When every Assignment has a final result, the Quest becomes `QUEST_COMPLETED` if at least one Assignment is `ASSIGNMENT_COMPLETED`; otherwise, it becomes `QUEST_FAILED`.
+- The non-approval creates exactly one **Admin Review Item** automatically. It links the Quest, affected Assignment, Hirer, Worker, reason, and either the Proof Submission with its evidence references or the Completion Confirmation with an empty evidence list.
 - The Admin Review Item is for review and audit only. It does not delay or undo `QUEST_FAILED`, reopen the Quest, create Rework, or allow a second Proof Submission.
 - Notification failure does not undo `QUEST_FAILED`; retries reuse the same Item identity.
 - A missing required submission at `dueAt` fails the Quest immediately.
@@ -47,4 +58,5 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 - If another Worker has a Proof Submission sent on time and still `PROOF_PENDING`, the Hirer may review it after the Quest becomes `QUEST_FAILED`.
 - If that later review approves the submission, its Assignment becomes `ASSIGNMENT_COMPLETED` and its Worker receives the Reward from the held Funding Reservation (see [Reward & Money Contract](reward-money-contract.md)). The Quest remains `QUEST_FAILED`.
+- A pending proof-free Completion Confirmation for a `GROUP + FIRST_COME_FIRST_SERVED` Quest can also be reviewed after the Quest becomes `QUEST_FAILED`. Approval settles the affected Worker's Reward. The Quest remains `QUEST_FAILED`.
 - In a `GROUP + FCFS` Quest, an approved or proof-free completed Worker keeps the Reward even when another Worker later causes `QUEST_FAILED`.

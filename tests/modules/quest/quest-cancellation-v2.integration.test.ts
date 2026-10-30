@@ -2,6 +2,7 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
+import { adminReviewItem } from '@/database/schema/admin.schema';
 import {
   quest,
   questAssignment,
@@ -9,6 +10,7 @@ import {
   questCandidateTeamV2Member,
   questV2UnderfilledConsent,
   questV2UnderfilledDecision,
+  questV2CompletionConfirmation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
@@ -95,6 +97,58 @@ const previewRequest = (questId: string, memberId: string) =>
     })
   );
 
+const reviewCompletionConfirmation = (
+  questId: string,
+  completionConfirmationId: string,
+  memberId: string,
+  commandId: string
+) =>
+  app.handle(
+    new Request(
+      `http://localhost/api/v2/quests/${questId}/completion-confirmations/${completionConfirmationId}/review`,
+      {
+        method: 'POST',
+        headers: {
+          'x-member-id': memberId,
+          'idempotency-key': commandId,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ decision: 'COMPLETION_CONFIRMATION_APPROVED' }),
+      }
+    )
+  );
+
+const notApproveCompletionConfirmation = (
+  questId: string,
+  completionConfirmationId: string,
+  memberId: string,
+  commandId: string
+) =>
+  app.handle(
+    new Request(
+      `http://localhost/api/v2/quests/${questId}/completion-confirmations/${completionConfirmationId}/review`,
+      {
+        method: 'POST',
+        headers: {
+          'x-member-id': memberId,
+          'idempotency-key': commandId,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          decision: 'COMPLETION_CONFIRMATION_NOT_APPROVED',
+          reason: 'The work is not complete',
+        }),
+      }
+    )
+  );
+
+const listCompletionConfirmations = (questId: string, memberId: string) =>
+  app.handle(
+    new Request(`http://localhost/api/v2/quests/${questId}/completion-confirmations`, {
+      headers: { 'x-member-id': memberId },
+    })
+  );
+
 const createV2Quest = async (input: {
   status:
     | 'QUEST_DRAFT'
@@ -109,6 +163,7 @@ const createV2Quest = async (input: {
   headcount?: number;
   rewardSatang?: number;
   platformFeeSatang?: number;
+  proofRequired?: boolean;
 }) => {
   const mode = input.mode ?? 'FIRST_COME_FIRST_SERVED';
   const participation = input.participation ?? 'SINGLE';
@@ -144,6 +199,8 @@ const createV2Quest = async (input: {
     tagId: input.status === 'QUEST_DRAFT' ? null : tagId,
     headcount,
     startTime: new Date('2030-01-01T10:00:00.000Z'),
+    dueAt: new Date('2030-01-02T10:00:00.000Z'),
+    proofRequired: input.proofRequired ?? true,
   });
 
   if (workers.length > 0) {
@@ -508,6 +565,59 @@ describe('Quest API v2 Hirer cancellation', () => {
     expect((await previewRequest(randomUUID(), hirerId)).status).toBe(404);
   });
 
+  it('rejects a cancellation preview after a new Completion Confirmation is created', async () => {
+    if (!postgresAvailable) return;
+    const workers = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      participation: 'GROUP',
+      workers,
+      headcount: 2,
+      proofRequired: false,
+    });
+    const previewData = (await (await previewRequest(questId, hirerId)).json()).data;
+    const confirmedAt = new Date();
+    const [confirmation] = await db
+      .insert(questV2CompletionConfirmation)
+      .values({
+        questId,
+        workerId: workers[0],
+        teamId: null,
+        confirmedByUserId: workers[0],
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt: new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000),
+      })
+      .returning({ id: questV2CompletionConfirmation.id });
+
+    const stale = await request(
+      questId,
+      hirerId,
+      `cancel-v2-new-confirmation-${questId}`,
+      undefined,
+      {
+        'x-cancel-preview-version': previewData.previewVersion,
+      }
+    );
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('CANCEL_PREVIEW_STALE');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.remainingSatang).toBe(
+      2_040
+    );
+    expect(
+      (
+        await db
+          .select({ reviewStatus: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.id, confirmation!.id))
+      )[0]?.reviewStatus
+    ).toBe('COMPLETION_CONFIRMATION_PENDING');
+  });
+
   it('uses the active Worker allocation for GROUP + FCFS and pays only the Team Leader for GROUP + CANDIDATE', async () => {
     if (!postgresAvailable) return;
     const fcfsQuestId = await createV2Quest({
@@ -598,6 +708,348 @@ describe('Quest API v2 Hirer cancellation', () => {
     expect((await response.json()).data).toMatchObject({ paidSatang: 800, refundedSatang: 3_280 });
     expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(first + 400);
     expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(second + 400);
+  });
+
+  it('refunds an incomplete underfilled share and pays only the remaining active Worker', async () => {
+    if (!postgresAvailable) return;
+    const workers = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      participation: 'GROUP',
+      workers,
+      headcount: 3,
+      rewardSatang: 1_000,
+      platformFeeSatang: 20,
+    });
+    await completeUnderfilledAllocation(questId, workers, 3, 1_000);
+    const confirmedAt = new Date();
+    const [confirmation] = await db
+      .insert(questV2CompletionConfirmation)
+      .values({
+        questId,
+        workerId: workers[0],
+        teamId: null,
+        confirmedByUserId: workers[0],
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt: new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1_000),
+      })
+      .returning({ id: questV2CompletionConfirmation.id });
+    const review = await notApproveCompletionConfirmation(
+      questId,
+      confirmation!.id,
+      hirerId,
+      `cancel-v2-underfilled-nonapproval-review-${questId}`
+    );
+    expect(review.status).toBe(200);
+    expect((await review.json()).data.confirmation.reviewStatus).toBe(
+      'COMPLETION_CONFIRMATION_NOT_APPROVED'
+    );
+    expect(
+      await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId))
+    ).toContainEqual({ status: 'ASSIGNMENT_INCOMPLETE' });
+
+    const incompleteWorkerBefore = (await readTestWallet(workers[0])).earningsBalanceSatang;
+    const activeWorkerBefore = (await readTestWallet(workers[1])).earningsBalanceSatang;
+    const cancelled = await request(
+      questId,
+      hirerId,
+      `cancel-v2-underfilled-after-nonapproval-${questId}`
+    );
+
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({
+      paidSatang: 1_500,
+      refundedSatang: 1_530,
+    });
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(incompleteWorkerBefore);
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(
+      activeWorkerBefore + 1_500
+    );
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+  });
+
+  it('cancels pending Completion Confirmations without paying affected Workers', async () => {
+    if (!postgresAvailable) return;
+    const workers = [workerIds[0], workerIds[1]];
+    const fcfsQuestId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      participation: 'GROUP',
+      workers,
+      headcount: 2,
+      rewardSatang: 1_000,
+      platformFeeSatang: 20,
+    });
+    const confirmedAt = new Date();
+    const reviewDeadlineAt = new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000);
+    const reviewedAt = new Date(confirmedAt.getTime() + 1_000);
+    await db.insert(questV2CompletionConfirmation).values([
+      {
+        questId: fcfsQuestId,
+        workerId: workers[0],
+        teamId: null,
+        confirmedByUserId: workers[0],
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt,
+      },
+      {
+        questId: fcfsQuestId,
+        workerId: workers[1],
+        teamId: null,
+        confirmedByUserId: workers[1],
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_APPROVED',
+        reviewDeadlineAt,
+        reviewedAt,
+        reviewedBy: 'HIRER',
+      },
+    ]);
+    const pendingWorkerBefore = (await readTestWallet(workers[0])).earningsBalanceSatang;
+    const approvedWorkerBefore = (await readTestWallet(workers[1])).earningsBalanceSatang;
+
+    const fcfsResponse = await request(
+      fcfsQuestId,
+      hirerId,
+      `cancel-v2-pending-confirmation-fcfs-${fcfsQuestId}`
+    );
+    expect(fcfsResponse.status).toBe(200);
+    expect((await fcfsResponse.json()).data).toMatchObject({
+      paidSatang: 1_000,
+      refundedSatang: 1_020,
+    });
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(pendingWorkerBefore);
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(
+      approvedWorkerBefore + 1_000
+    );
+    const fcfsConfirmations = await db
+      .select({
+        workerId: questV2CompletionConfirmation.workerId,
+        reviewStatus: questV2CompletionConfirmation.reviewStatus,
+      })
+      .from(questV2CompletionConfirmation)
+      .where(eq(questV2CompletionConfirmation.questId, fcfsQuestId));
+    expect(fcfsConfirmations).toContainEqual({
+      workerId: workers[0],
+      reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED',
+    });
+    expect(fcfsConfirmations).toContainEqual({
+      workerId: workers[1],
+      reviewStatus: 'COMPLETION_CONFIRMATION_APPROVED',
+    });
+    expect(
+      await db
+        .select({ id: adminReviewItem.id })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.questId, fcfsQuestId))
+    ).toHaveLength(0);
+
+    const hirerList = await listCompletionConfirmations(fcfsQuestId, hirerId);
+    const affectedWorkerList = await listCompletionConfirmations(fcfsQuestId, workers[0]!);
+    const unrelatedWorkerList = await listCompletionConfirmations(fcfsQuestId, otherMemberId);
+    expect(hirerList.status).toBe(200);
+    expect(
+      (await hirerList.json()).data.items.map(
+        ({ reviewStatus }: { reviewStatus: string }) => reviewStatus
+      )
+    ).toEqual(['COMPLETION_CONFIRMATION_CANCELLED', 'COMPLETION_CONFIRMATION_APPROVED']);
+    expect(affectedWorkerList.status).toBe(200);
+    expect((await affectedWorkerList.json()).data.items).toMatchObject([
+      { workerId: workers[0], reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' },
+    ]);
+    expect(unrelatedWorkerList.status).toBe(403);
+
+    const candidateWorkers = [workerIds[1], workerIds[2]];
+    const candidateQuestId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      workers: candidateWorkers,
+      headcount: 2,
+      rewardSatang: 1_000,
+      platformFeeSatang: 20,
+    });
+    const leaderId = candidateWorkers[0];
+    const teamId = await selectCandidateTeam(candidateQuestId, leaderId, candidateWorkers);
+    await db.insert(questV2CompletionConfirmation).values({
+      questId: candidateQuestId,
+      workerId: null,
+      teamId,
+      confirmedByUserId: leaderId,
+      confirmedAt,
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      reviewDeadlineAt,
+    });
+    const leaderBefore = (await readTestWallet(leaderId)).earningsBalanceSatang;
+    const teammateBefore = (await readTestWallet(candidateWorkers[1])).earningsBalanceSatang;
+
+    const candidateResponse = await request(
+      candidateQuestId,
+      hirerId,
+      `cancel-v2-pending-confirmation-candidate-${candidateQuestId}`
+    );
+    expect(candidateResponse.status).toBe(200);
+    expect((await candidateResponse.json()).data).toMatchObject({
+      paidSatang: 0,
+      refundedSatang: 2_040,
+    });
+    expect((await readTestWallet(leaderId)).earningsBalanceSatang).toBe(leaderBefore);
+    expect((await readTestWallet(candidateWorkers[1])).earningsBalanceSatang).toBe(teammateBefore);
+    expect(
+      (
+        await db
+          .select({ reviewStatus: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.questId, candidateQuestId))
+      )[0]?.reviewStatus
+    ).toBe('COMPLETION_CONFIRMATION_CANCELLED');
+    const teammateList = await listCompletionConfirmations(candidateQuestId, candidateWorkers[1]!);
+    expect(teammateList.status).toBe(200);
+    expect((await teammateList.json()).data.items).toMatchObject([
+      { teamId, reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' },
+    ]);
+  });
+
+  it('cancels remaining GROUP + FCFS work after an approved Completion Confirmation', async () => {
+    if (!postgresAvailable) return;
+    const workers = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      participation: 'GROUP',
+      workers,
+      headcount: 2,
+      proofRequired: false,
+    });
+    const confirmedAt = new Date();
+    const [confirmation] = await db
+      .insert(questV2CompletionConfirmation)
+      .values({
+        questId,
+        workerId: workers[0],
+        teamId: null,
+        confirmedByUserId: workers[0],
+        confirmedAt,
+        reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+        reviewDeadlineAt: new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000),
+      })
+      .returning({ id: questV2CompletionConfirmation.id });
+    const firstWorkerBefore = (await readTestWallet(workers[0])).earningsBalanceSatang;
+    const secondWorkerBefore = (await readTestWallet(workers[1])).earningsBalanceSatang;
+
+    const review = await reviewCompletionConfirmation(
+      questId,
+      confirmation!.id,
+      hirerId,
+      `cancel-v2-approve-before-cancel-${questId}`
+    );
+    expect(review.status).toBe(200);
+    expect((await review.json()).data.confirmation.reviewStatus).toBe(
+      'COMPLETION_CONFIRMATION_APPROVED'
+    );
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(
+      firstWorkerBefore + 1_000
+    );
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.remainingSatang).toBe(
+      1_020
+    );
+
+    const cancelled = await request(questId, hirerId, `cancel-v2-after-approval-${questId}`);
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({ paidSatang: 1_000, refundedSatang: 0 });
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(
+      firstWorkerBefore + 1_000
+    );
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(
+      secondWorkerBefore + 1_000
+    );
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.status).toBe('SETTLED');
+  });
+
+  it('refunds a pending GROUP + FCFS slot after another Worker was approved', async () => {
+    if (!postgresAvailable) return;
+    const workers = [workerIds[0], workerIds[1]];
+    const questId = await createV2Quest({
+      status: 'QUEST_IN_PROGRESS',
+      participation: 'GROUP',
+      workers,
+      headcount: 2,
+      proofRequired: false,
+    });
+    const confirmedAt = new Date();
+    const confirmations = await db
+      .insert(questV2CompletionConfirmation)
+      .values(
+        workers.map((workerId) => ({
+          questId,
+          workerId,
+          teamId: null,
+          confirmedByUserId: workerId,
+          confirmedAt,
+          reviewStatus: 'COMPLETION_CONFIRMATION_PENDING' as const,
+          reviewDeadlineAt: new Date(confirmedAt.getTime() + 24 * 60 * 60 * 1000),
+        }))
+      )
+      .returning({
+        id: questV2CompletionConfirmation.id,
+        workerId: questV2CompletionConfirmation.workerId,
+      });
+    const approvedConfirmation = confirmations.find(({ workerId }) => workerId === workers[0]);
+    const firstWorkerBefore = (await readTestWallet(workers[0])).earningsBalanceSatang;
+    const secondWorkerBefore = (await readTestWallet(workers[1])).earningsBalanceSatang;
+
+    const review = await reviewCompletionConfirmation(
+      questId,
+      approvedConfirmation!.id,
+      hirerId,
+      `cancel-v2-approve-one-pending-other-${questId}`
+    );
+    expect(review.status).toBe(200);
+    expect((await review.json()).data.confirmation.reviewStatus).toBe(
+      'COMPLETION_CONFIRMATION_APPROVED'
+    );
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(
+      firstWorkerBefore + 1_000
+    );
+    expect((await readTestQuestEscrow({ ownerUserId: hirerId, questId }))?.remainingSatang).toBe(
+      1_020
+    );
+
+    const cancelled = await request(
+      questId,
+      hirerId,
+      `cancel-v2-pending-after-approval-${questId}`
+    );
+    expect(cancelled.status).toBe(200);
+    expect((await cancelled.json()).data).toMatchObject({ paidSatang: 0, refundedSatang: 1_020 });
+    expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(
+      firstWorkerBefore + 1_000
+    );
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(secondWorkerBefore);
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+    const confirmationStatuses = await db
+      .select({
+        workerId: questV2CompletionConfirmation.workerId,
+        status: questV2CompletionConfirmation.reviewStatus,
+      })
+      .from(questV2CompletionConfirmation)
+      .where(eq(questV2CompletionConfirmation.questId, questId));
+    expect(confirmationStatuses).toContainEqual({
+      workerId: workers[0],
+      status: 'COMPLETION_CONFIRMATION_APPROVED',
+    });
+    expect(confirmationStatuses).toContainEqual({
+      workerId: workers[1],
+      status: 'COMPLETION_CONFIRMATION_CANCELLED',
+    });
   });
 
   it('rejects terminal States and preserves the Quest, while a reused key fails canonically', async () => {

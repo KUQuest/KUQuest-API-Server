@@ -1,0 +1,20 @@
+ALTER TABLE "admin_review_item" DROP CONSTRAINT "admin_review_item_evidence_check";--> statement-breakpoint
+ALTER TABLE "admin_review_item" ALTER COLUMN "proof_submission_id" DROP NOT NULL;--> statement-breakpoint
+ALTER TABLE "admin_review_item" ADD COLUMN "completion_confirmation_id" uuid;--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD COLUMN "review_status" varchar(48) DEFAULT 'COMPLETION_CONFIRMATION_APPROVED' NOT NULL;--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD COLUMN "review_deadline_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD COLUMN "review_reason" varchar(1000);--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD COLUMN "reviewed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD COLUMN "reviewed_by" varchar(16);--> statement-breakpoint
+ALTER TABLE "admin_review_item" ADD CONSTRAINT "admin_review_item_completion_confirmation_id_quest_v2_completion_confirmation_id_fk" FOREIGN KEY ("completion_confirmation_id") REFERENCES "public"."quest_v2_completion_confirmation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "quest_v2_completion_confirmation_review_idx" ON "quest_v2_completion_confirmation" USING btree ("review_status","review_deadline_at","confirmed_at");--> statement-breakpoint
+ALTER TABLE "admin_review_item" ADD CONSTRAINT "admin_review_item_completion_confirmation_key" UNIQUE("completion_confirmation_id");--> statement-breakpoint
+ALTER TABLE "admin_review_item" ADD CONSTRAINT "admin_review_item_source_check" CHECK (num_nonnulls("admin_review_item"."proof_submission_id", "admin_review_item"."completion_confirmation_id") = 1);--> statement-breakpoint
+ALTER TABLE "admin_review_item" ADD CONSTRAINT "admin_review_item_evidence_check" CHECK (jsonb_typeof("admin_review_item"."evidence_references") = 'array');--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD CONSTRAINT "quest_v2_completion_confirmation_review_status_check" CHECK ("quest_v2_completion_confirmation"."review_status" IN ('COMPLETION_CONFIRMATION_PENDING', 'COMPLETION_CONFIRMATION_APPROVED', 'COMPLETION_CONFIRMATION_NOT_APPROVED', 'COMPLETION_CONFIRMATION_CANCELLED'));--> statement-breakpoint
+ALTER TABLE "quest_v2_completion_confirmation" ADD CONSTRAINT "quest_v2_completion_confirmation_review_check" CHECK ((
+        ("quest_v2_completion_confirmation"."review_status" = 'COMPLETION_CONFIRMATION_PENDING' AND "quest_v2_completion_confirmation"."review_deadline_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_at" IS NULL AND "quest_v2_completion_confirmation"."reviewed_by" IS NULL AND "quest_v2_completion_confirmation"."review_reason" IS NULL)
+        OR ("quest_v2_completion_confirmation"."review_status" = 'COMPLETION_CONFIRMATION_APPROVED' AND "quest_v2_completion_confirmation"."review_reason" IS NULL AND (("quest_v2_completion_confirmation"."review_deadline_at" IS NULL AND "quest_v2_completion_confirmation"."reviewed_at" IS NULL AND "quest_v2_completion_confirmation"."reviewed_by" IS NULL) OR ("quest_v2_completion_confirmation"."review_deadline_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_by" IS NOT NULL)))
+        OR ("quest_v2_completion_confirmation"."review_status" = 'COMPLETION_CONFIRMATION_NOT_APPROVED' AND "quest_v2_completion_confirmation"."review_deadline_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_by" IS NOT NULL AND btrim("quest_v2_completion_confirmation"."review_reason") <> '')
+        OR ("quest_v2_completion_confirmation"."review_status" = 'COMPLETION_CONFIRMATION_CANCELLED' AND "quest_v2_completion_confirmation"."review_deadline_at" IS NOT NULL AND "quest_v2_completion_confirmation"."reviewed_at" IS NULL AND "quest_v2_completion_confirmation"."reviewed_by" IS NULL AND "quest_v2_completion_confirmation"."review_reason" IS NULL)
+      ));

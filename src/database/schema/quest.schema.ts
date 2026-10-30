@@ -777,6 +777,19 @@ export const questV2CompletionConfirmation = pgTable(
       .notNull()
       .references(() => authUser.id),
     confirmedAt: time('confirmed_at').defaultNow().notNull(),
+    reviewStatus: varchar('review_status', { length: 48 })
+      .$type<
+        | 'COMPLETION_CONFIRMATION_PENDING'
+        | 'COMPLETION_CONFIRMATION_APPROVED'
+        | 'COMPLETION_CONFIRMATION_NOT_APPROVED'
+        | 'COMPLETION_CONFIRMATION_CANCELLED'
+      >()
+      .default('COMPLETION_CONFIRMATION_APPROVED')
+      .notNull(),
+    reviewDeadlineAt: time('review_deadline_at'),
+    reviewReason: varchar('review_reason', { length: 1000 }),
+    reviewedAt: time('reviewed_at'),
+    reviewedBy: varchar('reviewed_by', { length: 16 }).$type<'HIRER' | 'AUTO_APPROVE'>(),
   },
   (table) => [
     check(
@@ -786,6 +799,24 @@ export const questV2CompletionConfirmation = pgTable(
     unique('quest_v2_completion_confirmation_worker_key').on(table.questId, table.workerId),
     unique('quest_v2_completion_confirmation_team_key').on(table.questId, table.teamId),
     index('quest_v2_completion_confirmation_quest_idx').on(table.questId),
+    index('quest_v2_completion_confirmation_review_idx').on(
+      table.reviewStatus,
+      table.reviewDeadlineAt,
+      table.confirmedAt
+    ),
+    check(
+      'quest_v2_completion_confirmation_review_status_check',
+      sql`${table.reviewStatus} IN ('COMPLETION_CONFIRMATION_PENDING', 'COMPLETION_CONFIRMATION_APPROVED', 'COMPLETION_CONFIRMATION_NOT_APPROVED', 'COMPLETION_CONFIRMATION_CANCELLED')`
+    ),
+    check(
+      'quest_v2_completion_confirmation_review_check',
+      sql`(
+        (${table.reviewStatus} = 'COMPLETION_CONFIRMATION_PENDING' AND ${table.reviewDeadlineAt} IS NOT NULL AND ${table.reviewedAt} IS NULL AND ${table.reviewedBy} IS NULL AND ${table.reviewReason} IS NULL)
+        OR (${table.reviewStatus} = 'COMPLETION_CONFIRMATION_APPROVED' AND ${table.reviewReason} IS NULL AND ((${table.reviewDeadlineAt} IS NULL AND ${table.reviewedAt} IS NULL AND ${table.reviewedBy} IS NULL) OR (${table.reviewDeadlineAt} IS NOT NULL AND ${table.reviewedAt} IS NOT NULL AND ${table.reviewedBy} IS NOT NULL)))
+        OR (${table.reviewStatus} = 'COMPLETION_CONFIRMATION_NOT_APPROVED' AND ${table.reviewDeadlineAt} IS NOT NULL AND ${table.reviewedAt} IS NOT NULL AND ${table.reviewedBy} IS NOT NULL AND btrim(${table.reviewReason}) <> '')
+        OR (${table.reviewStatus} = 'COMPLETION_CONFIRMATION_CANCELLED' AND ${table.reviewDeadlineAt} IS NOT NULL AND ${table.reviewedAt} IS NULL AND ${table.reviewedBy} IS NULL AND ${table.reviewReason} IS NULL)
+      )`
+    ),
   ]
 );
 

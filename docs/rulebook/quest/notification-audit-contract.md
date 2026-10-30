@@ -6,7 +6,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 - System Messages are immutable and use standard Event templates.
 - They appear in the Work Conversation as messages from KU bot.
-- **Events covered**: Membership changes, Proof Submission, approval, non-approval, deadline failure, Quest completion, Quest failure, Quest cancellation, and Quest Edit outcomes.
+- **Events covered**: Membership changes, Proof Submission, Completion Confirmation, approval, non-approval, deadline failure, Quest completion, Quest failure, Quest cancellation, and Quest Edit outcomes.
 - **Privacy and display**:
   - They include the affected Worker's system display name and Event summary, but not private proof details or full Profile data.
   - On Quest completion, a Worker sees that Worker's Reward. Other participants see completion without the amount.
@@ -27,6 +27,8 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - **Recipients**:
   - A new Message in a Work Conversation notifies every other current Accepted Participant, never the sender.
   - Directly affected Events notify the affected recipient. Quest-wide Events notify all current Accepted Participants.
+  - Creating a proof-free Completion Confirmation notifies the Hirer. A Hirer or automatic decision notifies the Member who submitted the Confirmation.
+  - Real-time `COMPLETION_REVIEW_PENDING` and `COMPLETION_REVIEWED` Events update the Hirer and affected Workers.
   - A `QUEST_OPEN_EDIT_UPDATED` realtime event goes to the Hirer and Members
     with an open Candidate Inquiry Conversation. It does not create a Push
     Notification.
@@ -44,7 +46,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 ## Audit and retention
 
 - An **Audit Record** stores actor or system, time, old value, new value, and reason where applicable.
-- **Coverage**: Quest, Assignment, Proof Submission, Admin Review Item, Quest Reward, Platform Fee changes, Candidate Inquiry Conversation creation, Message access, and `INQUIRY_CLOSED` transitions.
+- **Coverage**: Quest, Assignment, Proof Submission, Completion Confirmation, Admin Review Item, Quest Reward, Platform Fee changes, Candidate Inquiry Conversation creation, Message access, and `INQUIRY_CLOSED` transitions.
 - Detailed Audit Records are visible only to authorized roles such as Hirer and Admin.
 - Review creation and edits are recorded with the Review author and timestamp.
 - **Retention**: Audit Records are retained for at least one year after the Quest becomes Terminal and longer when a Report Case requires a hold.

@@ -9,6 +9,7 @@ type FrameWaiter = {
 
 export class QuestWebSocketClient {
   private buffer: Buffer;
+  private closeSent = false;
   private readonly frames: WebSocketFrame[] = [];
   private readonly waiters: FrameWaiter[] = [];
 
@@ -35,7 +36,7 @@ export class QuestWebSocketClient {
     port: number,
     questId: string,
     cookie: string,
-    origin: string | null = 'http://localhost:5000',
+    origin: string | null = null,
     path = `/api/v2/quests/${questId}/events`
   ) {
     const socket = createConnection({ host: '127.0.0.1', port });
@@ -130,6 +131,9 @@ export class QuestWebSocketClient {
       this.buffer = this.buffer.subarray(frameLength);
 
       const frame = { opcode, payload };
+      if (opcode === 8 && !this.closeSent) {
+        this.sendCloseFrame(payload);
+      }
       const waiter = this.waiters.shift();
       if (waiter) {
         clearTimeout(waiter.timer);
@@ -188,7 +192,41 @@ export class QuestWebSocketClient {
     this.socket.write(frame);
   }
 
+  private sendCloseFrame(payload = Buffer.alloc(0)) {
+    if (this.closeSent || this.socket.destroyed) return;
+    this.closeSent = true;
+    this.writeClientFrame(8, payload);
+  }
+
   destroy() {
     this.socket.destroy();
+  }
+
+  async destroyAndWait() {
+    if (this.socket.closed) return;
+    if (!this.closeSent) {
+      this.sendCloseFrame(Buffer.from([0x03, 0xe8]));
+      const deadline = Date.now() + 500;
+      let frame: WebSocketFrame | undefined;
+      do {
+        frame = await this.nextFrame(Math.max(1, deadline - Date.now()));
+      } while (frame && frame.opcode !== 8 && Date.now() < deadline);
+    }
+
+    await new Promise<void>((resolve) => {
+      if (this.socket.closed) {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => {
+        this.socket.destroy();
+      }, 500);
+      this.socket.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      this.socket.end(() => this.socket.destroy());
+    });
   }
 }

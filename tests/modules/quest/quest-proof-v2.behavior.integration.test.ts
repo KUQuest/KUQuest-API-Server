@@ -21,6 +21,7 @@ import {
 import { tag } from '@/database/schema/tag.schema';
 import { auth } from '@/modules/auth';
 import {
+  autoApproveDueQuestV2CompletionConfirmations,
   autoApproveDueQuestV2Proofs,
   createQuestV2ProofSubmission,
   failQuestV2AtDueAt,
@@ -49,6 +50,7 @@ import {
   listTestLedgerPostings,
   listTestQuestEscrowSettlements,
   readTestQuestEscrow,
+  releaseTestQuestEscrows,
 } from '../wallet/wallet-test-fixtures';
 
 import { randomUUID } from 'node:crypto';
@@ -144,6 +146,37 @@ const jsonRequest = (
   headers: HeadersInit = {}
 ) => request(method, path, memberId, JSON.stringify(body), headers);
 
+const createCompletionConfirmation = async (
+  questId: string,
+  memberId: string,
+  commandId: string
+) => {
+  const response = await request(
+    'POST',
+    `/api/v2/quests/${questId}/completion-confirmation`,
+    memberId,
+    undefined,
+    { 'idempotency-key': commandId }
+  );
+  const body = await response.json();
+  return { response, body };
+};
+
+const reviewCompletionConfirmation = (
+  questId: string,
+  completionConfirmationId: string,
+  decision: 'COMPLETION_CONFIRMATION_APPROVED' | 'COMPLETION_CONFIRMATION_NOT_APPROVED',
+  reason: string | undefined,
+  commandId: string
+) =>
+  jsonRequest(
+    'POST',
+    `/api/v2/quests/${questId}/completion-confirmations/${completionConfirmationId}/review`,
+    hirer.id,
+    { decision, ...(reason === undefined ? {} : { reason }) },
+    { 'idempotency-key': commandId }
+  );
+
 const createQuest = async (
   overrides: Partial<typeof quest.$inferInsert> = {},
   assignmentWorkerIds?: string[]
@@ -151,6 +184,7 @@ const createQuest = async (
   const questId = randomUUID();
   questIds.push(questId);
   const group = overrides.v2Participation === 'GROUP';
+  const v2Mode = overrides.v2Mode ?? 'FIRST_COME_FIRST_SERVED';
   const workerIds = assignmentWorkerIds ?? (group ? [worker.id, secondWorker.id] : [worker.id]);
   await db.insert(quest).values({
     id: questId,
@@ -158,9 +192,9 @@ const createQuest = async (
     apiVersion: 'v2',
     title: 'Proof Submission v2 behavior Quest',
     condition: 'Complete the work',
-    mode: group && overrides.v2Mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
+    mode: v2Mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
     participation: group ? 'GROUP' : 'SOLO',
-    v2Mode: group ? 'FIRST_COME_FIRST_SERVED' : 'FIRST_COME_FIRST_SERVED',
+    v2Mode,
     v2Participation: group ? 'GROUP' : 'SINGLE',
     questStatus: 'QUEST_IN_PROGRESS',
     rewardSatang: 1_000,
@@ -315,6 +349,7 @@ beforeEach(() => {
 afterEach(async () => {
   mock.restore();
   if (!postgresAvailable || !proofSchemaAvailable) return;
+  await releaseTestQuestEscrows([hirer.id]);
   if (questIds.length > 0) {
     await deleteWorkChatForQuests([...questIds]);
     await db.delete(quest).where(inArray(quest.id, questIds));
@@ -785,6 +820,8 @@ describe('Quest Proof Submission v2 behavior', () => {
     });
     await reserveQuest(questId, 1_020);
     const { proofSubmissionId } = await createSentProofForQuest(questId, worker.id, sentAt);
+    const fixtureEscrow = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    expect(fixtureEscrow?.status).toBe('ACTIVE');
 
     expect(
       await autoApproveDueQuestV2Proofs(new Date(sentAt.getTime() + 24 * 60 * 60 * 1000 - 1), 10)
@@ -1165,7 +1202,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect((await sent.json()).data.status).toBe('PROOF_PENDING');
   });
 
-  it('settles proof-free GROUP FCFS completion after every Active Worker confirms', async () => {
+  it('waits for GROUP FCFS completion reviews and settles only approved Workers', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest({
       v2Participation: 'GROUP',
@@ -1178,15 +1215,17 @@ describe('Quest Proof Submission v2 behavior', () => {
     const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
     if (!reservation) throw new Error('Proof-free GROUP fixture reservation was not created');
 
-    const first = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const first = await createCompletionConfirmation(
+      questId,
       worker.id,
-      undefined,
-      { 'idempotency-key': 'proof-v2-behavior-fcfs-first' }
+      `proof-v2-behavior-fcfs-first-${questId}`
     );
-    expect(first.status).toBe(200);
-    expect((await first.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(first.response.status).toBe(200);
+    expect(first.body.data).toMatchObject({
+      confirmed: true,
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      questStatus: 'QUEST_IN_PROGRESS',
+    });
     expect(
       await db
         .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
@@ -1194,31 +1233,86 @@ describe('Quest Proof Submission v2 behavior', () => {
         .where(eq(questAssignment.questId, questId))
     ).toEqual(
       expect.arrayContaining([
-        { workerId: worker.id, status: 'ASSIGNMENT_COMPLETED' },
+        { workerId: worker.id, status: 'ASSIGNMENT_ACTIVE' },
         { workerId: secondWorker.id, status: 'ASSIGNMENT_ACTIVE' },
       ])
     );
-    expect(
-      (await listTestQuestEscrowSettlements(reservation.id))
-        .filter(({ recipientUserId }) => recipientUserId === worker.id)
-        .map(({ recipientUserId, recipientAmountSatang, platformFeeSatang }) => ({
-          recipientUserId,
-          recipientAmountSatang,
-          platformFeeSatang,
-        }))
-    ).toEqual([
-      { recipientUserId: worker.id, recipientAmountSatang: 1_000, platformFeeSatang: 20 },
-    ]);
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
 
-    const second = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
-      secondWorker.id,
-      undefined,
-      { 'idempotency-key': 'proof-v2-behavior-fcfs-second' }
+    const rejected = await reviewCompletionConfirmation(
+      questId,
+      first.body.data.id,
+      'COMPLETION_CONFIRMATION_NOT_APPROVED',
+      'The work is not complete',
+      `proof-v2-behavior-fcfs-reject-${questId}`
     );
-    expect(second.status).toBe(200);
-    expect((await second.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    expect(rejected.status).toBe(200);
+    expect((await rejected.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
+    expect(
+      await db
+        .select({
+          proofSubmissionId: adminReviewItem.proofSubmissionId,
+          completionConfirmationId: adminReviewItem.completionConfirmationId,
+          reason: adminReviewItem.reason,
+          evidenceReferences: adminReviewItem.evidenceReferences,
+        })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.questId, questId))
+    ).toEqual([
+      {
+        proofSubmissionId: null,
+        completionConfirmationId: first.body.data.id,
+        reason: 'The work is not complete',
+        evidenceReferences: [],
+      },
+    ]);
+    const hirerConfirmations = await request(
+      'GET',
+      `/api/v2/quests/${questId}/completion-confirmations`,
+      hirer.id
+    );
+    expect((await hirerConfirmations.json()).data.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: first.body.data.id,
+          reviewReason: 'The work is not complete',
+        }),
+      ])
+    );
+    const submitterConfirmations = await request(
+      'GET',
+      `/api/v2/quests/${questId}/completion-confirmations`,
+      worker.id
+    );
+    expect((await submitterConfirmations.json()).data.items).toEqual([
+      expect.objectContaining({
+        id: first.body.data.id,
+        reviewReason: 'The work is not complete',
+      }),
+    ]);
+    const otherWorkerConfirmations = await request(
+      'GET',
+      `/api/v2/quests/${questId}/completion-confirmations`,
+      secondWorker.id
+    );
+    expect((await otherWorkerConfirmations.json()).data.items).toEqual([]);
+
+    const second = await createCompletionConfirmation(
+      questId,
+      secondWorker.id,
+      `proof-v2-behavior-fcfs-second-${questId}`
+    );
+    expect(second.response.status).toBe(200);
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      second.body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-fcfs-approve-${questId}`
+    );
+    expect(approved.status).toBe(200);
+    expect((await approved.json()).data.questStatus).toBe('QUEST_COMPLETED');
     expect(
       await db
         .select()
@@ -1229,18 +1323,38 @@ describe('Quest Proof Submission v2 behavior', () => {
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_COMPLETED');
-    expect(
-      await db
-        .select({ status: questAssignment.assignmentStatus })
-        .from(questAssignment)
-        .where(eq(questAssignment.questId, questId))
-    ).toEqual([{ status: 'ASSIGNMENT_COMPLETED' }, { status: 'ASSIGNMENT_COMPLETED' }]);
+    const assignments = await db
+      .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    expect(assignments).toHaveLength(2);
+    expect(assignments).toEqual(
+      expect.arrayContaining([
+        { workerId: worker.id, status: 'ASSIGNMENT_INCOMPLETE' },
+        { workerId: secondWorker.id, status: 'ASSIGNMENT_COMPLETED' },
+      ])
+    );
     expect(
       await db
         .select()
-        .from(questV2CompletionConfirmation)
-        .where(eq(questV2CompletionConfirmation.questId, questId))
-    ).toHaveLength(2);
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, questId))
+    ).toEqual([]);
+    expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_020,
+    });
+    expect(
+      (
+        await db
+          .select({ holdAt: quest.moneyHoldStartedAt })
+          .from(quest)
+          .where(eq(quest.id, questId))
+      )[0]?.holdAt
+    ).toBeInstanceOf(Date);
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([
+      expect.objectContaining({ recipientUserId: secondWorker.id, recipientAmountSatang: 1_000 }),
+    ]);
   });
 
   it('serializes concurrent proof-free GROUP FCFS confirmations', async () => {
@@ -1253,14 +1367,30 @@ describe('Quest Proof Submission v2 behavior', () => {
       questEscrowSatang: 2_040,
     });
     await reserveQuest(questId, 2_040);
-    const responses = await Promise.all(
+    const confirmations = await Promise.all(
       [worker, secondWorker].map((member, index) =>
-        request('POST', `/api/v2/quests/${questId}/completion-confirmation`, member.id, undefined, {
-          'idempotency-key': `proof-v2-behavior-concurrent-confirm-${index}-${questId}`,
-        })
+        createCompletionConfirmation(
+          questId,
+          member.id,
+          `proof-v2-behavior-concurrent-confirm-${index}-${questId}`
+        )
       )
     );
-    expect(responses.map(({ status }) => status)).toEqual([200, 200]);
+    expect(confirmations.map(({ response }) => response.status)).toEqual([200, 200]);
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
+    for (const confirmation of confirmations) {
+      const review = await reviewCompletionConfirmation(
+        questId,
+        confirmation.body.data.id,
+        'COMPLETION_CONFIRMATION_APPROVED',
+        undefined,
+        `proof-v2-behavior-concurrent-review-${confirmation.body.data.id}`
+      );
+      expect(review.status).toBe(200);
+    }
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -1269,6 +1399,46 @@ describe('Quest Proof Submission v2 behavior', () => {
     if (!reservation)
       throw new Error('Concurrent confirmation fixture reservation was not created');
     expect(await listTestQuestEscrowSettlements(reservation.id)).toHaveLength(2);
+  });
+
+  it('fails GROUP FCFS only after every Worker confirmation is not approved', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({
+      v2Participation: 'GROUP',
+      headcount: 2,
+      proofRequired: false,
+      questFundingTotalSatang: 2_000,
+      questEscrowSatang: 2_040,
+    });
+    await reserveQuest(questId, 2_040);
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    if (!reservation) throw new Error('GROUP FCFS behavior fixture reservation was not created');
+    for (const [index, member] of [worker, secondWorker].entries()) {
+      const { response, body } = await createCompletionConfirmation(
+        questId,
+        member.id,
+        `proof-v2-behavior-fcfs-all-fail-confirm-${index}-${questId}`
+      );
+      expect(response.status).toBe(200);
+      const rejected = await reviewCompletionConfirmation(
+        questId,
+        body.data.id,
+        'COMPLETION_CONFIRMATION_NOT_APPROVED',
+        'The work is not complete',
+        `proof-v2-behavior-fcfs-all-fail-review-${index}-${questId}`
+      );
+      expect(rejected.status).toBe(200);
+      expect((await rejected.json()).data.questStatus).toBe(
+        index === 0 ? 'QUEST_IN_PROGRESS' : 'QUEST_FAILED'
+      );
+    }
+    expect(
+      await db
+        .select({ status: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, questId))
+    ).toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }, { status: 'ASSIGNMENT_INCOMPLETE' }]);
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
   });
 
   it('settles an underfilled 3-of-4 GROUP FCFS Quest against the fixed Escrow fee pool', async () => {
@@ -1321,25 +1491,45 @@ describe('Quest Proof Submission v2 behavior', () => {
         createdAt: assignment.createdAt,
       }))
     );
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    if (!reservation) throw new Error('Underfilled behavior fixture reservation was not created');
 
     const confirmations = await Promise.all(
       [worker, secondWorker, unrelated].map((member, index) =>
-        request('POST', `/api/v2/quests/${questId}/completion-confirmation`, member.id, undefined, {
-          'idempotency-key': `proof-v2-behavior-underfilled-confirm-${index}-${questId}`,
-        })
+        createCompletionConfirmation(
+          questId,
+          member.id,
+          `proof-v2-behavior-underfilled-confirm-${index}-${questId}`
+        )
       )
     );
-    expect(confirmations.map(({ status }) => status)).toEqual([200, 200, 200]);
-    const confirmationStatuses = await Promise.all(
-      confirmations.map(async (response) => (await response.json()).data.questStatus)
+    expect(confirmations.map(({ response }) => response.status)).toEqual([200, 200, 200]);
+    expect(confirmations.map(({ body }) => body.data.reviewStatus)).toEqual([
+      'COMPLETION_CONFIRMATION_PENDING',
+      'COMPLETION_CONFIRMATION_PENDING',
+      'COMPLETION_CONFIRMATION_PENDING',
+    ]);
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
+    const reviews = await Promise.all(
+      confirmations.map(({ body }, index) =>
+        reviewCompletionConfirmation(
+          questId,
+          body.data.id,
+          'COMPLETION_CONFIRMATION_APPROVED',
+          undefined,
+          `proof-v2-behavior-underfilled-review-${index}-${questId}`
+        )
+      )
     );
-    expect(confirmationStatuses.filter((status) => status === 'QUEST_COMPLETED')).toHaveLength(1);
+    expect(reviews.map(({ status }) => status)).toEqual([200, 200, 200]);
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
     ).toBe('QUEST_COMPLETED');
-    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
-    if (!reservation) throw new Error('Underfilled behavior fixture reservation was not created');
 
     const settlements = await listTestQuestEscrowSettlements(reservation.id);
     expect(settlements).toEqual(
@@ -1471,20 +1661,64 @@ describe('Quest Proof Submission v2 behavior', () => {
     if (!('outcome' in result)) expect(result.submittedAt).toBeNull();
   });
 
-  it('settles proof-free SINGLE completion without creating a Proof Submission', async () => {
+  it('waits for a Hirer decision before settling proof-free SINGLE completion', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest({ proofRequired: false });
     await reserveQuest(questId, 1_020);
+    const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+    if (!reservation)
+      throw new Error('Proof-free SINGLE behavior fixture reservation was not created');
 
-    const confirmed = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const { response: confirmed, body } = await createCompletionConfirmation(
+      questId,
       worker.id,
-      undefined,
-      { 'idempotency-key': 'proof-v2-behavior-single-confirm' }
+      `proof-v2-behavior-single-confirm-${questId}`
     );
     expect(confirmed.status).toBe(200);
-    expect((await confirmed.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    expect(body.data).toMatchObject({
+      reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+      questStatus: 'QUEST_IN_PROGRESS',
+      reviewDeadlineAt: expect.any(String),
+    });
+    expect(
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      )[0]?.status
+    ).toBe('ASSIGNMENT_ACTIVE');
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
+    const missingReason = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_NOT_APPROVED',
+      undefined,
+      `proof-v2-behavior-single-missing-reason-${questId}`
+    );
+    expect(missingReason.status).toBe(400);
+    expect((await missingReason.json()).error.code).toBe('COMPLETION_NOT_APPROVED_REASON_REQUIRED');
+    const approvalCommandId = `proof-v2-behavior-single-approve-${questId}`;
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      approvalCommandId
+    );
+    expect(approved.status).toBe(200);
+    const approvedBody = await approved.json();
+    expect(approvedBody.data.questStatus).toBe('QUEST_COMPLETED');
+    const replay = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      approvalCommandId
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(approvedBody);
+    expect(await listTestQuestEscrowSettlements(reservation.id)).toHaveLength(1);
     const [stateChangeAudit] = await db
       .select()
       .from(auditRecord)
@@ -1497,7 +1731,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       );
     expect(stateChangeAudit).toMatchObject({
       actorType: 'MEMBER',
-      actorUserId: worker.id,
+      actorUserId: hirer.id,
       newValue: { state: 'QUEST_COMPLETED' },
     });
     expect(
@@ -1572,6 +1806,268 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect((await afterSend.json()).error.code).toBe('PROOF_SUBMISSION_ALREADY_EXISTS');
   });
 
+  it('fails proof-free SINGLE in both modes and GROUP Candidate after Hirer non-approval', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const cases = [
+      {
+        name: 'single FCFS',
+        overrides: { proofRequired: false },
+        workerIds: [worker.id],
+        escrowSatang: 1_020,
+      },
+      {
+        name: 'single Candidate',
+        overrides: { proofRequired: false, v2Mode: 'CANDIDATE' as const },
+        workerIds: [worker.id],
+        escrowSatang: 1_020,
+      },
+      {
+        name: 'GROUP Candidate',
+        overrides: {
+          proofRequired: false,
+          mode: 'CANDIDATE' as const,
+          v2Mode: 'CANDIDATE' as const,
+          v2Participation: 'GROUP' as const,
+          headcount: 2,
+          questFundingTotalSatang: 2_000,
+          questEscrowSatang: 2_040,
+        },
+        workerIds: [worker.id, secondWorker.id],
+        escrowSatang: 2_040,
+      },
+    ];
+
+    for (const [index, entry] of cases.entries()) {
+      const { questId } = await createQuest(entry.overrides, entry.workerIds);
+      if (entry.name === 'GROUP Candidate') {
+        const teamId = randomUUID();
+        await db.insert(questCandidateTeamV2).values({
+          id: teamId,
+          questId,
+          leaderId: worker.id,
+          name: 'Selected Team',
+          headcount: 2,
+          state: 'TEAM_SELECTED',
+        });
+        await db.insert(questCandidateTeamV2Member).values([
+          { teamId, memberId: worker.id },
+          { teamId, memberId: secondWorker.id },
+        ]);
+      }
+      await reserveQuest(questId, entry.escrowSatang);
+      const reservation = await readTestQuestEscrow({ ownerUserId: hirer.id, questId });
+      if (!reservation) throw new Error(`${entry.name} Quest Escrow was not created`);
+
+      const { response: confirmed, body } = await createCompletionConfirmation(
+        questId,
+        worker.id,
+        `proof-v2-behavior-non-approval-confirm-${index}-${questId}`
+      );
+      expect(confirmed.status).toBe(200);
+      const rejected = await reviewCompletionConfirmation(
+        questId,
+        body.data.id,
+        'COMPLETION_CONFIRMATION_NOT_APPROVED',
+        'The work is not complete',
+        `proof-v2-behavior-non-approval-review-${index}-${questId}`
+      );
+      expect(rejected.status).toBe(200);
+      expect((await rejected.json()).data.questStatus).toBe('QUEST_FAILED');
+      expect(
+        (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+          ?.status
+      ).toBe('QUEST_FAILED');
+      expect(
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      ).toEqual(entry.workerIds.map(() => ({ status: 'ASSIGNMENT_INCOMPLETE' })));
+      expect(await listTestQuestEscrowSettlements(reservation.id)).toEqual([]);
+      expect(
+        await db
+          .select({
+            proofSubmissionId: adminReviewItem.proofSubmissionId,
+            completionConfirmationId: adminReviewItem.completionConfirmationId,
+            reason: adminReviewItem.reason,
+            evidenceReferences: adminReviewItem.evidenceReferences,
+          })
+          .from(adminReviewItem)
+          .where(eq(adminReviewItem.questId, questId))
+      ).toEqual([
+        {
+          proofSubmissionId: null,
+          completionConfirmationId: body.data.id,
+          reason: 'The work is not complete',
+          evidenceReferences: [],
+        },
+      ]);
+      expect(
+        await db
+          .select()
+          .from(questV2ProofSubmission)
+          .where(eq(questV2ProofSubmission.questId, questId))
+      ).toEqual([]);
+    }
+  });
+
+  it('auto-approves a proof-free Completion Confirmation after 24 hours', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+    const { response, body } = await createCompletionConfirmation(
+      questId,
+      worker.id,
+      `proof-v2-behavior-auto-approval-confirm-${questId}`
+    );
+    expect(response.status).toBe(200);
+    const deadline = new Date(body.data.reviewDeadlineAt);
+    expect(
+      await autoApproveDueQuestV2CompletionConfirmations(new Date(deadline.getTime() - 1), 10)
+    ).not.toContain(body.data.id);
+    expect(await autoApproveDueQuestV2CompletionConfirmations(deadline, 10)).toContain(
+      body.data.id
+    );
+    expect(
+      (
+        await db
+          .select({ status: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.id, body.data.id))
+      )[0]?.status
+    ).toBe('COMPLETION_CONFIRMATION_APPROVED');
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_COMPLETED');
+  });
+
+  it('allows only the Hirer to review and only the Hirer or submitter to read confirmations', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+    const { response: confirmation, body } = await createCompletionConfirmation(
+      questId,
+      worker.id,
+      `proof-v2-behavior-confirmation-auth-${questId}`
+    );
+    expect(confirmation.status).toBe(200);
+
+    const submitterList = await request(
+      'GET',
+      `/api/v2/quests/${questId}/completion-confirmations`,
+      worker.id
+    );
+    expect(submitterList.status).toBe(200);
+    expect((await submitterList.json()).data.items).toEqual([
+      expect.objectContaining({ id: body.data.id }),
+    ]);
+    const unrelatedList = await request(
+      'GET',
+      `/api/v2/quests/${questId}/completion-confirmations`,
+      unrelated.id
+    );
+    expect(unrelatedList.status).toBe(403);
+    expect((await unrelatedList.json()).error.code).toBe('COMPLETION_CONFIRMATION_NOT_ALLOWED');
+
+    const workerReview = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/completion-confirmations/${body.data.id}/review`,
+      worker.id,
+      { decision: 'COMPLETION_CONFIRMATION_APPROVED' },
+      { 'idempotency-key': `proof-v2-behavior-confirmation-auth-review-${questId}` }
+    );
+    expect(workerReview.status).toBe(403);
+    expect((await workerReview.json()).error.code).toBe('COMPLETION_REVIEW_NOT_ALLOWED');
+    expect(
+      (
+        await db
+          .select({ status: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.id, body.data.id))
+      )[0]?.status
+    ).toBe('COMPLETION_CONFIRMATION_PENDING');
+  });
+
+  it('returns a Completion Confirmation review conflict when the Quest is terminal', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+    const { response: confirmation, body } = await createCompletionConfirmation(
+      questId,
+      worker.id,
+      `proof-v2-behavior-terminal-review-${questId}`
+    );
+    expect(confirmation.status).toBe(200);
+    await db.update(quest).set({ questStatus: 'QUEST_COMPLETED' }).where(eq(quest.id, questId));
+
+    const review = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-terminal-review-command-${questId}`
+    );
+    expect(review.status).toBe(409);
+    expect((await review.json()).error.code).toBe('COMPLETION_CONFIRMATION_NOT_REVIEWABLE');
+  });
+
+  it('keeps concurrent Hirer decisions to one final Completion Confirmation outcome', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest({ proofRequired: false });
+    await reserveQuest(questId, 1_020);
+    const { response: confirmation, body } = await createCompletionConfirmation(
+      questId,
+      worker.id,
+      `proof-v2-behavior-concurrent-review-confirm-${questId}`
+    );
+    expect(confirmation.status).toBe(200);
+    const path = `/api/v2/quests/${questId}/completion-confirmations/${body.data.id}/review`;
+    const [approval, nonApproval] = await Promise.all([
+      jsonRequest(
+        'POST',
+        path,
+        hirer.id,
+        { decision: 'COMPLETION_CONFIRMATION_APPROVED' },
+        { 'idempotency-key': `proof-v2-behavior-concurrent-approve-${questId}` }
+      ),
+      jsonRequest(
+        'POST',
+        path,
+        hirer.id,
+        {
+          decision: 'COMPLETION_CONFIRMATION_NOT_APPROVED',
+          reason: 'The work is not complete',
+        },
+        { 'idempotency-key': `proof-v2-behavior-concurrent-reject-${questId}` }
+      ),
+    ]);
+    expect([approval.status, nonApproval.status].sort()).toEqual([200, 409]);
+    const winner = approval.status === 200 ? approval : nonApproval;
+    const conflictResponse = approval.status === 409 ? approval : nonApproval;
+    expect((await conflictResponse.json()).error.code).toBe('COMPLETION_CONFIRMATION_NOT_PENDING');
+    const winningDecision = (await winner.json()).data.confirmation.reviewStatus;
+    expect(winningDecision).toBe(
+      approval.status === 200
+        ? 'COMPLETION_CONFIRMATION_APPROVED'
+        : 'COMPLETION_CONFIRMATION_NOT_APPROVED'
+    );
+    expect(
+      (
+        await db
+          .select({ status: questV2CompletionConfirmation.reviewStatus })
+          .from(questV2CompletionConfirmation)
+          .where(eq(questV2CompletionConfirmation.id, body.data.id))
+      )[0]?.status
+    ).toBe(winningDecision);
+    expect(
+      await db
+        .select({ id: adminReviewItem.id })
+        .from(adminReviewItem)
+        .where(eq(adminReviewItem.completionConfirmationId, body.data.id))
+    ).toHaveLength(winningDecision === 'COMPLETION_CONFIRMATION_NOT_APPROVED' ? 1 : 0);
+  });
+
   it('serializes concurrent Draft creates into one Draft', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest();
@@ -1611,21 +2107,27 @@ describe('Quest Proof Submission v2 behavior', () => {
       }
     );
 
-    const response = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const { response: confirmation, body } = await createCompletionConfirmation(
+      questId,
       worker.id,
+      `proof-v2-behavior-rollback-confirm-${questId}`
+    );
+    expect(confirmation.status).toBe(200);
+    const response = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
       undefined,
-      { 'idempotency-key': 'proof-v2-behavior-rollback-confirm' }
+      `proof-v2-behavior-rollback-review-${questId}`
     );
     expect(response.status).toBe(503);
     expect((await response.json()).error.code).toBe('QUEST_COMPLETION_UNAVAILABLE');
     expect(
       await db
-        .select()
+        .select({ reviewStatus: questV2CompletionConfirmation.reviewStatus })
         .from(questV2CompletionConfirmation)
         .where(eq(questV2CompletionConfirmation.questId, questId))
-    ).toEqual([]);
+    ).toEqual([{ reviewStatus: 'COMPLETION_CONFIRMATION_PENDING' }]);
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -1672,14 +2174,25 @@ describe('Quest Proof Submission v2 behavior', () => {
     applySpy?.mockRestore();
     await reserveQuest(questId, 1_020);
 
-    const response = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const { response, body } = await createCompletionConfirmation(
+      questId,
       worker.id,
-      undefined,
-      { 'idempotency-key': `proof-v2-behavior-real-chat-confirm-${questId}` }
+      `proof-v2-behavior-real-chat-confirm-${questId}`
     );
     expect(response.status).toBe(200);
+    const [pendingConversation] = await db
+      .select({ readOnlyAt: chatConversation.readOnlyAt })
+      .from(chatConversation)
+      .where(eq(chatConversation.questId, questId));
+    expect(pendingConversation?.readOnlyAt).toBeNull();
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-real-chat-review-${questId}`
+    );
+    expect(approved.status).toBe(200);
     const [conversation] = await db
       .select({
         id: chatConversation.id,
@@ -1814,15 +2327,21 @@ describe('Quest Proof Submission v2 behavior', () => {
       }
     );
 
-    const response = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const { response, body } = await createCompletionConfirmation(
+      questId,
       worker.id,
-      undefined,
-      { 'idempotency-key': `proof-v2-behavior-partial-proof-free-${questId}` }
+      `proof-v2-behavior-partial-proof-free-${questId}`
     );
     expect(response.status).toBe(200);
-    expect((await response.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-partial-proof-free-review-${questId}`
+    );
+    expect(approved.status).toBe(200);
+    expect((await approved.json()).data.questStatus).toBe('QUEST_IN_PROGRESS');
     expect(transitions).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -2092,15 +2611,30 @@ describe('Quest Proof Submission v2 behavior', () => {
     expect(memberAttempt.status).toBe(403);
     expect((await memberAttempt.json()).error.code).toBe('PROOF_SUBMISSION_NOT_ALLOWED');
 
-    const leaderConfirmation = await request(
-      'POST',
-      `/api/v2/quests/${questId}/completion-confirmation`,
+    const { response: leaderConfirmation, body } = await createCompletionConfirmation(
+      questId,
       worker.id,
-      undefined,
-      { 'idempotency-key': `proof-v2-behavior-candidate-leader-${questId}` }
+      `proof-v2-behavior-candidate-leader-${questId}`
     );
     expect(leaderConfirmation.status).toBe(200);
-    expect((await leaderConfirmation.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    expect(body.data.reviewStatus).toBe('COMPLETION_CONFIRMATION_PENDING');
+    expect(
+      (
+        await db
+          .select({ status: questAssignment.assignmentStatus })
+          .from(questAssignment)
+          .where(eq(questAssignment.questId, questId))
+      ).every(({ status }) => status === 'ASSIGNMENT_ACTIVE')
+    ).toBe(true);
+    const approved = await reviewCompletionConfirmation(
+      questId,
+      body.data.id,
+      'COMPLETION_CONFIRMATION_APPROVED',
+      undefined,
+      `proof-v2-behavior-candidate-leader-review-${questId}`
+    );
+    expect(approved.status).toBe(200);
+    expect((await approved.json()).data.questStatus).toBe('QUEST_COMPLETED');
     expect(
       await db
         .select({ status: questAssignment.assignmentStatus })

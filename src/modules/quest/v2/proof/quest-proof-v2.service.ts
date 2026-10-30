@@ -3,6 +3,7 @@ import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { adminReviewItem } from '@/database/schema/admin.schema';
 import { file } from '@/database/schema/file.schema';
 import { recordAudit, type AuditActor } from '@/modules/audit/audit.service';
+import { enqueuePushDeliveryInTransaction } from '@/modules/push';
 import {
   quest,
   questApiVersion,
@@ -20,7 +21,7 @@ import {
   UnsupportedFileTypeError,
 } from '@/shared/object-storage';
 
-import { and, asc, eq, inArray, isNull, isNotNull, lte, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, isNotNull, lte, ne, or } from 'drizzle-orm';
 
 import type { QuestTransaction } from '../../shared/work-chat/quest-work-chat.port';
 import {
@@ -41,6 +42,7 @@ import {
 import {
   failQuestV2InTransaction,
   markAssignmentIncompleteV2InTransaction,
+  rejectProofFreeQuestV2CompletionInTransaction,
   settleApprovedQuestV2ProofInTransaction,
   settleProofFreeQuestV2InTransaction,
 } from '../../settlement';
@@ -71,6 +73,8 @@ const proofStatuses = ['PROOF_PENDING', 'PROOF_APPROVED', 'PROOF_NOT_APPROVED'] 
 
 /** Pending Proof Submissions auto-approve this long after submission (rulebook). */
 const proofAutoApprovalWindowMs = 24 * 60 * 60 * 1000;
+/** Pending proof-free completion confirmations auto-approve after this window. */
+const completionAutoApprovalWindowMs = 24 * 60 * 60 * 1000;
 
 export type QuestV2ProofStatus = (typeof proofStatuses)[number];
 
@@ -147,6 +151,8 @@ type QuestV2ProofBusinessOutcomeCode =
   | 'already-confirmed'
   | 'already-exists'
   | 'already-sent'
+  | 'completion-confirmation-not-found'
+  | 'completion-confirmation-review-not-pending'
   | 'due-at-missing'
   | 'due-at-passed'
   | 'files-failed'
@@ -165,6 +171,8 @@ type QuestV2ProofBusinessOutcomeCode =
   | 'review-not-pending'
   | 'review-reason-invalid'
   | 'review-reason-required'
+  | 'completion-review-reason-required'
+  | 'completion-review-reason-invalid'
   | 'submission-locked'
   | 'not-v2-contract';
 
@@ -177,13 +185,51 @@ export type QuestV2ProofSubmissionDeleteOutcome =
   { deleted: true; proofSubmissionId: string } | { outcome: ProofCommandOutcomeCode };
 
 export type QuestV2CompletionConfirmation = {
+  id: string;
   confirmed: true;
   confirmedAt: Date;
+  reviewDeadlineAt: Date;
+  reviewStatus: QuestV2CompletionConfirmationStatus;
   questStatus: QuestV2State;
+};
+
+export type QuestV2CompletionConfirmationStatus =
+  | 'COMPLETION_CONFIRMATION_PENDING'
+  | 'COMPLETION_CONFIRMATION_APPROVED'
+  | 'COMPLETION_CONFIRMATION_NOT_APPROVED'
+  | 'COMPLETION_CONFIRMATION_CANCELLED';
+
+export type QuestV2CompletionConfirmationReviewDecision =
+  'COMPLETION_CONFIRMATION_APPROVED' | 'COMPLETION_CONFIRMATION_NOT_APPROVED';
+
+export type QuestV2CompletionConfirmationReview = {
+  confirmation: QuestV2CompletionConfirmationRecord;
+  questStatus: QuestV2State;
+  replayed?: boolean;
+};
+
+export type QuestV2CompletionConfirmationRecord = {
+  id: string;
+  questId: string;
+  workerId: string | null;
+  teamId: string | null;
+  confirmedByUserId: string;
+  confirmedAt: Date;
+  reviewStatus: QuestV2CompletionConfirmationStatus;
+  reviewDeadlineAt: Date | null;
+  reviewReason: string | null;
+  reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
 };
 
 export type QuestV2CompletionConfirmationOutcome =
   QuestV2CompletionConfirmation | { outcome: ProofCommandOutcomeCode };
+
+export type QuestV2CompletionConfirmationReviewOutcome =
+  QuestV2CompletionConfirmationReview | { outcome: ProofCommandOutcomeCode };
+
+export type QuestV2CompletionConfirmationListOutcome =
+  QuestV2CompletionConfirmationRecord[] | { outcome: 'not-authorized' | 'not-found' };
 
 export type QuestV2ProofSubmissionListOutcome =
   QuestV2ProofSubmission[] | { outcome: 'not-authorized' | 'not-found' };
@@ -248,6 +294,9 @@ const questV2ProofSubmitOperationScope = 'quest.v2.proof.submit';
 const questV2ProofReviewOperationScope = 'quest.v2.proof.review';
 const questV2ProofAutoApprovalOperationScope = 'quest.v2.proof.auto-approval';
 const questV2CompletionConfirmationOperationScope = 'quest.v2.proof.completion-confirmation';
+const questV2CompletionConfirmationReviewOperationScope = 'quest.v2.proof.completion-review';
+const questV2CompletionConfirmationAutoApprovalOperationScope =
+  'quest.v2.proof.completion-auto-approval';
 const questV2ProofUploadCleanupOperationScope = 'quest.v2.proof.upload-cleanup';
 
 type QuestV2ProofUploadCleanupObject = Pick<StoredQuestV2ProofFile, 'bucket' | 'objectKey'>;
@@ -475,6 +524,19 @@ const isProofStatus = (value: string | null): value is QuestV2ProofStatus =>
 const isQuestV2State = (value: string): value is QuestV2State =>
   questV2States.includes(value as QuestV2State);
 
+const completionConfirmationStatuses: QuestV2CompletionConfirmationStatus[] = [
+  'COMPLETION_CONFIRMATION_PENDING',
+  'COMPLETION_CONFIRMATION_APPROVED',
+  'COMPLETION_CONFIRMATION_NOT_APPROVED',
+  'COMPLETION_CONFIRMATION_CANCELLED',
+];
+
+const isCompletionConfirmationStatus = (
+  value: unknown
+): value is QuestV2CompletionConfirmationStatus =>
+  typeof value === 'string' &&
+  completionConfirmationStatuses.includes(value as QuestV2CompletionConfirmationStatus);
+
 const isInputFieldPresent = <T extends object, K extends keyof T>(input: T, field: K): boolean =>
   Object.prototype.hasOwnProperty.call(input, field);
 
@@ -567,6 +629,22 @@ const failureRecipientWorkerIds = async (transaction: QuestTransaction, questId:
     ])
   ).map(({ workerId }) => workerId);
 
+const allQuestWorkerIds = async (
+  transaction: QuestTransaction,
+  questId: string
+): Promise<string[]> => {
+  const assignments = await transaction
+    .select({ workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        ne(questAssignment.assignmentStatus, 'ASSIGNMENT_CANCELLED')
+      )
+    );
+  return [...new Set(assignments.map(({ workerId }) => workerId))];
+};
+
 const failedQuestPendingProofParticipantIds = async (
   transaction: QuestTransaction,
   questId: string,
@@ -592,6 +670,30 @@ const failedQuestPendingProofParticipantIds = async (
   return [...new Set(members.flat())];
 };
 
+const pendingCompletionConfirmationParticipantIds = async (
+  transaction: QuestTransaction,
+  questId: string,
+  dueAt: Date
+): Promise<string[]> => {
+  const confirmations = await transaction
+    .select({
+      workerId: questV2CompletionConfirmation.workerId,
+      teamId: questV2CompletionConfirmation.teamId,
+    })
+    .from(questV2CompletionConfirmation)
+    .where(
+      and(
+        eq(questV2CompletionConfirmation.questId, questId),
+        eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING'),
+        lte(questV2CompletionConfirmation.confirmedAt, dueAt)
+      )
+    );
+  const members = await Promise.all(
+    confirmations.map((confirmation) => proofParticipantIds(transaction, confirmation))
+  );
+  return [...new Set(members.flat())];
+};
+
 const emitQuestUpdate = (
   transaction: QuestTransaction,
   questId: string,
@@ -600,6 +702,8 @@ const emitQuestUpdate = (
     | 'PROOF_REVIEWED'
     | 'PROOF_AUTO_APPROVED'
     | 'COMPLETION_CONFIRMED'
+    | 'COMPLETION_REVIEW_PENDING'
+    | 'COMPLETION_REVIEWED'
     | 'QUEST_COMPLETED'
     | 'QUEST_FAILED'
     | 'DISPUTE_WINDOW_OPENED',
@@ -612,6 +716,54 @@ const emitQuestUpdate = (
     recipientMemberIds: [...new Set(recipientMemberIds)],
     ...(closeMemberIds?.length ? { closeMemberIds: [...new Set(closeMemberIds)] } : {}),
   });
+
+const enqueueCompletionConfirmationPush = async (
+  transaction: QuestTransaction,
+  input: {
+    recipientMemberId: string;
+    questId: string;
+    confirmationId: string;
+    eventType: 'COMPLETION_REVIEW_PENDING' | 'COMPLETION_REVIEWED';
+    decision?: QuestV2CompletionConfirmationReviewDecision;
+    reviewedBy?: 'HIRER' | 'AUTO_APPROVE';
+    reviewDeadlineAt?: Date;
+    now: Date;
+  }
+) => {
+  const transitionId = `quest-v2:${input.eventType}:${input.confirmationId}:${input.decision ?? 'PENDING'}`;
+  await enqueuePushDeliveryInTransaction(transaction, {
+    recipientMemberId: input.recipientMemberId,
+    eventKey: transitionId,
+    eventType: input.eventType,
+    title:
+      input.eventType === 'COMPLETION_REVIEW_PENDING'
+        ? 'Completion confirmation needs review'
+        : input.decision === 'COMPLETION_CONFIRMATION_APPROVED'
+          ? input.reviewedBy === 'AUTO_APPROVE'
+            ? 'Completion confirmation approved automatically'
+            : 'Completion confirmation approved'
+          : 'Completion confirmation not approved',
+    body:
+      input.eventType === 'COMPLETION_REVIEW_PENDING'
+        ? 'A Worker confirmed Quest completion. Review the confirmation.'
+        : input.decision === 'COMPLETION_CONFIRMATION_APPROVED'
+          ? input.reviewedBy === 'AUTO_APPROVE'
+            ? 'The Server approved your completion confirmation because the Hirer did not decide within 24 hours.'
+            : 'The Hirer approved your completion confirmation.'
+          : 'The Hirer did not approve your completion confirmation. Open the Quest to read the reason.',
+    deepLink: `kuquest://quest/${input.questId}`,
+    data: {
+      type: input.eventType,
+      questId: input.questId,
+      completionConfirmationId: input.confirmationId,
+      transitionId,
+      ...(input.decision ? { decision: input.decision } : {}),
+      ...(input.reviewedBy ? { reviewedBy: input.reviewedBy } : {}),
+      ...(input.reviewDeadlineAt ? { reviewDeadlineAt: input.reviewDeadlineAt.toISOString() } : {}),
+    },
+    now: input.now,
+  });
+};
 
 const ownerCondition = (owner: ProofOwner) =>
   owner.workerId
@@ -678,80 +830,6 @@ const ownerFor = async (
     .limit(1)
     .for('update');
   return assignment ? { workerId: memberId, teamId: null } : undefined;
-};
-
-const allCompletionObligationsConfirmed = async (
-  transaction: QuestTransaction,
-  current: QuestRow,
-  questId: string
-): Promise<boolean> => {
-  if (
-    current.v2Mode === questV2Mode.candidate &&
-    current.v2Participation === questV2Participation.group
-  ) {
-    const [team] = await transaction
-      .select({ id: questCandidateTeamV2.id, leaderId: questCandidateTeamV2.leaderId })
-      .from(questCandidateTeamV2)
-      .where(
-        and(
-          eq(questCandidateTeamV2.questId, questId),
-          eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
-        )
-      )
-      .limit(1)
-      .for('update');
-    if (!team) return false;
-    const [assignment] = await transaction
-      .select({ id: questAssignment.id })
-      .from(questAssignment)
-      .where(
-        and(
-          eq(questAssignment.questId, questId),
-          eq(questAssignment.workerId, team.leaderId),
-          eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-        )
-      )
-      .limit(1)
-      .for('update');
-    if (!assignment) return false;
-    const [confirmation] = await transaction
-      .select({ id: questV2CompletionConfirmation.id })
-      .from(questV2CompletionConfirmation)
-      .where(
-        and(
-          eq(questV2CompletionConfirmation.questId, questId),
-          eq(questV2CompletionConfirmation.teamId, team.id)
-        )
-      )
-      .limit(1);
-    return Boolean(confirmation);
-  }
-
-  const assignments = await transaction
-    .select({ workerId: questAssignment.workerId })
-    .from(questAssignment)
-    .where(
-      and(
-        eq(questAssignment.questId, questId),
-        eq(questAssignment.assignmentStatus, 'ASSIGNMENT_ACTIVE')
-      )
-    )
-    .for('update');
-  if (assignments.length === 0) return false;
-  const confirmations = await transaction
-    .select({ workerId: questV2CompletionConfirmation.workerId })
-    .from(questV2CompletionConfirmation)
-    .where(
-      and(
-        eq(questV2CompletionConfirmation.questId, questId),
-        inArray(
-          questV2CompletionConfirmation.workerId,
-          assignments.map(({ workerId }) => workerId)
-        )
-      )
-    );
-  const confirmedWorkerIds = new Set(confirmations.map(({ workerId }) => workerId));
-  return assignments.every(({ workerId }) => confirmedWorkerIds.has(workerId));
 };
 
 const submissionForOwner = async (
@@ -1221,20 +1299,90 @@ const deletionFromSnapshot = (
 const completionSnapshotFor = (result: QuestV2CompletionConfirmation) => ({
   ...result,
   confirmedAt: result.confirmedAt.toISOString(),
+  reviewDeadlineAt: result.reviewDeadlineAt.toISOString(),
 });
 
 const completionFromSnapshot = (value: unknown): QuestV2CompletionConfirmation | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const snapshot = value as Partial<QuestV2CompletionConfirmation>;
   const confirmedAt = dateFromSnapshot(snapshot.confirmedAt);
+  const reviewDeadlineAt = dateFromSnapshot(snapshot.reviewDeadlineAt);
   if (
+    typeof snapshot.id !== 'string' ||
     snapshot.confirmed !== true ||
     !confirmedAt ||
+    !reviewDeadlineAt ||
+    snapshot.reviewStatus !== 'COMPLETION_CONFIRMATION_PENDING' ||
     typeof snapshot.questStatus !== 'string' ||
     !isQuestV2State(snapshot.questStatus)
   )
     return undefined;
-  return { confirmed: true, confirmedAt, questStatus: snapshot.questStatus };
+  return {
+    id: snapshot.id,
+    confirmed: true,
+    confirmedAt,
+    reviewDeadlineAt,
+    reviewStatus: snapshot.reviewStatus,
+    questStatus: snapshot.questStatus,
+  };
+};
+
+const completionConfirmationSnapshotFor = (result: QuestV2CompletionConfirmationReview) => ({
+  confirmation: {
+    ...result.confirmation,
+    confirmedAt: result.confirmation.confirmedAt.toISOString(),
+    reviewDeadlineAt: result.confirmation.reviewDeadlineAt?.toISOString() ?? null,
+    reviewedAt: result.confirmation.reviewedAt?.toISOString() ?? null,
+  },
+  questStatus: result.questStatus,
+});
+
+const completionConfirmationFromSnapshot = (
+  value: unknown
+): QuestV2CompletionConfirmationReview | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const snapshot = value as {
+    confirmation?: Partial<QuestV2CompletionConfirmationRecord> & {
+      confirmedAt?: unknown;
+      reviewDeadlineAt?: unknown;
+      reviewedAt?: unknown;
+    };
+    questStatus?: unknown;
+  };
+  const confirmation = snapshot.confirmation;
+  if (!confirmation || typeof confirmation.id !== 'string') return undefined;
+  const confirmedAt = dateFromSnapshot(confirmation.confirmedAt);
+  const reviewDeadlineAt = dateFromSnapshot(confirmation.reviewDeadlineAt);
+  const reviewedAt = dateFromSnapshot(confirmation.reviewedAt);
+  if (
+    !confirmedAt ||
+    typeof confirmation.questId !== 'string' ||
+    typeof confirmation.confirmedByUserId !== 'string' ||
+    !isCompletionConfirmationStatus(confirmation.reviewStatus) ||
+    typeof snapshot.questStatus !== 'string' ||
+    !isQuestV2State(snapshot.questStatus)
+  )
+    return undefined;
+  return {
+    confirmation: {
+      id: confirmation.id,
+      questId: confirmation.questId,
+      workerId: confirmation.workerId ?? null,
+      teamId: confirmation.teamId ?? null,
+      confirmedByUserId: confirmation.confirmedByUserId,
+      confirmedAt,
+      reviewStatus: confirmation.reviewStatus,
+      reviewDeadlineAt: reviewDeadlineAt ?? null,
+      reviewReason: confirmation.reviewReason ?? null,
+      reviewedAt: reviewedAt ?? null,
+      reviewedBy:
+        confirmation.reviewedBy === 'HIRER' || confirmation.reviewedBy === 'AUTO_APPROVE'
+          ? confirmation.reviewedBy
+          : null,
+    },
+    questStatus: snapshot.questStatus,
+    replayed: true,
+  };
 };
 
 const reviewSnapshotFor = (result: QuestV2ProofReview) => ({
@@ -1853,10 +2001,8 @@ export const confirmQuestV2Completion = async (
   now = new Date()
 ): Promise<QuestV2CompletionConfirmationOutcome> => {
   const requestHash = await requestHashFor(memberId, 'confirm-completion', questId, null, null);
-  // ADR-0019: the whole command — proof-free check, the confirmation insert, Worker
-  // earnings, Assignment completion, the QUEST_COMPLETED transition, and the
-  // read-only Work Conversation commit — runs inside this one transaction. The
-  // Quest row is locked before runQuestCommand; see the lock-order note there.
+  // The confirmation and its Hirer notification are one transaction. Review and
+  // settlement use a separate idempotent command after the Hirer decides.
   return db.transaction(async (transaction) => {
     const current = await lockQuest(transaction, questId);
     if (!current) return { outcome: 'not-found' };
@@ -1879,7 +2025,6 @@ export const confirmQuestV2Completion = async (
         const [existing] = await transaction
           .select({
             id: questV2CompletionConfirmation.id,
-            confirmedAt: questV2CompletionConfirmation.confirmedAt,
           })
           .from(questV2CompletionConfirmation)
           .where(
@@ -1904,66 +2049,39 @@ export const confirmQuestV2Completion = async (
             teamId: checks.owner.teamId,
             confirmedByUserId: memberId,
             confirmedAt: now,
+            reviewStatus: 'COMPLETION_CONFIRMATION_PENDING',
+            reviewDeadlineAt: new Date(now.getTime() + completionAutoApprovalWindowMs),
           })
-          .returning({ confirmedAt: questV2CompletionConfirmation.confirmedAt });
+          .returning({
+            id: questV2CompletionConfirmation.id,
+            confirmedAt: questV2CompletionConfirmation.confirmedAt,
+            reviewDeadlineAt: questV2CompletionConfirmation.reviewDeadlineAt,
+            reviewStatus: questV2CompletionConfirmation.reviewStatus,
+          });
         if (!confirmation)
           throw new Error('Quest API v2 Completion Confirmation insert returned no row');
-        const activeWorkerIds = await activeAssignmentWorkerIds(transaction, questId);
-        let questStatus: QuestV2State = currentQuestState;
-        let allocationPending = false;
-        const groupFcfs =
-          current.v2Mode === questV2Mode.firstComeFirstServed &&
-          current.v2Participation === questV2Participation.group;
-        if (groupFcfs) {
-          const settlement = await settleProofFreeQuestV2InTransaction(
-            transaction,
-            questId,
-            `quest-v2-completion:${questId}`,
-            now,
-            checks.owner.workerId!,
-            memberId
-          );
-          if (settlement) {
-            questStatus = 'QUEST_COMPLETED';
-            allocationPending = settlement.allocationPending === true;
-          }
-        } else if (await allCompletionObligationsConfirmed(transaction, current, questId)) {
-          const settlement = await settleProofFreeQuestV2InTransaction(
-            transaction,
-            questId,
-            `quest-v2-completion:${questId}`,
-            now,
-            undefined,
-            memberId
-          );
-          questStatus = 'QUEST_COMPLETED';
-          allocationPending = settlement?.allocationPending === true;
-        }
         const participants = await proofParticipantIds(transaction, checks.owner);
-        const closeMemberIds =
-          groupFcfs && questStatus !== 'QUEST_COMPLETED' ? participants : undefined;
-        await emitQuestUpdate(
-          transaction,
+        await emitQuestUpdate(transaction, questId, 'COMPLETION_REVIEW_PENDING', [
+          current.hirerId,
+          ...participants,
+        ]);
+        await enqueueCompletionConfirmationPush(transaction, {
+          recipientMemberId: current.hirerId,
           questId,
-          'COMPLETION_CONFIRMED',
-          [current.hirerId, ...participants],
-          closeMemberIds
-        );
-        if (questStatus === 'QUEST_COMPLETED') {
-          await emitQuestUpdate(
-            transaction,
-            questId,
-            'QUEST_COMPLETED',
-            [current.hirerId, ...activeWorkerIds],
-            allocationPending ? [] : activeWorkerIds
-          );
-        }
+          confirmationId: confirmation.id,
+          eventType: 'COMPLETION_REVIEW_PENDING',
+          reviewDeadlineAt: confirmation.reviewDeadlineAt!,
+          now,
+        });
         return {
           kind: 'success',
           result: {
+            id: confirmation.id,
             confirmed: true,
             confirmedAt: confirmation.confirmedAt,
-            questStatus,
+            reviewDeadlineAt: confirmation.reviewDeadlineAt!,
+            reviewStatus: confirmation.reviewStatus as QuestV2CompletionConfirmationStatus,
+            questStatus: currentQuestState,
           },
         };
       },
@@ -1977,6 +2095,138 @@ export const confirmQuestV2Completion = async (
 };
 
 type ReviewCommandActor = { actorType: 'MEMBER'; actorUserId: string } | { actorType: 'SYSTEM' };
+
+const completionConfirmationFields = {
+  id: questV2CompletionConfirmation.id,
+  questId: questV2CompletionConfirmation.questId,
+  workerId: questV2CompletionConfirmation.workerId,
+  teamId: questV2CompletionConfirmation.teamId,
+  confirmedByUserId: questV2CompletionConfirmation.confirmedByUserId,
+  confirmedAt: questV2CompletionConfirmation.confirmedAt,
+  reviewStatus: questV2CompletionConfirmation.reviewStatus,
+  reviewDeadlineAt: questV2CompletionConfirmation.reviewDeadlineAt,
+  reviewReason: questV2CompletionConfirmation.reviewReason,
+  reviewedAt: questV2CompletionConfirmation.reviewedAt,
+  reviewedBy: questV2CompletionConfirmation.reviewedBy,
+} as const;
+
+const toCompletionConfirmationRecord = (
+  row: QuestV2CompletionConfirmationRecord
+): QuestV2CompletionConfirmationRecord => row;
+
+const completionReviewReason = (
+  decision: QuestV2CompletionConfirmationReviewDecision,
+  reason: string | null
+):
+  | { reason: string | null }
+  | { outcome: 'completion-review-reason-required' | 'completion-review-reason-invalid' } => {
+  const value = reason?.trim() ?? null;
+  if (decision === 'COMPLETION_CONFIRMATION_APPROVED' && value !== null) {
+    return { outcome: 'completion-review-reason-invalid' };
+  }
+  if (decision === 'COMPLETION_CONFIRMATION_NOT_APPROVED' && value === null) {
+    return { outcome: 'completion-review-reason-required' };
+  }
+  if (value !== null && value.length > maxDescriptionLength) {
+    return { outcome: 'completion-review-reason-invalid' };
+  }
+  return { reason: value };
+};
+
+export const listQuestV2CompletionConfirmations = async (
+  memberId: string,
+  questId: string
+): Promise<QuestV2CompletionConfirmationListOutcome> => {
+  const [current] = await db
+    .select({ hirerId: quest.hirerId, questStatus: quest.questStatus })
+    .from(quest)
+    .where(and(eq(quest.id, questId), eq(quest.apiVersion, questApiVersion.v2)))
+    .limit(1);
+  if (!current) return { outcome: 'not-found' };
+
+  if (current.hirerId === memberId) {
+    const rows = await db
+      .select(completionConfirmationFields)
+      .from(questV2CompletionConfirmation)
+      .where(eq(questV2CompletionConfirmation.questId, questId))
+      .orderBy(
+        asc(questV2CompletionConfirmation.confirmedAt),
+        asc(questV2CompletionConfirmation.id)
+      );
+    return rows.sort(
+      (left, right) =>
+        Number(right.reviewStatus === 'COMPLETION_CONFIRMATION_PENDING') -
+          Number(left.reviewStatus === 'COMPLETION_CONFIRMATION_PENDING') ||
+        left.confirmedAt.getTime() - right.confirmedAt.getTime()
+    );
+  }
+
+  const [assignment] = await db
+    .select({
+      id: questAssignment.id,
+      assignmentStatus: questAssignment.assignmentStatus,
+    })
+    .from(questAssignment)
+    .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, memberId)))
+    .limit(1);
+  if (!assignment) return { outcome: 'not-authorized' };
+  const cancelledParticipant = assignment.assignmentStatus === 'ASSIGNMENT_CANCELLED';
+  if (cancelledParticipant && current.questStatus !== 'QUEST_CANCELLED') {
+    return { outcome: 'not-authorized' };
+  }
+
+  const [team] = await db
+    .select({ id: questCandidateTeamV2Member.teamId })
+    .from(questCandidateTeamV2Member)
+    .innerJoin(
+      questCandidateTeamV2,
+      and(
+        eq(questCandidateTeamV2.id, questCandidateTeamV2Member.teamId),
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .where(eq(questCandidateTeamV2Member.memberId, memberId))
+    .limit(1);
+  const ownerConditions = [eq(questV2CompletionConfirmation.workerId, memberId)];
+  if (team) ownerConditions.push(eq(questV2CompletionConfirmation.teamId, team.id));
+  if (cancelledParticipant) {
+    const [cancelledConfirmation] = await db
+      .select({ id: questV2CompletionConfirmation.id })
+      .from(questV2CompletionConfirmation)
+      .where(
+        and(
+          eq(questV2CompletionConfirmation.questId, questId),
+          eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_CANCELLED'),
+          ownerConditions.length === 1 ? ownerConditions[0]! : or(...ownerConditions)
+        )
+      )
+      .limit(1);
+    if (!cancelledConfirmation) return { outcome: 'not-authorized' };
+  }
+  const rows = await db
+    .select(completionConfirmationFields)
+    .from(questV2CompletionConfirmation)
+    .where(
+      and(
+        eq(questV2CompletionConfirmation.questId, questId),
+        ownerConditions.length === 1 ? ownerConditions[0]! : or(...ownerConditions)
+      )
+    )
+    .orderBy(asc(questV2CompletionConfirmation.confirmedAt), asc(questV2CompletionConfirmation.id));
+  return rows
+    .sort(
+      (left, right) =>
+        Number(right.reviewStatus === 'COMPLETION_CONFIRMATION_PENDING') -
+          Number(left.reviewStatus === 'COMPLETION_CONFIRMATION_PENDING') ||
+        left.confirmedAt.getTime() - right.confirmedAt.getTime()
+    )
+    .map((row) =>
+      toCompletionConfirmationRecord(
+        row.confirmedByUserId === memberId ? row : { ...row, reviewReason: null }
+      )
+    );
+};
 
 type ReviewCommandInput = {
   principalId: string;
@@ -2060,6 +2310,73 @@ const reviewSubjectFor = async (
   };
 };
 
+const completionReviewSubjectFor = async (
+  transaction: QuestTransaction,
+  questId: string,
+  confirmation: QuestV2CompletionConfirmationRecord
+): Promise<ReviewSubject | undefined> => {
+  if (confirmation.workerId) {
+    const assignments = await transaction
+      .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+      .from(questAssignment)
+      .where(
+        and(
+          eq(questAssignment.questId, questId),
+          eq(questAssignment.workerId, confirmation.workerId),
+          ne(questAssignment.assignmentStatus, 'ASSIGNMENT_CANCELLED')
+        )
+      )
+      .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+      .for('update');
+    const assignment = assignments[0];
+    if (!assignment) return undefined;
+    return {
+      assignmentIds: assignments.map(({ id }) => id),
+      assignmentId: assignment.id,
+      workerId: assignment.workerId,
+      teamId: null,
+    };
+  }
+  if (!confirmation.teamId) return undefined;
+  const [team] = await transaction
+    .select({ leaderId: questCandidateTeamV2.leaderId })
+    .from(questCandidateTeamV2)
+    .where(
+      and(
+        eq(questCandidateTeamV2.id, confirmation.teamId),
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .limit(1)
+    .for('update');
+  if (!team) return undefined;
+  const assignments = await transaction
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .innerJoin(
+      questCandidateTeamV2Member,
+      eq(questCandidateTeamV2Member.memberId, questAssignment.workerId)
+    )
+    .where(
+      and(
+        eq(questAssignment.questId, questId),
+        eq(questCandidateTeamV2Member.teamId, confirmation.teamId),
+        ne(questAssignment.assignmentStatus, 'ASSIGNMENT_CANCELLED')
+      )
+    )
+    .orderBy(asc(questAssignment.createdAt), asc(questAssignment.id))
+    .for('update');
+  const leaderAssignment = assignments.find(({ workerId }) => workerId === team.leaderId);
+  if (!leaderAssignment || assignments.length === 0) return undefined;
+  return {
+    assignmentIds: assignments.map(({ id }) => id),
+    assignmentId: leaderAssignment.id,
+    workerId: team.leaderId,
+    teamId: confirmation.teamId,
+  };
+};
+
 const normalizedReviewReason = (
   decision: QuestV2ProofReviewDecision,
   reason: string | null
@@ -2124,6 +2441,354 @@ const recordAssignmentAudits = async (
       createdAt: now,
     });
   }
+};
+
+type CompletionReviewCommandInput = {
+  principalId: string;
+  actor: ReviewCommandActor;
+  operationScope: string;
+  questId: string;
+  completionConfirmationId: string;
+  decision: QuestV2CompletionConfirmationReviewDecision;
+  reason: string | null;
+  commandId: string;
+  requestHash: string;
+  now: Date;
+};
+
+const createCompletionConfirmationAdminReviewItem = async (
+  transaction: QuestTransaction,
+  input: {
+    actor: ReviewCommandActor;
+    questId: string;
+    confirmation: QuestV2CompletionConfirmationRecord;
+    subject: ReviewSubject;
+    hirerId: string;
+    reason: string;
+    now: Date;
+  }
+) => {
+  const [reviewItem] = await transaction
+    .insert(adminReviewItem)
+    .values({
+      questId: input.questId,
+      assignmentId: input.subject.assignmentId,
+      proofSubmissionId: null,
+      completionConfirmationId: input.confirmation.id,
+      hirerId: input.hirerId,
+      workerId: input.subject.workerId,
+      teamId: input.subject.teamId,
+      reason: input.reason,
+      evidenceReferences: [],
+      createdAt: input.now,
+    })
+    .returning({ id: adminReviewItem.id });
+  if (!reviewItem) throw new Error('Admin Review Item could not be created');
+  await recordAudit(transaction, {
+    ...auditActorFor(input.actor),
+    action: 'ADMIN_REVIEW_ITEM_CREATED',
+    resourceType: 'ADMIN_REVIEW_ITEM',
+    resourceId: reviewItem.id,
+    newValue: {
+      questId: input.questId,
+      assignmentId: input.subject.assignmentId,
+      completionConfirmationId: input.confirmation.id,
+      workerId: input.subject.workerId,
+      teamId: input.subject.teamId,
+      evidenceReferences: [],
+    },
+    reason: input.reason,
+    createdAt: input.now,
+  });
+};
+
+const reviewQuestV2CompletionConfirmationInTransaction = async (
+  transaction: QuestTransaction,
+  input: CompletionReviewCommandInput
+): Promise<QuestV2CompletionConfirmationReviewOutcome> => {
+  const current = await lockQuest(transaction, input.questId);
+  if (!current) return { outcome: 'not-found' };
+  const command = await runQuestCommand({
+    transaction,
+    identity: {
+      principalUserId: input.principalId,
+      operationScope: input.operationScope,
+      key: input.commandId,
+      requestHash: input.requestHash,
+      questId: input.questId,
+    },
+    now: input.now,
+    work: async ({
+      commandId,
+    }): Promise<
+      QuestCommandWork<QuestV2CompletionConfirmationReview, QuestV2ProofBusinessOutcomeCode>
+    > => {
+      if (input.actor.actorType === 'MEMBER' && current.hirerId !== input.actor.actorUserId) {
+        return { kind: 'rejected', rejection: 'hirer-not-allowed' };
+      }
+      if (current.proofRequired) return { kind: 'rejected', rejection: 'not-required' };
+      if (!current.v2Mode || !current.v2Participation) {
+        return { kind: 'rejected', rejection: 'not-v2-contract' };
+      }
+      const [row] = await transaction
+        .select(completionConfirmationFields)
+        .from(questV2CompletionConfirmation)
+        .where(
+          and(
+            eq(questV2CompletionConfirmation.id, input.completionConfirmationId),
+            eq(questV2CompletionConfirmation.questId, input.questId)
+          )
+        )
+        .limit(1)
+        .for('update');
+      if (!row) {
+        return { kind: 'rejected', rejection: 'completion-confirmation-not-found' };
+      }
+      if (row.reviewStatus !== 'COMPLETION_CONFIRMATION_PENDING') {
+        return {
+          kind: 'rejected',
+          rejection: 'completion-confirmation-review-not-pending',
+        };
+      }
+      const groupFcfs =
+        current.v2Mode === questV2Mode.firstComeFirstServed &&
+        current.v2Participation === questV2Participation.group;
+      if (
+        current.questState !== 'QUEST_IN_PROGRESS' &&
+        !(groupFcfs && current.questState === 'QUEST_FAILED')
+      ) {
+        return { kind: 'rejected', rejection: 'not-reviewable' };
+      }
+      if (!current.dueAt || row.confirmedAt.getTime() > current.dueAt.getTime()) {
+        return { kind: 'rejected', rejection: 'due-at-passed' };
+      }
+      const normalizedReason = completionReviewReason(input.decision, input.reason);
+      if ('outcome' in normalizedReason) {
+        return { kind: 'rejected', rejection: normalizedReason.outcome };
+      }
+      const pendingRecord = toCompletionConfirmationRecord(row);
+      const subject = await completionReviewSubjectFor(transaction, input.questId, pendingRecord);
+      if (!subject) {
+        return { kind: 'rejected', rejection: 'completion-confirmation-not-found' };
+      }
+      const allWorkerIds = await allQuestWorkerIds(transaction, input.questId);
+      const [updated] = await transaction
+        .update(questV2CompletionConfirmation)
+        .set({
+          reviewStatus: input.decision,
+          reviewReason: normalizedReason.reason,
+          reviewedAt: input.now,
+          reviewedBy: input.actor.actorType === 'MEMBER' ? 'HIRER' : 'AUTO_APPROVE',
+        })
+        .where(
+          and(
+            eq(questV2CompletionConfirmation.id, input.completionConfirmationId),
+            eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING')
+          )
+        )
+        .returning(completionConfirmationFields);
+      if (!updated) {
+        return {
+          kind: 'rejected',
+          rejection: 'completion-confirmation-review-not-pending',
+        };
+      }
+      const confirmation = toCompletionConfirmationRecord(updated);
+      await recordAudit(transaction, {
+        ...auditActorFor(input.actor),
+        action: 'COMPLETION_CONFIRMATION_REVIEWED',
+        resourceType: 'COMPLETION_CONFIRMATION',
+        resourceId: confirmation.id,
+        oldValue: { status: 'COMPLETION_CONFIRMATION_PENDING' },
+        newValue: { status: input.decision },
+        reason: normalizedReason.reason,
+        createdAt: input.now,
+      });
+
+      let questStatus = current.questState as QuestV2State;
+      let allocationPending = false;
+      let changedAssignmentIds: string[] = [];
+      if (input.decision === 'COMPLETION_CONFIRMATION_APPROVED') {
+        const settlement = await settleProofFreeQuestV2InTransaction(
+          transaction,
+          input.questId,
+          commandId,
+          input.now,
+          groupFcfs ? confirmation.workerId! : undefined,
+          input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
+        );
+        questStatus = settlement.questStatus as QuestV2State;
+        allocationPending = settlement.allocationPending === true;
+        changedAssignmentIds = groupFcfs ? [subject.assignmentId] : subject.assignmentIds;
+        await recordAssignmentAudits(
+          transaction,
+          input.actor,
+          changedAssignmentIds,
+          'ASSIGNMENT_COMPLETED',
+          input.now
+        );
+        await recordAudit(transaction, {
+          ...auditActorFor(input.actor),
+          action: allocationPending
+            ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+            : 'QUEST_REWARD_SETTLED',
+          resourceType: 'QUEST_REWARD',
+          resourceId: input.questId,
+          newValue: {
+            state: allocationPending
+              ? 'QUEST_TEAM_REWARD_ALLOCATION_PENDING'
+              : 'QUEST_REWARD_SETTLED',
+            assignmentIds: changedAssignmentIds,
+            paidSatang: settlement.paidSatang,
+          },
+          createdAt: input.now,
+        });
+      } else {
+        if (groupFcfs) {
+          const failure = await rejectProofFreeQuestV2CompletionInTransaction(
+            transaction,
+            input.questId,
+            [subject.assignmentId],
+            commandId,
+            input.now,
+            input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
+          );
+          questStatus = failure.questStatus as QuestV2State;
+          changedAssignmentIds = failure.incompleteAssignmentIds;
+        } else {
+          const failure = await failQuestV2InTransaction(
+            transaction,
+            input.questId,
+            subject.assignmentIds,
+            commandId,
+            input.now,
+            input.actor.actorType === 'MEMBER' ? input.actor.actorUserId : null
+          );
+          questStatus = failure.questStatus as QuestV2State;
+          changedAssignmentIds = failure.incompleteAssignmentIds;
+        }
+        await recordAssignmentAudits(
+          transaction,
+          input.actor,
+          changedAssignmentIds,
+          'ASSIGNMENT_INCOMPLETE',
+          input.now
+        );
+        await createCompletionConfirmationAdminReviewItem(transaction, {
+          actor: input.actor,
+          questId: input.questId,
+          confirmation,
+          subject,
+          hirerId: current.hirerId,
+          reason: normalizedReason.reason!,
+          now: input.now,
+        });
+      }
+
+      const participants = await proofParticipantIds(transaction, confirmation);
+      const closeReviewedParticipants =
+        groupFcfs && input.decision === 'COMPLETION_CONFIRMATION_NOT_APPROVED' ? participants : [];
+      await emitQuestUpdate(
+        transaction,
+        input.questId,
+        'COMPLETION_REVIEWED',
+        [current.hirerId, ...participants],
+        closeReviewedParticipants
+      );
+      await enqueueCompletionConfirmationPush(transaction, {
+        recipientMemberId: confirmation.confirmedByUserId,
+        questId: input.questId,
+        confirmationId: confirmation.id,
+        eventType: 'COMPLETION_REVIEWED',
+        decision: input.decision,
+        reviewedBy: confirmation.reviewedBy!,
+        now: input.now,
+      });
+
+      if (questStatus === 'QUEST_FAILED' && current.questState !== 'QUEST_FAILED') {
+        await emitQuestUpdate(
+          transaction,
+          input.questId,
+          'QUEST_FAILED',
+          [current.hirerId, ...allWorkerIds],
+          allWorkerIds
+        );
+        await emitQuestUpdate(transaction, input.questId, 'DISPUTE_WINDOW_OPENED', [
+          current.hirerId,
+          ...allWorkerIds,
+        ]);
+        await enqueueQuestFailedPush(transaction, {
+          recipientMemberIds: allWorkerIds,
+          questId: input.questId,
+          reason: 'COMPLETION_NOT_APPROVED',
+          now: input.now,
+        });
+      } else if (questStatus === 'QUEST_COMPLETED') {
+        await emitQuestUpdate(
+          transaction,
+          input.questId,
+          'QUEST_COMPLETED',
+          [current.hirerId, ...allWorkerIds],
+          allocationPending ? [] : allWorkerIds
+        );
+      }
+
+      const relatedMemberIds = changedAssignmentIds.length
+        ? (
+            await transaction
+              .select({ workerId: questAssignment.workerId })
+              .from(questAssignment)
+              .where(inArray(questAssignment.id, [...new Set(changedAssignmentIds)]))
+          ).map(({ workerId }) => workerId)
+        : [];
+      return {
+        kind: 'success',
+        result: { confirmation, questStatus },
+        resourceType: 'quest-v2-completion-confirmation',
+        resourceId: confirmation.id,
+        relatedMemberIds: [...new Set(relatedMemberIds)],
+      };
+    },
+    toSnapshot: completionConfirmationSnapshotFor,
+    fromSnapshot: completionConfirmationFromSnapshot,
+  });
+  if ('outcome' in command) return { outcome: command.outcome };
+  if (command.kind === 'success') return command.result;
+  return { outcome: command.rejection };
+};
+
+export const reviewQuestV2CompletionConfirmation = async (
+  memberId: string,
+  questId: string,
+  completionConfirmationId: string,
+  decision: QuestV2CompletionConfirmationReviewDecision,
+  reason: string | null,
+  rawCommandId: string,
+  now = new Date()
+): Promise<QuestV2CompletionConfirmationReviewOutcome> => {
+  const normalizedReason = reason?.trim() ?? null;
+  const requestHash = await sha256Json({
+    authenticatedMemberId: memberId,
+    operation: 'completion-review',
+    questId,
+    completionConfirmationId,
+    decision,
+    reason: normalizedReason,
+  });
+  return db.transaction((transaction) =>
+    reviewQuestV2CompletionConfirmationInTransaction(transaction, {
+      principalId: memberId,
+      actor: { actorType: 'MEMBER', actorUserId: memberId },
+      operationScope: questV2CompletionConfirmationReviewOperationScope,
+      questId,
+      completionConfirmationId,
+      decision,
+      reason,
+      commandId: rawCommandId,
+      requestHash,
+      now,
+    })
+  );
 };
 
 const reviewQuestV2ProofSubmissionInTransaction = async (
@@ -2611,11 +3276,14 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
     const assignmentIds = await dueQuestV2ProofFailureAssignmentIds(transaction, current, questId);
     if (assignmentIds.length === 0) return false;
     const workerIds = await failureRecipientWorkerIds(transaction, questId);
-    const pendingProofWorkerIds = await failedQuestPendingProofParticipantIds(
-      transaction,
-      questId,
-      current.dueAt
-    );
+    const [pendingProofWorkerIds, pendingConfirmationWorkerIds] = await Promise.all([
+      failedQuestPendingProofParticipantIds(transaction, questId, current.dueAt),
+      pendingCompletionConfirmationParticipantIds(transaction, questId, current.dueAt),
+    ]);
+    const pendingDecisionWorkerIds = new Set([
+      ...pendingProofWorkerIds,
+      ...pendingConfirmationWorkerIds,
+    ]);
     const failure = await failQuestV2InTransaction(
       transaction,
       questId,
@@ -2636,7 +3304,7 @@ export const failQuestV2AtDueAt = async (questId: string, now = new Date()): Pro
       questId,
       'QUEST_FAILED',
       [current.hirerId, ...workerIds],
-      workerIds.filter((workerId) => !pendingProofWorkerIds.includes(workerId))
+      workerIds.filter((workerId) => !pendingDecisionWorkerIds.has(workerId))
     );
     await emitQuestUpdate(transaction, questId, 'DISPUTE_WINDOW_OPENED', [
       current.hirerId,
@@ -2718,6 +3386,63 @@ export const autoApproveDueQuestV2Proofs = async (
       now,
     });
     if (!('outcome' in result) && !result.replayed) approved.push(candidate.proofSubmissionId);
+  }
+  return approved;
+};
+
+export const autoApproveDueQuestV2CompletionConfirmations = async (
+  now = new Date(),
+  limit = 100
+): Promise<string[]> => {
+  if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer');
+  const due = await db
+    .select({
+      completionConfirmationId: questV2CompletionConfirmation.id,
+      questId: questV2CompletionConfirmation.questId,
+      hirerId: quest.hirerId,
+    })
+    .from(questV2CompletionConfirmation)
+    .innerJoin(quest, eq(quest.id, questV2CompletionConfirmation.questId))
+    .where(
+      and(
+        eq(quest.apiVersion, questApiVersion.v2),
+        inArray(quest.questStatus, ['QUEST_IN_PROGRESS', 'QUEST_FAILED']),
+        eq(questV2CompletionConfirmation.reviewStatus, 'COMPLETION_CONFIRMATION_PENDING'),
+        lte(questV2CompletionConfirmation.reviewDeadlineAt, now)
+      )
+    )
+    .orderBy(
+      asc(questV2CompletionConfirmation.reviewDeadlineAt),
+      asc(questV2CompletionConfirmation.id)
+    )
+    .limit(limit);
+  const approved: string[] = [];
+  for (const candidate of due) {
+    const requestHash = await sha256Json({
+      authenticatedMemberId: candidate.hirerId,
+      operation: 'completion-auto-approval',
+      path: '/api/v2/quests/:questId/completion-confirmations/:completionConfirmationId/review',
+      questId: candidate.questId,
+      completionConfirmationId: candidate.completionConfirmationId,
+      body: { decision: 'COMPLETION_CONFIRMATION_APPROVED', reason: null },
+    });
+    const result = await db.transaction((transaction) =>
+      reviewQuestV2CompletionConfirmationInTransaction(transaction, {
+        principalId: candidate.hirerId,
+        actor: { actorType: 'SYSTEM' },
+        operationScope: questV2CompletionConfirmationAutoApprovalOperationScope,
+        questId: candidate.questId,
+        completionConfirmationId: candidate.completionConfirmationId,
+        decision: 'COMPLETION_CONFIRMATION_APPROVED',
+        reason: null,
+        commandId: `quest-v2-completion-auto-approval:${candidate.completionConfirmationId}`,
+        requestHash,
+        now,
+      })
+    );
+    if (!('outcome' in result) && !result.replayed) {
+      approved.push(candidate.completionConfirmationId);
+    }
   }
   return approved;
 };

@@ -56,25 +56,28 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 ## Completion and failure
 
 - A required submitter sends Proof Submission before `dueAt` when `proofRequired=true`. A proof-free required submitter confirms completion before `dueAt` (see [Proof Submission Contract](proof-submission-contract.md)).
-- The Hirer approves or does not approve each submitted Proof Submission.
+- The Hirer approves or does not approve each Proof Submission or proof-free Completion Confirmation.
 - If the Hirer has not decided 24 hours after a Proof Submission is sent, the Server records `PROOF_APPROVED`.
-- Approved or proof-free Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
+- If the Hirer has not decided 24 hours after a Completion Confirmation is created, the Server records `COMPLETION_CONFIRMATION_APPROVED`.
+- Approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
 - Approved or proof-free `GROUP + CANDIDATE` Team work opens a 24-hour Team Reward Allocation window after the Quest becomes `QUEST_COMPLETED`. The Team Leader assigns each teammate a percentage; the Leader receives the remainder. Teammate percentages cannot exceed 100% in total. If no allocation is submitted before the deadline, the Server applies an equal split. Every member's Assignment is completed when the work succeeds; payment waits for the allocation and then goes directly from Quest Escrow to each member's Earnings Balance.
-- Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
+- Non-approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE` and gives them no Reward.
 - A missing required Team Proof Submission or Team confirmation makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_INCOMPLETE`.
-- In `GROUP + FIRST_COME_FIRST_SERVED`, Hirer non-approval makes only the affected Assignment `ASSIGNMENT_INCOMPLETE`. The Quest keeps its State until every Worker has a final result (see [Quest Mode Matrix Contract](quest-mode-matrix-contract.md)). All other Quest modes keep the rule in the next bullet.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, Hirer non-approval makes only the affected Assignment `ASSIGNMENT_INCOMPLETE`. Other Active Workers can finish their work. The Quest becomes `QUEST_COMPLETED` when all Assignments have a final result and at least one Assignment is completed; otherwise it becomes `QUEST_FAILED` (see [Quest Mode Matrix Contract](quest-mode-matrix-contract.md)).
 - Hirer non-approval, a missing required submission, a missing proof-free confirmation, or a missing Start Work action at `dueAt` makes the Quest `QUEST_FAILED`.
 - Failure gives the affected Assignment `ASSIGNMENT_INCOMPLETE`. No Rework or second Proof Submission exists.
 - In a `GROUP` Quest, an Assignment that completed before another Assignment fails keeps its Quest Reward. When the Quest becomes `QUEST_FAILED`, it remains `QUEST_FAILED`.
-- In `GROUP + FIRST_COME_FIRST_SERVED`, a Quest with at least one `ASSIGNMENT_COMPLETED` Assignment and one `ASSIGNMENT_INCOMPLETE` Assignment ends as `QUEST_COMPLETED` when the Hirer did not approve only some Proof Submissions.
+- In `GROUP + FIRST_COME_FIRST_SERVED`, a Quest with at least one `ASSIGNMENT_COMPLETED` Assignment and one `ASSIGNMENT_INCOMPLETE` Assignment ends as `QUEST_COMPLETED` after every Worker has a final Proof Submission or Completion Confirmation decision.
 
 ## Cancellation settlement
 
-| Quest State at cancellation | Settlement result                                                                                                                                                     |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `QUEST_OPEN`                | Refund the Hirer 100% of Quest Escrow.                                                                                                                                |
-| `QUEST_ASSIGNED`            | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer. |
-| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool to the Team Leader. The Hirer receives no refund.           |
+| Quest State at cancellation | Settlement result                                                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `QUEST_OPEN`                | Refund the Hirer 100% of Quest Escrow.                                                                                                                                                                                                                                                                                              |
+| `QUEST_ASSIGNED`            | Pay 20% of the Worker Reward pool to Active Workers. For `GROUP + CANDIDATE`, pay the full 20% only to the Team Leader. Return 80% and the Platform Fee to the Hirer.                                                                                                                                                               |
+| `QUEST_IN_PROGRESS`         | Settle full Worker Rewards and the Platform Fee. For `GROUP + CANDIDATE`, pay the full Worker Reward pool to the Team Leader. The Hirer receives no refund. A Worker or Team with a pending proof-free Completion Confirmation receives no Reward for that confirmation; return its unsettled Reward and Platform Fee to the Hirer. |
+
+When the Hirer cancels or an Admin terminates a `QUEST_IN_PROGRESS` Quest, the Server changes each pending proof-free Completion Confirmation to `COMPLETION_CONFIRMATION_CANCELLED`. Cancellation is not a Hirer non-approval and does not create an Admin Review Item. Do not pay the Reward for the affected Worker or Team. Return that Worker's or Team's unsettled Reward and Platform Fee to the Hirer. Keep the normal cancellation settlement for other Active Workers and preserve any Reward already paid after an approved Completion Confirmation. Affected Members must refresh the Completion Confirmation list after cancellation or termination.
 
 An Active Worker cannot voluntarily leave or be replaced. The cancellation rules create the allowed departure transition.
 

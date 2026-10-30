@@ -38,6 +38,7 @@ import {
   pendingQuestV2UnderfilledQuestIds,
 } from '../v2/lifecycle';
 import {
+  autoApproveDueQuestV2CompletionConfirmations,
   autoApproveDueQuestV2Proofs,
   failDueAtQuestV2Proofs,
   retryQuestV2ProofUploadCleanup,
@@ -86,6 +87,7 @@ export type QuestLifecycleWorkerError = {
     | 'invitation-expiry'
     | 'edit-timeout'
     | 'auto-approval'
+    | 'completion-confirmation-auto-approval'
     | 'due-at-failure'
     | 'quest-image-cleanup'
     | 'quest-proof-upload-cleanup'
@@ -107,6 +109,7 @@ export type QuestLifecycleWorkerResult = {
   expiredInvitationIds: string[];
   autoAllocatedTeamRewardQuestIds: string[];
   autoApprovedProofIds: string[];
+  autoApprovedCompletionConfirmationIds: string[];
   errors: QuestLifecycleWorkerError[];
 };
 
@@ -624,6 +627,18 @@ export const runQuestLifecycleWorker = async (
     reportError(options.onError, error);
   }
 
+  let autoApprovedCompletionConfirmationIds: string[] = [];
+  try {
+    autoApprovedCompletionConfirmationIds = await autoApproveDueQuestV2CompletionConfirmations(
+      now,
+      limit
+    );
+  } catch (cause) {
+    const error = { operation: 'completion-confirmation-auto-approval' as const, cause };
+    errors.push(error);
+    reportError(options.onError, error);
+  }
+
   let failedQuestIds: string[] = [];
   try {
     failedQuestIds = await failDueAtQuestV2Proofs(now, limit);
@@ -715,6 +730,7 @@ export const runQuestLifecycleWorker = async (
     expiredInvitationIds,
     autoAllocatedTeamRewardQuestIds,
     autoApprovedProofIds,
+    autoApprovedCompletionConfirmationIds,
     errors,
   };
 };
