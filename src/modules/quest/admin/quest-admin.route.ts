@@ -47,7 +47,7 @@ export const adminQuestRoute = new Elysia({
       tags: ['Admin Quests'],
       summary: 'Get Quest detail for Admin review',
       description:
-        'Reads Quest facts, Hirer, Candidates, Workers, Assignments, Proof Submissions, Quest Images with temporary links, state timeline, linked Dispute Cases, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
+        'Reads Quest facts, Hirer, Candidates, Workers, Assignments, sent Proof Submissions with temporary evidence links, Quest Images with temporary links, state timeline, linked Dispute Cases, financial facts, edit history, and Admin Action history without secrets or unrelated Member data.',
 
       operationId: 'getAdminQuestDetail',
       security: betterAuthSecurity,

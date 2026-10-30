@@ -167,20 +167,26 @@ const adminQuestAssignmentSchema = t.Object({
 
 const adminQuestProofSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  apiVersion: t.Union([t.Literal('v1'), t.Literal('v2')]),
   worker: t.Nullable(adminQuestMemberSchema),
   team: t.Nullable(t.Object({ id: t.String({ format: 'uuid' }), name: t.String() })),
   submittedBy: adminQuestMemberSchema,
   content: t.String(),
+  description: t.Nullable(t.String()),
+  workerMessage: t.Nullable(t.String()),
   submissionStatus: t.String(),
   reviewNote: t.Nullable(t.String()),
   submittedAt: t.String({ format: 'date-time' }),
   reviewedAt: t.Nullable(t.String({ format: 'date-time' })),
+  reviewedBy: t.Nullable(t.Union([t.Literal('HIRER'), t.Literal('AUTO_APPROVE')])),
   files: t.Array(
     t.Object({
       fileId: t.String({ format: 'uuid' }),
       contentType: t.String(),
       sizeBytes: t.Integer({ minimum: 0 }),
       position: t.Integer({ minimum: 0 }),
+      url: t.String({ format: 'uri' }),
+      urlExpiresAt: t.String({ format: 'date-time' }),
     })
   ),
 });
