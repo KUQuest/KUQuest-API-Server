@@ -6,6 +6,7 @@ import { chatConversation, chatMembership } from '@/database/schema/work-chat.sc
 import {
   quest,
   questAssignment,
+  questCandidateApplicationV2,
   questCandidateTeamV2,
   questCandidateTeamV2SubmissionFile,
   questCommand,
@@ -18,7 +19,13 @@ import { notifyQuestUpdate } from '@/modules/quest/v2/realtime';
 import { detectQuestV2Underfilled } from '@/modules/quest/v2';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { fundTestWallet, releaseTestQuestEscrows } from '../wallet/wallet-test-fixtures';
-import { assignmentStatus, questStatus, startQuestWork } from '@/modules/quest/shared';
+import {
+  applicationStatus,
+  assignmentStatus,
+  moneyHoldDurationMs,
+  questStatus,
+  startQuestWork,
+} from '@/modules/quest/shared';
 
 import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 import { QuestWebSocketClient } from './quest-update-test-client';
@@ -244,6 +251,16 @@ const expectSocketClosedWithCode = async (connection: QuestUpdateTestConnection,
   const frame = await connection.client.nextFrame();
   expect(frame?.opcode).toBe(8);
   expect(frame?.payload.readUInt16BE(0)).toBe(code);
+};
+
+const questSocketCloseCode = async (port: number, questId: string, cookie: string) => {
+  const socket = await QuestWebSocketClient.connect(port, questId, cookie);
+  try {
+    const frame = await socket.nextFrame();
+    return frame?.opcode === 8 ? frame.payload.readUInt16BE(0) : undefined;
+  } finally {
+    socket.destroy();
+  }
 };
 
 const deleteWorkChatForQuests = async (ids: string[]) => {
@@ -1125,6 +1142,114 @@ describe('Quest v2 realtime updates', () => {
       expect(deniedWithoutHold).toBe(true);
     } finally {
       client.destroy();
+      await server.stop();
+    }
+  });
+
+  it('keeps an incomplete Worker live on a completed Quest until the money hold ends', async () => {
+    const [hirer, worker] = sessions;
+    if (!hirer || !worker) throw new Error('Test sessions are missing');
+    const questId = await createAssignedQuest([worker.id]);
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.completed,
+        moneyHoldStartedAt: new Date(Date.now() - moneyHoldDurationMs + 2_000),
+      })
+      .where(eq(quest.id, questId));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.incomplete })
+      .where(eq(questAssignment.questId, questId));
+
+    const connection = await connectToApp(questId, worker.cookie);
+    try {
+      await expectRealtimeSubscription(connection, questId);
+      await db.transaction(async (transaction) => {
+        await notifyQuestUpdate(transaction, {
+          questId,
+          recipientMemberIds: [hirer.id, worker.id],
+          changeType: 'QUEST_COMPLETED',
+        });
+        await notifyQuestUpdate(transaction, {
+          questId,
+          recipientMemberIds: [hirer.id, worker.id],
+          changeType: 'DISPUTE_WINDOW_OPENED',
+        });
+      });
+      for (const changeType of ['QUEST_COMPLETED', 'DISPUTE_WINDOW_OPENED']) {
+        expect(JSON.parse((await connection.client.nextText())!)).toEqual({
+          type: 'QUEST_UPDATED',
+          version: 1,
+          questId,
+          changeType,
+        });
+      }
+
+      await expectSocketClosedWithCode(connection, 1000);
+      expect(
+        await questSocketCloseCode(connection.server.server!.port!, questId, worker.cookie)
+      ).toBe(4403);
+    } finally {
+      connection.client.destroy();
+      await connection.server.stop();
+    }
+  });
+
+  it('refuses an incomplete Worker on a completed Quest after the money hold ended', async () => {
+    const [, worker] = sessions;
+    if (!worker) throw new Error('Test sessions are missing');
+    const questId = await createAssignedQuest([worker.id]);
+    await db
+      .update(quest)
+      .set({
+        questStatus: questStatus.completed,
+        moneyHoldStartedAt: new Date(Date.now() - moneyHoldDurationMs - 60_000),
+      })
+      .where(eq(quest.id, questId));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.incomplete })
+      .where(eq(questAssignment.questId, questId));
+
+    const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
+    try {
+      expect(await questSocketCloseCode(server.server!.port!, questId, worker.cookie)).toBe(4403);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('refuses other former Workers and non-participants on a completed Quest with a money hold', async () => {
+    const [hirer, worker, otherWorker, outsider] = sessions;
+    if (!hirer || !worker || !otherWorker || !outsider)
+      throw new Error('Test sessions are missing');
+    const questId = await createAssignedQuest([worker.id]);
+    await db
+      .update(quest)
+      .set({ questStatus: questStatus.completed, moneyHoldStartedAt: new Date() })
+      .where(eq(quest.id, questId));
+    await db
+      .update(questAssignment)
+      .set({ assignmentStatus: assignmentStatus.cancelled })
+      .where(eq(questAssignment.questId, questId));
+    await db.insert(questCandidateApplicationV2).values({
+      questId,
+      memberId: otherWorker.id,
+      state: applicationStatus.rejected,
+    });
+
+    const server = createApp().listen({ hostname: '127.0.0.1', port: 0 });
+    try {
+      expect(
+        await questSocketCloseCode(server.server!.port!, questId, hirer.cookie)
+      ).toBeUndefined();
+      expect(await questSocketCloseCode(server.server!.port!, questId, worker.cookie)).toBe(4403);
+      expect(await questSocketCloseCode(server.server!.port!, questId, otherWorker.cookie)).toBe(
+        4403
+      );
+      expect(await questSocketCloseCode(server.server!.port!, questId, outsider.cookie)).toBe(4403);
+    } finally {
       await server.stop();
     }
   });
