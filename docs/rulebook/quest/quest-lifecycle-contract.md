@@ -57,7 +57,7 @@ At `startTime`, an underfilled `GROUP + FIRST_COME_FIRST_SERVED` Quest has fewer
 
 - A required submitter sends Proof Submission before `dueAt` when `proofRequired=true`. A proof-free required submitter confirms completion before `dueAt` (see [Proof Submission Contract](proof-submission-contract.md)).
 - The Hirer approves or does not approve each Proof Submission or proof-free Completion Confirmation.
-- If the Hirer has not decided 24 hours after a Proof Submission is sent, the Server records `PROOF_APPROVED`.
+- If the Hirer has not decided by a Proof Submission's `reviewDeadlineAt`, the Server records `PROOF_APPROVED`. The deadline is the later of the Quest `dueAt` and 24 hours after the Worker sends the Proof Submission (`submittedAt`).
 - If the Hirer has not decided 24 hours after a Completion Confirmation is created, the Server records `COMPLETION_CONFIRMATION_APPROVED`.
 - Approved Team work makes every Active Worker Assignment in a `GROUP + CANDIDATE` Quest `ASSIGNMENT_COMPLETED`.
 - Approved or proof-free `GROUP + CANDIDATE` Team work opens a 24-hour Team Reward Allocation window after the Quest becomes `QUEST_COMPLETED`. The Team Leader assigns each teammate a percentage; the Leader receives the remainder. Teammate percentages cannot exceed 100% in total. If no allocation is submitted before the deadline, the Server applies an equal split. Every member's Assignment is completed when the work succeeds; payment waits for the allocation and then goes directly from Quest Escrow to each member's Earnings Balance.

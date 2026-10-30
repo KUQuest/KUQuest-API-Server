@@ -445,7 +445,7 @@ Failure and Dispute change types fire once per transition:
 | changeType              | When it fires                                                                                                                                                                                                                                                                                   | Who gets it                     |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                                                                                                                                                        | Hirer and the submitting Worker |
-| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                                                                                                                                                              | Hirer and the submitting Worker |
+| `PROOF_AUTO_APPROVED`   | The Proof review deadline arrived and the Server approved the Proof.                                                                                                                                                                                                                            | Hirer and the submitting Worker |
 | `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure. In GROUP + FIRST_COME_FIRST_SERVED, a not-approved Proof fails the Quest only when no Worker completed and no Worker is still Active.                                               | Hirer and the Workers           |
 | `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. A GROUP + FIRST_COME_FIRST_SERVED Quest that completes with a not-approved Worker also sends it right after `QUEST_COMPLETED`, to the Hirer, the Workers who were Active, and every not-approved Worker. The 1-day self-file window starts. | Hirer and the Workers           |
 | `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees that the hold start + 1 day has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time.                                                                                                                       | Hirer and the Workers           |
@@ -2486,12 +2486,12 @@ Other permitted viewers can receive SUMMARY.
 
 Review fields:
 
-| Field            | Meaning                                                                                                                                                                                                                                                     |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| reviewDeadlineAt | Non-null only while status is PROOF_PENDING. It is the exact instant the Server auto-approves: `submittedAt + 24 hours`. A sent Proof is locked, so it never moves. Visible to Hirer and Worker, also in SUMMARY rows. Null for drafts and reviewed Proofs. |
-| reviewedBy       | `HIRER`, `AUTO_APPROVE`, or null before review.                                                                                                                                                                                                             |
-| reviewedAt       | Time of the review or auto-approval, or null.                                                                                                                                                                                                               |
-| reviewReason     | The Hirer's reason for PROOF_NOT_APPROVED. Only FULL rows carry it, so only the submitting Worker (or Team) and the Hirer read it; SUMMARY rows always have null.                                                                                           |
+| Field            | Meaning                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| reviewDeadlineAt | Non-null only while status is PROOF_PENDING. It is the exact instant the Server auto-approves: the later of Quest `dueAt` and `submittedAt + 24 hours`. A sent Proof is locked and Quest `dueAt` cannot change after assignment, so this deadline does not move. Visible to Hirer and Worker, also in SUMMARY rows. Null for drafts and reviewed Proofs. |
+| reviewedBy       | `HIRER`, `AUTO_APPROVE`, or null before review.                                                                                                                                                                                                                                                                                                          |
+| reviewedAt       | Time of the review or auto-approval, or null.                                                                                                                                                                                                                                                                                                            |
+| reviewReason     | The Hirer's reason for PROOF_NOT_APPROVED. Only FULL rows carry it, so only the submitting Worker (or Team) and the Hirer read it; SUMMARY rows always have null.                                                                                                                                                                                        |
 
 ### 12.2 Create a Proof Draft
 
@@ -2715,7 +2715,8 @@ still send Proof until `dueAt`. When the last Active Worker has a result, the
 Quest becomes QUEST_COMPLETED if one Worker is ASSIGNMENT_COMPLETED, otherwise
 QUEST_FAILED. In every other mode, non-approval changes the Quest to
 QUEST_FAILED.
-The system can auto-approve a pending Proof after 24 hours.
+The Server auto-approves a pending Proof at `reviewDeadlineAt`, the later of
+Quest `dueAt` and 24 hours after `submittedAt`.
 
 Errors include:
 
