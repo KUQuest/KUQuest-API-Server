@@ -106,6 +106,7 @@ export const adminDisputeRoute = new Elysia({
       tags: ['Admin Disputes'],
       summary: 'Dismiss or resolve a Dispute Case',
       description:
+        'An Admin must decide within seven days after the Dispute Case is created. At the deadline, the system dismisses a pending Case and makes no settlement. An Admin decision at or after the deadline returns 409. ' +
         'DISPUTE_CASE_DISMISSED reasonCode is DISPUTE_INSUFFICIENT_EVIDENCE, DISPUTE_QUEST_RECORD_DOES_NOT_SUPPORT_CLAIM, DISPUTE_NO_UNFAIR_SETTLEMENT_FOUND, or DISPUTE_WORKER_ALREADY_COMPENSATED. ' +
         'DISPUTE_CASE_RESOLVED reasonCode is DISPUTE_VALID_PROOF_NOT_APPROVED, DISPUTE_WORKER_MET_QUEST_CONDITION, or DISPUTE_PARTIAL_WORK_EARNED_REWARD. Wallet owns the balanced financial settlement. Each decision may include an optional Admin-only decisionReasonText of up to 200 characters. The note is stored on the immutable Admin Action and does not replace reasonCode.',
       operationId: 'resolveAdminDispute',
