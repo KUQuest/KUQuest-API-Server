@@ -2163,6 +2163,18 @@ describe('Admin Dispute API', () => {
         canFile: true,
         windowEndsAt: new Date(now.getTime() + 24 * 60 * 60 * 1000),
       });
+      // Worker B was approved and already received the Reward: B has nothing to dispute.
+      expect(await readQuestDisputeSummary(workerB, questId)).toMatchObject({ canFile: false });
+      await expect(
+        db.transaction((transaction) =>
+          createAdminDisputeCaseInTransaction(transaction, {
+            questId,
+            filerUserId: workerB,
+            category: 'PROOF_REVIEW',
+            submittedDetail: 'I was paid but I file anyway.',
+          })
+        )
+      ).rejects.toMatchObject({ code: 'DISPUTE_CASE_ASSIGNMENT_COMPLETED' });
 
       const disputeCase = await db.transaction((transaction) =>
         createAdminDisputeCaseInTransaction(transaction, {
@@ -2172,6 +2184,28 @@ describe('Admin Dispute API', () => {
           submittedDetail: 'The submitted Proof meets the Quest Condition.',
         })
       );
+      // An Admin cannot pay the dispute to the Worker who already received the Reward.
+      const paidWorkerResponse = await adminRequest(
+        `/api/v1/admin/disputes/${disputeCase.id}/resolve`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': `dispute-group-fcfs-paid-${disputeCase.id}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'DISPUTE_CASE_RESOLVED',
+            reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED',
+            workerId: workerB,
+            amountSatang: 1_000,
+          }),
+        }
+      );
+      expect(paidWorkerResponse.status).toBe(409);
+      expect(await paidWorkerResponse.json()).toMatchObject({
+        error: { code: 'DISPUTE_CASE_ASSIGNMENT_COMPLETED' },
+      });
       const response = await adminRequest(`/api/v1/admin/disputes/${disputeCase.id}/resolve`, {
         method: 'POST',
         headers: {
