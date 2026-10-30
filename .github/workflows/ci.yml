@@ -113,31 +113,77 @@ jobs:
           git cat-file -e "$MIGRATION_BASE^{commit}"
           printf 'MIGRATION_BASE_REF=%s\n' "$MIGRATION_BASE" >> "$GITHUB_ENV"
 
-      # Tests read and write real tables, so they need a migrated database. They use a
-      # database of their own to leave the one below pristine, which is what lets the
-      # production image still prove it can apply the whole chain from empty.
-      - name: Create the test database
-        run: |
-          docker run \
-            --rm \
-            --network host \
-            --env PGPASSWORD=kuquest-ci-only \
-            postgres:17-alpine \
-            psql \
-            --host localhost \
-            --username kuquest \
-            --dbname kuquest \
-            --command 'CREATE DATABASE kuquest_test;'
-
-      - name: Apply migrations to the test database
+      # CI test data does not need to survive a crash, so the tests do not wait for disk writes.
+      - name: Remove PostgreSQL durability waits
         env:
-          DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest_test
-        run: bun run db:migrate
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec "$POSTGRES_CONTAINER" psql --username kuquest --dbname kuquest \
+            --command 'ALTER SYSTEM SET fsync = off' \
+            --command 'ALTER SYSTEM SET synchronous_commit = off' \
+            --command 'ALTER SYSTEM SET full_page_writes = off' \
+            --command 'SELECT pg_reload_conf()'
 
       - name: Run validation
-        env:
-          DATABASE_URL: postgresql://kuquest:kuquest-ci-only@localhost:5432/kuquest_test
-        run: bun run check
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          bun run db:check || exit 1
+
+          names=()
+          pids=()
+          start() {
+            local name=$1
+            shift
+            "$@" >"$RUNNER_TEMP/$name.log" 2>&1 &
+            names+=("$name")
+            pids+=("$!")
+          }
+
+          run_tests() {
+            cd "$1" && xargs -a "$2" bun test
+          }
+
+          start lint bun run lint
+          start format bun run format:check
+          start typecheck bun run typecheck
+
+          # tests/preload.ts names the test database after the current folder, and it keeps the
+          # pristine migration database below untouched. Each group gets its own folder, so each
+          # group gets its own database. Largest files first gives groups of a similar size.
+          groups=3
+          find . \( -path ./node_modules -o -path ./.git \) -prune -o -type f \
+            -regextype posix-extended -regex '.*[._](test|spec)\.(ts|tsx|js|jsx)' -printf '%s %p\n' |
+            sort -k1,1rn -k2 |
+            cut -d' ' -f2- >"$RUNNER_TEMP/test-files"
+          for group in $(seq 1 "$groups"); do
+            folder="$RUNNER_TEMP/tests_$group"
+            mkdir "$folder"
+            cp -al . "$folder/"
+            awk -v groups="$groups" -v group="$group" 'NR % groups == group % groups' \
+              "$RUNNER_TEMP/test-files" >"$RUNNER_TEMP/test-files-$group"
+            start "test-$group" run_tests "$folder" "$RUNNER_TEMP/test-files-$group"
+          done
+
+          status=0
+          for index in "${!pids[@]}"; do
+            name=${names[$index]}
+            result=passed
+            if ! wait "${pids[$index]}"; then
+              result=FAILED
+              status=1
+            fi
+            echo "::group::$name $result"
+            cat "$RUNNER_TEMP/$name.log"
+            echo '::endgroup::'
+            if [ "$result" = FAILED ]; then
+              echo "::error::$name failed"
+            fi
+          done
+          [ "$status" -eq 0 ] || exit "$status"
+
+          bun run build
 
       - name: Build production image
         run: docker build --tag kuquest-api:ci .
