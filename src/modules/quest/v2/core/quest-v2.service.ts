@@ -3252,11 +3252,11 @@ export const getQuestV2ParticipationDetail = async (
           : [];
       const candidateTeamAllocation =
         participationRow.v2Mode === 'CANDIDATE' && participationRow.v2Participation === 'GROUP';
-      const pending =
-        participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' &&
-        (candidateTeamAllocation
-          ? teamAllocation?.status === 'PENDING' || (teamAllocation?.rewardSatang ?? 0) > 0
-          : true);
+      const pending = candidateTeamAllocation
+        ? (participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED' ||
+            participationRow.assignmentStatus === 'ASSIGNMENT_CANCELLED') &&
+          (teamAllocation?.status === 'PENDING' || (teamAllocation?.rewardSatang ?? 0) > 0)
+        : participationRow.assignmentStatus === 'ASSIGNMENT_COMPLETED';
       workerSettlement = {
         status: pending ? 'PENDING' : 'NO_PAYMENT',
         amountSatang: pending ? null : 0,

@@ -1,3 +1,4 @@
+import { settleDueQuestV2RewardAllocation } from '@/modules/quest/v2/reward-allocation';
 import { app } from '@/app';
 import { db, sql as postgresSql } from '@/database/client';
 import { adminReviewItem } from '@/database/schema/admin.schema';
@@ -2509,6 +2510,9 @@ describe('Quest API v1 to v2 migration verification', () => {
         paidSatang: expectedPaid,
         refundedSatang: testCase.status === 'QUEST_ASSIGNED' ? escrowSatang - expectedPaid : 0,
       });
+      if (leaderId) {
+        await settleDueQuestV2RewardAllocation(questId, new Date(Date.now() + 25 * 60 * 60 * 1000));
+      }
 
       const escrow = await readTestQuestEscrow({
         ownerUserId: hirer.id,
@@ -2526,7 +2530,9 @@ describe('Quest API v1 to v2 migration verification', () => {
         settlements.reduce((total, settlement) => total + settlement.platformFeeSatang, 0)
       ).toBe(testCase.status === 'QUEST_IN_PROGRESS' ? platformFeeSatang * testCase.headcount : 0);
       if (leaderId) {
-        expect(settlements.every(({ recipientUserId }) => recipientUserId === leaderId)).toBe(true);
+        expect(new Set(settlements.map(({ recipientUserId }) => recipientUserId))).toEqual(
+          new Set(testCase.workerIds)
+        );
       }
       expect(
         await db

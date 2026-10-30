@@ -65,7 +65,7 @@ export const getQuestV2RewardAllocation = async (
   if (
     current.mode !== 'CANDIDATE' ||
     current.participation !== 'GROUP' ||
-    current.state !== 'QUEST_COMPLETED'
+    (current.state !== 'QUEST_COMPLETED' && current.state !== 'QUEST_CANCELLED')
   ) {
     return { outcome: 'not-ready' };
   }
