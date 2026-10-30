@@ -4,7 +4,11 @@ export type ApiSuccess<T = undefined> = T extends undefined
 
 export type ApiError = {
   success: false;
-  error: { code: string; message: string };
+  error: {
+    code: string;
+    message: string;
+    memberBan?: { permanent: boolean; bannedUntil?: string };
+  };
 };
 
 export type ApiResponse<T = undefined> = ApiSuccess<T> | ApiError;

@@ -10,6 +10,12 @@ export const apiErrorSchema = t.Object({
   error: t.Object({
     code: t.String(),
     message: t.String(),
+    memberBan: t.Optional(
+      t.Object({
+        permanent: t.Boolean(),
+        bannedUntil: t.Optional(t.String({ format: 'date-time' })),
+      })
+    ),
   }),
 });
 

@@ -90,3 +90,8 @@ Fully automatic system evaluation (not Admin-triggered):
 - `authUser.bannedUntil` (nullable timestamp): Projected later expiry of temporary bans from both ladders for O(1) auth guard evaluation.
 - `authUser.redFlagExpiresAt` (nullable timestamp): Projected Red Flag expiry.
 - `memberPenaltyRecord` (immutable audit table): Source of truth for penalties, recording Member, ladder (`MISCONDUCT` | `REVIEW`), source (`REPORT_CASE`, `CONDUCT_REPORT`, `REVIEW_AVERAGE`, or direct Admin action), sequence number, result, actor, reason code, optional Admin note, timestamp, and nullable reversal and recalculation links.
+
+## 4. Member-facing status
+
+- `GET /api/v1/profile/penalty-status` returns the Member's own strike count and next result for each ladder, and `redFlagExpiresAt` when a Red Flag is active. The strike count excludes `PENALTY_EXEMPT` rows, reversed rows, and Admin-added rows.
+- A `403 MEMBER_BANNED` response includes `memberBan` with `permanent` and `bannedUntil`, on sign-in and on an existing session.

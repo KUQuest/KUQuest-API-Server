@@ -1,4 +1,4 @@
-import { readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
+import { describeMemberBan, readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
 import { apiError } from '@/shared/api-response';
 
 import { Elysia } from 'elysia';
@@ -12,7 +12,11 @@ export const memberBanGuard = new Elysia({ name: 'member-ban-guard' }).onBeforeH
     const { session, status } = context as typeof context & { session: AuthenticatedSession };
     const restriction = await readMemberPenaltyRestriction(session.user.id);
     if (restriction.banned) {
-      return status(403, apiError('MEMBER_BANNED', 'This Member is banned.'));
+      const error = apiError('MEMBER_BANNED', 'This Member is banned.');
+      return status(403, {
+        ...error,
+        error: { ...error.error, memberBan: describeMemberBan(restriction) },
+      });
     }
   }
 );

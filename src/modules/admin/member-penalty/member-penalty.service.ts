@@ -122,8 +122,19 @@ const activeOriginalRecords = (records: MemberPenaltyRow[]): MemberPenaltyRow[] 
   return originalRecords(records).filter((record) => !reversed.has(record.id));
 };
 
+const misconductStrikeCount = (records: MemberPenaltyRow[]): number =>
+  activeOriginalRecords(records).filter(
+    (record) =>
+      record.ladder === 'MISCONDUCT' &&
+      (record.source === 'REPORT_CASE' || record.source === 'CONDUCT_REPORT') &&
+      record.result !== 'PENALTY_EXEMPT'
+  ).length;
+
+const reviewStrikeCount = (records: MemberPenaltyRow[]): number =>
+  activeOriginalRecords(records).filter((record) => record.ladder === 'REVIEW').length;
+
 const readMemberRecords = async (
-  transaction: MemberPenaltyTransaction,
+  transaction: Pick<MemberPenaltyTransaction, 'select'>,
   memberId: string
 ): Promise<MemberPenaltyRow[]> =>
   transaction
@@ -264,13 +275,17 @@ const confirmedMisconductRecords = (records: MemberPenaltyRow[], memberCreatedAt
       record.createdAt >= memberCreatedAt
   );
 
-const misconductResult = (strikeCount: number): MemberPenaltyResult => {
+const misconductResult = (
+  strikeCount: number
+): 'PENALTY_RED_FLAG' | 'PENALTY_TEMPORARY_BAN_7_DAYS' | 'PENALTY_PERMANENT_BAN' => {
   if (strikeCount === 1) return 'PENALTY_RED_FLAG';
   if (strikeCount === 2) return 'PENALTY_TEMPORARY_BAN_7_DAYS';
   return 'PENALTY_PERMANENT_BAN';
 };
 
-const reviewResult = (strikeCount: number): MemberPenaltyResult =>
+const reviewResult = (
+  strikeCount: number
+): 'PENALTY_TEMPORARY_BAN_7_DAYS' | 'PENALTY_TEMPORARY_BAN_1_MONTH' | 'PENALTY_PERMANENT_BAN' =>
   strikeCount === 1
     ? 'PENALTY_TEMPORARY_BAN_7_DAYS'
     : strikeCount === 2
@@ -719,12 +734,7 @@ export const recordMemberConfirmedViolationInTransaction = async (
   const confirmed = confirmedMisconductRecords(records, member.createdAt);
   const reportCaseExemptionUsed = confirmed.some((record) => record.source === 'REPORT_CASE');
   const exemptionApplies = input.source === 'REPORT_CASE' && !reportCaseExemptionUsed;
-  const strikeCount = activeOriginalRecords(records).filter(
-    (record) =>
-      record.ladder === 'MISCONDUCT' &&
-      (record.source === 'REPORT_CASE' || record.source === 'CONDUCT_REPORT') &&
-      record.result !== 'PENALTY_EXEMPT'
-  ).length;
+  const strikeCount = misconductStrikeCount(records);
   const result = exemptionApplies ? 'PENALTY_EXEMPT' : misconductResult(strikeCount + 1);
 
   const [created] = await transaction
@@ -839,9 +849,7 @@ export const recordReviewAveragePenaltyInTransaction = async (
   }
 
   const records = await readMemberRecords(transaction, input.memberId);
-  const strikeCount = activeOriginalRecords(records).filter(
-    (record) => record.ladder === 'REVIEW'
-  ).length;
+  const strikeCount = reviewStrikeCount(records);
   const result: MemberPenaltyResult =
     strikeCount === 0
       ? 'PENALTY_TEMPORARY_BAN_7_DAYS'
@@ -975,6 +983,31 @@ export const readMemberPenaltyRestriction = async (
   };
 };
 
+const MEMBER_PENALTY_LADDER_LENGTH = 3;
+
+export const readMemberPenaltyStatus = async (memberId: string, now = new Date()) => {
+  const [records, restriction] = await Promise.all([
+    readMemberRecords(db, memberId),
+    readMemberPenaltyRestriction(memberId, now),
+  ]);
+  const misconductStrikes = misconductStrikeCount(records);
+  const reviewStrikes = reviewStrikeCount(records);
+
+  return {
+    misconduct: {
+      strikeCount: misconductStrikes,
+      ladderLength: MEMBER_PENALTY_LADDER_LENGTH,
+      nextResult: misconductResult(misconductStrikes + 1),
+    },
+    review: {
+      strikeCount: reviewStrikes,
+      ladderLength: MEMBER_PENALTY_LADDER_LENGTH,
+      nextResult: reviewResult(reviewStrikes + 1),
+    },
+    redFlagExpiresAt: restriction.redFlagExpiresAt,
+  };
+};
+
 export const isMemberRedFlagged = async (memberId: string, now = new Date()): Promise<boolean> => {
   const [member] = await db
     .select({ redFlagExpiresAt: authUser.redFlagExpiresAt })
@@ -1012,6 +1045,11 @@ export const hasRedFlaggedMemberInTransaction = async (
 
 export const isRedFlagActive = (expiresAt: Date | null, now = new Date()): boolean =>
   expiresAt !== null && expiresAt > now;
+
+export const describeMemberBan = (restriction: MemberPenaltyRestriction) => ({
+  permanent: restriction.permanentlyBanned,
+  bannedUntil: restriction.bannedUntil?.toISOString(),
+});
 
 export const isMemberBanned = async (memberId: string, now = new Date()): Promise<boolean> =>
   (await readMemberPenaltyRestriction(memberId, now)).banned;

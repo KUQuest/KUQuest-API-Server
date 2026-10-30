@@ -3,7 +3,7 @@ import { portfolioItemSchema } from '@/modules/portfolio/portfolio.schema';
 import { workExperienceSchema } from '@/modules/work-experience/work-experience.schema';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 
-import { t } from 'elysia';
+import { t, type TSchema } from 'elysia';
 
 export const avatarUploadSchema = t.Object(
   {
@@ -98,6 +98,34 @@ export const reputationResponseSchema = t.Object({
       count: t.Integer({ minimum: 0 }),
       distribution: ratingDistributionSchema,
     }),
+  }),
+});
+
+const penaltyLadderStatusSchema = <T extends TSchema>(nextResult: T) =>
+  t.Object({
+    strikeCount: t.Integer({ minimum: 0 }),
+    ladderLength: t.Integer({ minimum: 1 }),
+    nextResult,
+  });
+
+export const penaltyStatusResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    misconduct: penaltyLadderStatusSchema(
+      t.Union([
+        t.Literal('PENALTY_RED_FLAG'),
+        t.Literal('PENALTY_TEMPORARY_BAN_7_DAYS'),
+        t.Literal('PENALTY_PERMANENT_BAN'),
+      ])
+    ),
+    review: penaltyLadderStatusSchema(
+      t.Union([
+        t.Literal('PENALTY_TEMPORARY_BAN_7_DAYS'),
+        t.Literal('PENALTY_TEMPORARY_BAN_1_MONTH'),
+        t.Literal('PENALTY_PERMANENT_BAN'),
+      ])
+    ),
+    redFlagExpiresAt: t.Nullable(t.String({ format: 'date-time' })),
   }),
 });
 
