@@ -61,7 +61,7 @@ export const questProofV2Route = new Elysia({
       tags: ['Quest Proof v2'],
       summary: 'Create a v2 Proof Submission Draft',
       description:
-        'Creates an unsent Proof Submission Draft for the required submitter of an in-progress v2 Quest. Each image must be at most 10 MB and 25 megapixels; larger images return 422 PROOF_FILE_DIMENSIONS_TOO_LARGE.',
+        'Creates an unsent Proof Submission Draft for the required submitter of an in-progress v2 Quest. The create replaces the submitter’s own unsent Draft; after send it returns 409 PROOF_SUBMISSION_ALREADY_EXISTS. Each image must be at most 10 MB and 25 megapixels; larger images return 422 PROOF_FILE_DIMENSIONS_TOO_LARGE.',
       operationId: 'createQuestV2ProofSubmission',
       security: betterAuthSecurity,
     },
@@ -157,7 +157,7 @@ export const questProofV2Route = new Elysia({
         tags: ['Quest Proof v2'],
         summary: 'Review a v2 Proof Submission',
         description:
-          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission.',
+          'Records the Hirer’s first final approval or non-approval decision for a sent Proof Submission. Non-approval makes the Assignment ASSIGNMENT_INCOMPLETE. In GROUP + FIRST_COME_FIRST_SERVED, `questStatus` stays QUEST_IN_PROGRESS while another Worker is Active; when the last Active Worker has a result, the Quest becomes QUEST_COMPLETED if one Worker completed, otherwise QUEST_FAILED. In every other mode, non-approval makes the Quest QUEST_FAILED.',
         operationId: 'reviewQuestV2ProofSubmission',
         security: betterAuthSecurity,
       },

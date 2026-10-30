@@ -3,8 +3,10 @@ import { memberPenaltyRecord } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { quest, review } from '@/database/schema/quest.schema';
 import { walletStatusHistory, walletWallet } from '@/database/schema/wallet.schema';
+import { listAdminMemberPenaltyHistory } from '@/modules/admin/admin-member.service';
 import {
   recordMemberConfirmedViolationInTransaction,
+  removeAdminMemberPenalty,
   recordReviewAveragePenaltyInTransaction,
   reverseReportCaseViolationInTransaction,
 } from '@/modules/admin/member-penalty';
@@ -318,6 +320,70 @@ describe('Member Penalty persistence', () => {
         throw rollback;
       })
     ).rejects.toBe(rollback);
+  });
+
+  it('counts replacement strikes as effective after a Remove recalculation', async () => {
+    const memberId = randomUUID();
+    const adminId = randomUUID();
+    const now = new Date('2026-09-24T00:00:00.000Z');
+
+    try {
+      await db.insert(authUser).values({
+        id: memberId,
+        email: `${memberId}@ku.th`,
+        firstName: 'Penalty',
+        lastName: 'Member',
+        createdAt: new Date('2020-01-01T00:00:00.000Z'),
+      });
+      await db.insert(authAdmin).values({
+        id: adminId,
+        email: `${adminId}@example.com`,
+        firstName: 'Penalty',
+        lastName: 'Admin',
+      });
+      await db.transaction(async (transaction) => {
+        for (const offset of [0, 1]) {
+          await recordMemberConfirmedViolationInTransaction(transaction, {
+            memberId,
+            source: 'CONDUCT_REPORT',
+            sourceId: randomUUID(),
+            actorAdminId: adminId,
+            reasonCode: 'POLICY_REVIEW',
+            now: new Date(now.getTime() + offset * 1000),
+          });
+        }
+      });
+
+      const [first] = await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.memberId, memberId))
+        .orderBy(asc(memberPenaltyRecord.createdAt))
+        .limit(1);
+      const before = await db.$count(
+        memberPenaltyRecord,
+        eq(memberPenaltyRecord.memberId, memberId)
+      );
+
+      await removeAdminMemberPenalty({
+        memberId,
+        adminId,
+        requestKey: randomUUID(),
+        expectedVersionToken: before,
+        recordId: first!.id,
+        reasonCode: 'MEMBER_PENALTY_ADMIN_ERROR',
+        now: new Date(now.getTime() + 10_000),
+      });
+
+      const history = await listAdminMemberPenaltyHistory(memberId, { limit: 50 });
+      const replacements = history!.items.filter((item) => item.recalculatedFrom);
+      expect(replacements).toHaveLength(1);
+      expect(replacements.every((item) => item.isEffectiveActiveMisconductPenalty)).toBe(true);
+      expect(history!.effectiveActiveMisconductPenaltyCount).toBe(1);
+    } finally {
+      // Skip deleting the Member: Remove creates a Wallet, and Wallet status history is immutable.
+      await db.update(authAdmin).set({ disabledAt: new Date() }).where(eq(authAdmin.id, adminId));
+    }
   });
 
   it('records Review penalties only when a new Review crosses the average below 3.0', async () => {

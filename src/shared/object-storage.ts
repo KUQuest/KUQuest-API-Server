@@ -157,7 +157,10 @@ const detectContentType = async (
     detectedContentType = 'video/webm';
   }
 
-  if (!detectedContentType || declaredContentType !== detectedContentType) {
+  // Some mobile pickers send no type or a generic one; the detected bytes decide then.
+  const declaresNoType =
+    declaredContentType === '' || declaredContentType === 'application/octet-stream';
+  if (!detectedContentType || (!declaresNoType && declaredContentType !== detectedContentType)) {
     throw new UnsupportedFileTypeError(unsupportedTypeMessage);
   }
   return detectedContentType;
