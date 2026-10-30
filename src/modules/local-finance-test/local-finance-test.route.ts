@@ -1,4 +1,4 @@
-import { authGuard, type AuthenticatedSession } from '@/modules/auth';
+import { authGuard, memberBanGuard, type AuthenticatedSession } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
 import { Elysia } from 'elysia';
@@ -23,6 +23,7 @@ export const localFinanceTestRoute = new Elysia({
   prefix: '/api/local/test',
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .guard(
     {
       beforeHandle: (context) => {

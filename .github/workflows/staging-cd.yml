@@ -18,6 +18,7 @@ permissions: {}
 env:
   IMAGE_NAME: ghcr.io/kuquest/kuquest-api-server
   STAGING_SERVER: 192.168.1.210
+  STAGING_PUBLIC_URL: https://kuquest-dev-api.kubits.org
 
 jobs:
   build:
@@ -148,10 +149,7 @@ jobs:
           ADMIN_FIRST_NAME: ${{ secrets.ADMIN_FIRST_NAME }}
           ADMIN_LAST_NAME: ${{ secrets.ADMIN_LAST_NAME }}
           STAGING_TEST_AUTH_ENABLED: ${{ secrets.STAGING_TEST_AUTH_ENABLED }}
-          STAGING_TEST_AUTH_EMAIL: ${{ secrets.STAGING_TEST_AUTH_EMAIL }}
           STAGING_TEST_AUTH_PASSWORD: ${{ secrets.STAGING_TEST_AUTH_PASSWORD }}
-          STAGING_TEST_AUTH_FIRST_NAME: ${{ secrets.STAGING_TEST_AUTH_FIRST_NAME }}
-          STAGING_TEST_AUTH_LAST_NAME: ${{ secrets.STAGING_TEST_AUTH_LAST_NAME }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
@@ -218,10 +216,7 @@ jobs:
           fi
 
           TEST_AUTH_SECRETS=(
-            STAGING_TEST_AUTH_EMAIL
             STAGING_TEST_AUTH_PASSWORD
-            STAGING_TEST_AUTH_FIRST_NAME
-            STAGING_TEST_AUTH_LAST_NAME
           )
 
           for SECRET_NAME in "${TEST_AUTH_SECRETS[@]}"; do
@@ -259,10 +254,7 @@ jobs:
             printf 'ADMIN_FIRST_NAME=%s\n' "$ADMIN_FIRST_NAME"
             printf 'ADMIN_LAST_NAME=%s\n' "$ADMIN_LAST_NAME"
             printf 'STAGING_TEST_AUTH_ENABLED=true\n'
-            printf 'STAGING_TEST_AUTH_EMAIL=%s\n' "$STAGING_TEST_AUTH_EMAIL"
             printf 'STAGING_TEST_AUTH_PASSWORD=%s\n' "$STAGING_TEST_AUTH_PASSWORD"
-            printf 'STAGING_TEST_AUTH_FIRST_NAME=%s\n' "$STAGING_TEST_AUTH_FIRST_NAME"
-            printf 'STAGING_TEST_AUTH_LAST_NAME=%s\n' "$STAGING_TEST_AUTH_LAST_NAME"
             printf 'GOOGLE_CLIENT_ID=%s\n' "$GOOGLE_CLIENT_ID"
             printf 'GOOGLE_CLIENT_SECRET=%s\n' "$GOOGLE_CLIENT_SECRET"
 
@@ -278,9 +270,6 @@ jobs:
             printf 'PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION=%s\n' "${PAYMENT_PROVIDER_EVENT_ENCRYPTION_KEY_VERSION:-v1}"
             printf 'PAYOUT_DESTINATION_ENCRYPTION_KEY=%s\n' "$PAYOUT_DESTINATION_ENCRYPTION_KEY"
             printf 'PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION=%s\n' "${PAYOUT_DESTINATION_ENCRYPTION_KEY_VERSION:-v1}"
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_EMAIL=finance-test-recipient@ku.th\n'
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME=Finance\n'
-            printf 'LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME=Recipient\n'
 
             printf 'CMS_ORIGIN=%s\n' "$CMS_ORIGIN"
 
@@ -346,6 +335,89 @@ jobs:
              POSTGRES_CLIENT_IMAGE='${IMAGE_NAME}:postgres-client-${{ github.event.workflow_run.head_sha }}' \
              bash -s -- deploy" \
             < scripts/staging-operations.sh
+
+      - name: Seed demo Members and funded Quests
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend &&
+             APP_IMAGE='$IMAGE_TAG' \
+             docker compose run --rm --no-deps \
+             -e STAGING_FINANCE_SEED_ENABLED=true \
+             api bun run db:seed-staging"
+
+      - name: Verify all demo Member logins
+        shell: bash
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          ssh \
+            -i "$RUNNER_TEMP/staging_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/staging_known_hosts" \
+            deploy@"$STAGING_SERVER" \
+            "cd /opt/backend && APP_IMAGE='$IMAGE_TAG' \
+             docker compose run --rm --no-deps -T \
+             -e STAGING_PUBLIC_URL='$STAGING_PUBLIC_URL' api bun -" <<'BUN'
+          import { demoMembers } from './src/shared/demo-members.ts';
+
+          const baseUrl = process.env.STAGING_PUBLIC_URL;
+          const password = process.env.STAGING_TEST_AUTH_PASSWORD;
+          if (!baseUrl || !password) throw new Error('Demo login verification configuration is missing.');
+          if (demoMembers.length !== 10) throw new Error('Expected 10 demo Members.');
+
+          for (const member of demoMembers) {
+            const signIn = () => fetch(`${baseUrl}/api/staging/test-auth/sign-in/email`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ email: member.email, password }),
+              redirect: 'manual',
+              signal: AbortSignal.timeout(20_000),
+            });
+            let login = await signIn();
+            for (let retry = 0; login.status === 429 && retry < 2; retry++) {
+              const seconds = Number(login.headers.get('retry-after') ?? login.headers.get('x-retry-after') ?? '10');
+              if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60) {
+                throw new Error('Sign-in returned an unsupported rate-limit delay.');
+              }
+              await login.arrayBuffer();
+              console.log(`Sign-in rate limit reached; waiting ${seconds + 1} seconds.`);
+              await Bun.sleep((seconds + 1) * 1_000);
+              login = await signIn();
+            }
+            if (login.status !== 200) {
+              throw new Error(`Demo Member login failed: ${member.email}, HTTP ${login.status}`);
+            }
+            const result = await login.json();
+            if (result.user?.email !== member.email) {
+              throw new Error(`Demo login returned the wrong Member: ${member.email}`);
+            }
+            const cookie = login.headers.getSetCookie().map((value) => value.split(';', 1)[0]).join('; ');
+            if (!cookie) throw new Error(`Demo login returned no session cookie: ${member.email}`);
+            const profile = await fetch(`${baseUrl}/api/v1/profile`, {
+              headers: { cookie },
+              redirect: 'manual',
+              signal: AbortSignal.timeout(20_000),
+            });
+            if (profile.status !== 200) {
+              throw new Error(`Demo Member Profile read failed: ${member.email}, HTTP ${profile.status}`);
+            }
+            await profile.arrayBuffer();
+            console.log(`Verified demo Member login: ${member.email}`);
+          }
+          BUN
 
       - name: Clean temporary secret files
         if: always()

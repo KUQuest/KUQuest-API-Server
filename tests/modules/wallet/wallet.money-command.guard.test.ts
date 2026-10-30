@@ -12,12 +12,14 @@ const digestAllowedFiles: Record<string, true> = {
   'src/modules/wallet/wallet.money-command.service.ts': true,
   // Quest owns its own command records and their digest (ADR-0029). Importing the Wallet
   // helper here would add the Quest-to-Wallet import that ADR-0009 and ADR-0030 remove.
-  'src/modules/quest/quest-command.service.ts': true,
+  'src/modules/quest/shared/command/quest-command.service.ts': true,
 };
 
 const boundaryAllowedFiles: Record<string, true> = {
-  // The barrel re-exports walletRoute, which imports @/modules/auth, so a barrel import cycles.
+  // These Auth-linked files bypass the barrel to avoid pulling Wallet routes into Auth initialization.
   'src/modules/auth/auth.config.ts': true,
+  // auth.config imports Member Penalty to gate sign-in, so this service cannot import that barrel.
+  'src/modules/admin/member-penalty/member-penalty.service.ts': true,
   // Takes the Elysia schema walletBalanceSchema, which the barrel does not export.
   'src/modules/local-finance-test/local-finance-test.schema.ts': true,
   // Provider adapters that take only money value types from wallet.money.

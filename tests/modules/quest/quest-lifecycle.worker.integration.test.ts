@@ -10,10 +10,17 @@ import {
   questTeamInvitation,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { runQuestLifecycleWorker } from '@/modules/quest/quest-lifecycle.worker';
-import { questV2Storage } from '@/modules/quest/quest.storage';
-import { questV2ImageUploadOperationScope } from '@/modules/quest/quest-v2.service';
+import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
+import { questV2Storage } from '@/modules/quest/v2';
+import { questV2ImageUploadOperationScope } from '@/modules/quest/v2';
+import { positiveSatang, reserveSpending } from '@/modules/wallet';
 import { workChatMembershipWriter } from '@/modules/work-chat';
+
+import {
+  fundTestWallet,
+  readTestQuestEscrow,
+  readTestWallet,
+} from '../wallet/wallet-test-fixtures';
 
 import { and, eq, inArray } from 'drizzle-orm';
 import {
@@ -31,6 +38,7 @@ import {
 
 const hirerId = crypto.randomUUID();
 const workerId = crypto.randomUUID();
+const secondWorkerId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const testNow = new Date('2026-08-27T12:00:00.000Z');
 const questIds: string[] = [];
@@ -60,10 +68,10 @@ const createQuest = async (input: Partial<typeof quest.$inferInsert> = {}) => {
   return id;
 };
 
-const addAssignment = async (questId: string) => {
+const addAssignment = async (questId: string, assignmentWorkerId = workerId) => {
   await db
     .insert(questAssignment)
-    .values({ questId, workerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
+    .values({ questId, workerId: assignmentWorkerId, assignmentStatus: 'ASSIGNMENT_ACTIVE' });
 };
 
 beforeEach(() => {
@@ -84,6 +92,12 @@ beforeAll(async () => {
   await db.insert(authUser).values([
     { id: hirerId, email: `${hirerId}@ku.th`, firstName: 'Lifecycle', lastName: 'Hirer' },
     { id: workerId, email: `${workerId}@ku.th`, firstName: 'Lifecycle', lastName: 'Worker' },
+    {
+      id: secondWorkerId,
+      email: `${secondWorkerId}@ku.th`,
+      firstName: 'Lifecycle',
+      lastName: 'Second Worker',
+    },
   ]);
   await db.insert(tag).values({ id: tagId, name: `Lifecycle ${tagId}` });
 });
@@ -96,13 +110,13 @@ afterAll(async () => {
   await db.delete(questTeam).where(inArray(questTeam.id, teamIds));
   await db.delete(questTeamInvitation).where(inArray(questTeamInvitation.id, invitationIds));
   await db.delete(tag).where(eq(tag.id, tagId));
-  await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId]));
+  await db.delete(authUser).where(inArray(authUser.id, [hirerId, workerId, secondWorkerId]));
 });
 
 afterEach(() => mock.restore());
 
 describe('Quest lifecycle worker', () => {
-  it('starts only due assigned Quests with one fake-time instant for all active Assignments', async () => {
+  it('does not start assigned Quests when startTime arrives', async () => {
     const dueId = await createQuest({
       questStatus: 'QUEST_ASSIGNED',
       startTime: new Date(testNow.getTime() - 1),
@@ -116,43 +130,164 @@ describe('Quest lifecycle worker', () => {
     await addAssignment(dueId);
     await addAssignment(futureId);
 
-    const result = await runQuestLifecycleWorker({
+    await runQuestLifecycleWorker({
       clock: { now: () => testNow },
       autoApprove: async () => [],
     });
 
-    expect(result.startedQuestIds).toContain(dueId);
     const rows = await db
       .select({ id: quest.id, status: quest.questStatus, startedAt: questAssignment.startedAt })
       .from(quest)
       .leftJoin(questAssignment, eq(questAssignment.questId, quest.id))
       .where(inArray(quest.id, [dueId, futureId]));
-    expect(rows.find((row) => row.id === dueId)?.status).toBe('QUEST_IN_PROGRESS');
-    expect(rows.find((row) => row.id === dueId)?.startedAt?.getTime()).toBe(testNow.getTime());
-    expect(rows.find((row) => row.id === futureId)?.status).toBe('QUEST_ASSIGNED');
+    expect(rows.find((row) => row.id === dueId)).toMatchObject({
+      status: 'QUEST_ASSIGNED',
+      startedAt: null,
+    });
+    expect(rows.find((row) => row.id === futureId)).toMatchObject({
+      status: 'QUEST_ASSIGNED',
+      startedAt: null,
+    });
   });
 
-  it('is safe to retry and run concurrently', async () => {
+  it('leaves an assigned Quest unchanged across concurrent worker sweeps', async () => {
     const questId = await createQuest({
       questStatus: 'QUEST_ASSIGNED',
       startTime: new Date(testNow.getTime() - 1),
     });
     await addAssignment(questId);
     const options = { clock: { now: () => testNow }, autoApprove: async () => [] };
-    const [first, second] = await Promise.all([
-      runQuestLifecycleWorker(options),
-      runQuestLifecycleWorker(options),
-    ]);
-    expect(
-      first.startedQuestIds.concat(second.startedQuestIds).filter((id) => id === questId).length
-    ).toBe(1);
+    await Promise.all([runQuestLifecycleWorker(options), runQuestLifecycleWorker(options)]);
     const [row] = await db
       .select({ status: quest.questStatus, startedAt: questAssignment.startedAt })
       .from(quest)
       .innerJoin(questAssignment, eq(questAssignment.questId, quest.id))
       .where(eq(quest.id, questId));
-    expect(row?.status).toBe('QUEST_IN_PROGRESS');
-    expect(row?.startedAt?.getTime()).toBe(testNow.getTime());
+    expect(row?.status).toBe('QUEST_ASSIGNED');
+    expect(row?.startedAt).toBeNull();
+  });
+  it('fails a v2 assigned Quest at dueAt when the Worker has not started', async () => {
+    const questId = await createQuest({
+      apiVersion: 'v2',
+      v2Mode: 'FIRST_COME_FIRST_SERVED',
+      v2Participation: 'SINGLE',
+      questStatus: 'QUEST_ASSIGNED',
+      dueAt: new Date(testNow.getTime() - 1),
+    });
+    await addAssignment(questId);
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.failedQuestIds).toContain(questId);
+    const [failed] = await db
+      .select({ state: quest.questStatus, assignmentStatus: questAssignment.assignmentStatus })
+      .from(quest)
+      .innerJoin(questAssignment, eq(questAssignment.questId, quest.id))
+      .where(eq(quest.id, questId));
+    expect(failed).toEqual({
+      state: 'QUEST_FAILED',
+      assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+    });
+  });
+
+  it('fails a legacy assigned Quest at dueAt when the Worker has not started', async () => {
+    const questId = await createQuest({
+      questStatus: 'QUEST_ASSIGNED',
+      dueAt: new Date(testNow.getTime() - 1),
+    });
+    await addAssignment(questId);
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.failedQuestIds).toContain(questId);
+    const [failed] = await db
+      .select({ state: quest.questStatus, assignmentStatus: questAssignment.assignmentStatus })
+      .from(quest)
+      .innerJoin(questAssignment, eq(questAssignment.questId, quest.id))
+      .where(eq(quest.id, questId));
+    expect(failed).toEqual({
+      state: 'QUEST_FAILED',
+      assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+    });
+  });
+
+  it('marks only GROUP + FCFS Workers who missed Start Work incomplete at dueAt', async () => {
+    const questId = await createQuest({
+      participation: 'GROUP',
+      headcount: 2,
+      questStatus: 'QUEST_ASSIGNED',
+      dueAt: new Date(testNow.getTime() - 1),
+    });
+    await addAssignment(questId, workerId);
+    await addAssignment(questId, secondWorkerId);
+    await db
+      .update(questAssignment)
+      .set({ startedAt: new Date(testNow.getTime() - 60_000) })
+      .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, workerId)));
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.failedQuestIds).toContain(questId);
+    const [current] = await db
+      .select({ questStatus: quest.questStatus })
+      .from(quest)
+      .where(eq(quest.id, questId));
+    const assignments = await db
+      .select({ workerId: questAssignment.workerId, status: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    expect(current?.questStatus).toBe('QUEST_FAILED');
+    expect(assignments).toHaveLength(2);
+    expect(assignments).toContainEqual({ workerId, status: 'ASSIGNMENT_ACTIVE' });
+    expect(assignments).toContainEqual({
+      workerId: secondWorkerId,
+      status: 'ASSIGNMENT_INCOMPLETE',
+    });
+  });
+
+  it('marks all GROUP + CANDIDATE Assignments incomplete when the Team Leader misses Start Work', async () => {
+    const questId = await createQuest({
+      mode: 'CANDIDATE',
+      participation: 'GROUP',
+      headcount: 2,
+      questStatus: 'QUEST_ASSIGNED',
+      dueAt: new Date(testNow.getTime() - 1),
+    });
+    const teamId = crypto.randomUUID();
+    teamIds.push(teamId);
+    await db.insert(questTeam).values({
+      id: teamId,
+      questId,
+      leaderId: workerId,
+      name: 'Start deadline team',
+      teamStatus: 'TEAM_SELECTED',
+    });
+    await addAssignment(questId, workerId);
+    await addAssignment(questId, secondWorkerId);
+
+    const result = await runQuestLifecycleWorker({
+      clock: { now: () => testNow },
+      autoApprove: async () => [],
+    });
+
+    expect(result.failedQuestIds).toContain(questId);
+    const statuses = await db
+      .select({ status: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, questId));
+    expect(statuses).toEqual([
+      { status: 'ASSIGNMENT_INCOMPLETE' },
+      { status: 'ASSIGNMENT_INCOMPLETE' },
+    ]);
   });
 
   it('fails due Quests with missing Proof or confirmation, but keeps a submitted Proof path', async () => {
@@ -185,15 +320,76 @@ describe('Quest lifecycle worker', () => {
       expect.arrayContaining([missingProofId, missingConfirmationId])
     );
     const rows = await db
-      .select({ id: quest.id, status: quest.questStatus, failedAt: quest.failedAt })
+      .select({
+        id: quest.id,
+        status: quest.questStatus,
+        failedAt: quest.failedAt,
+        moneyHoldStartedAt: quest.moneyHoldStartedAt,
+      })
       .from(quest)
       .where(inArray(quest.id, [missingProofId, missingConfirmationId, submittedId]));
-    expect(rows.find((row) => row.id === missingProofId)?.status).toBe('QUEST_FAILED');
-    expect(rows.find((row) => row.id === missingProofId)?.failedAt?.getTime()).toBe(
-      testNow.getTime()
-    );
+    expect(rows.find((row) => row.id === missingProofId)).toMatchObject({
+      status: 'QUEST_FAILED',
+      failedAt: testNow,
+      moneyHoldStartedAt: testNow,
+    });
     expect(rows.find((row) => row.id === missingConfirmationId)?.status).toBe('QUEST_FAILED');
     expect(rows.find((row) => row.id === submittedId)?.status).toBe('QUEST_SUBMITTED');
+  });
+
+  it('releases a completed Quest money hold once, 7 days after the hold started', async () => {
+    const holdHirerId = crypto.randomUUID();
+    await db.insert(authUser).values({
+      id: holdHirerId,
+      email: `${holdHirerId}@ku.th`,
+      firstName: 'Lifecycle',
+      lastName: 'Hold Hirer',
+    });
+    await fundTestWallet(holdHirerId, 5_000);
+    const questId = crypto.randomUUID();
+    const reservation = await db.transaction((transaction) =>
+      reserveSpending(transaction, {
+        ownerUserId: holdHirerId,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: positiveSatang(1_000),
+      })
+    );
+    await createQuest({
+      id: questId,
+      hirerId: holdHirerId,
+      questStatus: 'QUEST_COMPLETED',
+      fundingReservationId: reservation.id,
+      moneyHoldStartedAt: new Date(testNow.getTime() - 7 * 24 * 60 * 60 * 1000),
+    });
+    questIds.push(questId);
+
+    const early = await runQuestLifecycleWorker({
+      clock: { now: () => new Date(testNow.getTime() - 1) },
+      autoApprove: async () => [],
+    });
+    expect(early.releasedFailedQuestIds).not.toContain(questId);
+    expect(await readTestQuestEscrow({ ownerUserId: holdHirerId, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 1_000,
+    });
+
+    const options = { clock: { now: () => testNow }, autoApprove: async () => [] };
+    const runs = await Promise.all([
+      runQuestLifecycleWorker(options),
+      runQuestLifecycleWorker(options),
+    ]);
+    expect(
+      runs.flatMap((run) => run.releasedFailedQuestIds).filter((id) => id === questId)
+    ).toEqual([questId]);
+    expect(await readTestQuestEscrow({ ownerUserId: holdHirerId, questId })).toMatchObject({
+      status: 'RELEASED',
+      remainingSatang: 0,
+    });
+    expect(await readTestWallet(holdHirerId)).toMatchObject({
+      spendingBalanceSatang: 5_000,
+      fundingReservedSatang: 0,
+    });
   });
 
   it('expires only pending invitations and delegates proof auto-approval to its seam', async () => {
@@ -297,12 +493,11 @@ describe('Quest lifecycle worker', () => {
       .mockRejectedValueOnce(new Error('storage unavailable'))
       .mockResolvedValue();
 
-    const result = await runQuestLifecycleWorker({
+    await runQuestLifecycleWorker({
       clock: { now: () => testNow },
       autoApprove: async () => [],
     });
 
-    expect(result.startedQuestIds).toContain(questId);
     const [pending] = await db
       .select({ objectDeletedAt: file.objectDeletedAt })
       .from(file)

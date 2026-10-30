@@ -4,6 +4,7 @@ import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
 } from '@/shared/object-storage';
@@ -100,6 +101,13 @@ export const createOwnPortfolio = async ({
   } catch (error) {
     await discardUploadedImages(uploaded);
 
+    if (error instanceof ImageDimensionsTooLargeError) {
+      set.status = 422;
+      return apiError(
+        'IMAGE_DIMENSIONS_TOO_LARGE',
+        'Image dimensions must not exceed 25 megapixels'
+      );
+    }
     if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('IMAGE_TOO_LARGE', error.message);
@@ -180,6 +188,13 @@ export const replaceOwnPortfolioImage = async ({
   try {
     uploaded = await portfolioStorage.upload(session.user.id, body.image);
   } catch (error) {
+    if (error instanceof ImageDimensionsTooLargeError) {
+      set.status = 422;
+      return apiError(
+        'IMAGE_DIMENSIONS_TOO_LARGE',
+        'Image dimensions must not exceed 25 megapixels'
+      );
+    }
     if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('IMAGE_TOO_LARGE', error.message);

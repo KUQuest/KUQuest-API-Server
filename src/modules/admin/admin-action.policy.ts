@@ -27,6 +27,7 @@ export type AdminActionErrorCode =
   | 'ADMIN_ACTION_ACTION_KIND_INVALID'
   | 'ADMIN_ACTION_REASON_REQUIRED'
   | 'ADMIN_ACTION_INVALID_REASON_CODE'
+  | 'ADMIN_ACTION_INVALID_DECISION_REASON_TEXT'
   | 'ADMIN_ACTION_INVALID_REQUEST_KEY'
   | 'ADMIN_ACTION_INVALID_VERSION'
   | 'ADMIN_ACTION_INVALID_RESOURCE'
@@ -203,6 +204,23 @@ export const normalizeReasonCode = (
     );
   }
   return normalized;
+};
+
+export const normalizeDecisionReasonText = (
+  decisionReasonText: string | undefined
+): string | undefined => {
+  if (decisionReasonText === undefined) return undefined;
+  if (
+    decisionReasonText.length === 0 ||
+    decisionReasonText.length > 200 ||
+    !/\S/.test(decisionReasonText)
+  ) {
+    throw new AdminActionError(
+      'ADMIN_ACTION_INVALID_DECISION_REASON_TEXT',
+      'Admin decision text must contain non-whitespace characters and be no more than 200 characters.'
+    );
+  }
+  return decisionReasonText;
 };
 
 const unsafeMetadata = (path: string, message: string): never => {

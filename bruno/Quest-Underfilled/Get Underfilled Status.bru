@@ -1,0 +1,20 @@
+meta {
+  name: Get Underfilled Status
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/underfilled
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns the underfilled consensus status for a GROUP + FIRST_COME_FIRST_SERVED Quest when startTime arrives with fewer workers than published headcount.
+  Includes the 10-minute Hirer decision window and Worker consent statuses.
+}

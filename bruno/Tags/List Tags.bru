@@ -1,0 +1,27 @@
+meta {
+  name: List Tags
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v1/tags
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && Array.isArray(data.data) && data.data.length > 0) {
+    bru.setEnvVar("tagId", data.data[0].id);
+  }
+}
+
+docs {
+  Returns all active Tags available in the system.
+  Automatically sets the first tag's ID into tagId in the active environment on success.
+}

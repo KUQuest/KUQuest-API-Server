@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quadrant 2: Single + Candidate Sequence (Bruno Case Guide)</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f5f5;
+        --color-paper-card: #ffffff;
+        --color-ink: #2d3142;
+        --color-muted: #4f5d75;
+        --color-soft: #7a8399;
+        --color-accent: #eb6c36;
+        --color-accent-tint: rgba(235, 108, 54, 0.08);
+        --color-rule: rgba(45, 49, 66, 0.12);
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', Georgia, serif;
+        --font-mono: 'Geist Mono', monospace;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 3rem 1.5rem;
+      }
+
+      .frame {
+        max-width: 1120px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 2.5rem;
+      }
+
+      header {
+        border-bottom: 1px solid var(--color-rule);
+        padding-bottom: 1.5rem;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(2rem, 3.2vw + 1rem, 2.75rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 0.5rem;
+      }
+
+      .lead {
+        font-size: 1rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+        max-width: 850px;
+      }
+
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+        padding: 0.5rem 0;
+      }
+
+      svg {
+        display: block;
+        margin: 0 auto;
+        max-width: 100%;
+        height: auto;
+      }
+
+      .cards-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 1.5rem;
+      }
+
+      @media (max-width: 860px) {
+        .cards-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: var(--color-paper-card);
+        border: 1px solid var(--color-rule);
+        border-radius: 6px;
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .card-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+
+      .card-dot.coral {
+        background: var(--color-accent);
+      }
+      .card-dot.ink {
+        background: var(--color-ink);
+      }
+      .card-dot.muted {
+        background: var(--color-muted);
+      }
+
+      .card h3 {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+
+      .card ul {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      .card li {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        line-height: 1.45;
+      }
+
+      .card li strong {
+        color: var(--color-ink);
+      }
+
+      footer {
+        border-top: 1px solid var(--color-rule);
+        padding-top: 1rem;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        color: var(--color-soft);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <header>
+        <p class="eyebrow">Bruno Test Case Guide · Quadrant 2</p>
+        <h1>SINGLE + CANDIDATE Application &amp; Selection Sequence</h1>
+        <p class="lead">
+          Visualizing the competitive application lifecycle: prospective Candidates submit applications while QUEST_OPEN, the Hirer evaluates candidates, and selecting one Candidate atomically assigns them while rejecting all competing applicants in a single transaction.
+        </p>
+      </header>
+
+      <div class="diagram-container">
+        <svg
+          role="img"
+          aria-labelledby="bruno-q2-title bruno-q2-desc"
+          viewBox="0 0 960 620"
+          width="960"
+          height="620"
+        >
+          <title id="bruno-q2-title">Quadrant 2 Single Candidate Sequence Diagram</title>
+          <desc id="bruno-q2-desc">
+            API sequence showing Candidate 1 and 2 applying for a Quest, Hirer reviewing applications, selecting Candidate 1, and atomic rejection of Candidate 2.
+          </desc>
+
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+            </marker>
+            <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+            </marker>
+            <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+
+          <!-- Background Paper -->
+          <rect width="100%" height="100%" fill="#f5f5f5" />
+
+          <!-- 4 Actor Lifelines -->
+          <!-- Actor 1: Hirer (x=120) -->
+          <line x1="120" y1="80" x2="120" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 2: KUQuest API (x=380) -->
+          <line x1="380" y1="80" x2="380" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 3: Candidate 1 (x=640) -->
+          <line x1="640" y1="80" x2="640" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 4: Candidate 2 (x=860) -->
+          <line x1="860" y1="80" x2="860" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+
+          <!-- Messages -->
+          <!-- 1. Publish Candidate Quest (y=112) -->
+          <line x1="120" y1="112" x2="372" y2="112" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="156" y="92" width="180" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="102" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../publish (CANDIDATE)</text>
+
+          <!-- 2. Candidate 1 applies (y=160) -->
+          <line x1="640" y1="160" x2="388" y2="160" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="424" y="140" width="176" height="14" rx="2" fill="#f5f5f5" />
+          <text x="512" y="150" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../applications (APPLY 1)</text>
+
+          <!-- 3. Candidate 2 applies (y=208) -->
+          <line x1="860" y1="208" x2="388" y2="208" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="536" y="188" width="176" height="14" rx="2" fill="#f5f5f5" />
+          <text x="624" y="198" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../applications (APPLY 2)</text>
+
+          <!-- 4. Hirer lists applications (y=256) -->
+          <line x1="120" y1="256" x2="372" y2="256" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="160" y="236" width="172" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="246" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">GET /.../applications (LIST)</text>
+
+          <!-- 5. Hirer selects Candidate 1 (y=304) -->
+          <line x1="120" y1="304" x2="372" y2="304" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <rect x="160" y="284" width="172" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="294" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../select (CHOOSE 1)</text>
+
+          <!-- 6. Atomic Assignment to Candidate 1 (y=348) -->
+          <line x1="380" y1="348" x2="632" y2="348" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <rect x="424" y="328" width="176" height="14" rx="2" fill="#f5f5f5" />
+          <text x="512" y="338" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ASSIGNMENT_ACTIVE (WINNER)</text>
+
+          <!-- 7. Atomic Rejection of Candidate 2 (y=384) -->
+          <line x1="380" y1="384" x2="852" y2="384" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <rect x="548" y="364" width="152" height="14" rx="2" fill="#f5f5f5" />
+          <text x="624" y="374" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">APPLICATION_REJECTED</text>
+
+          <!-- 8. Work Chat open for Candidate 1 (y=432) -->
+          <line x1="640" y1="432" x2="128" y2="432" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <rect x="296" y="412" width="168" height="14" rx="2" fill="#f5f5f5" />
+          <text x="380" y="422" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">WORK CONVERSATION OPEN</text>
+
+          <!-- 9. Submit & Approve Proof (y=480) -->
+          <line x1="640" y1="480" x2="128" y2="480" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="296" y="460" width="168" height="14" rx="2" fill="#f5f5f5" />
+          <text x="380" y="470" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">PROOF SUBMIT &amp; APPROVE</text>
+
+          <!-- Actor Boxes (Top Row) -->
+          <!-- Hirer Box -->
+          <rect x="48" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="48" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="56" y="32" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="76" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
+          <text x="120" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Hirer</text>
+
+          <!-- KUQuest API Box -->
+          <rect x="308" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="308" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="316" y="32" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="330" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+          <text x="380" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">KUQuest Server</text>
+
+          <!-- Candidate 1 Box -->
+          <rect x="568" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="568" y="24" width="144" height="56" rx="6" fill="rgba(235, 108, 54, 0.08)" stroke="#eb6c36" stroke-width="1.2" />
+          <rect x="576" y="32" width="56" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.4)" stroke-width="0.8" />
+          <text x="604" y="41" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CANDIDATE</text>
+          <text x="640" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Candidate 1 (Winner)</text>
+
+          <!-- Candidate 2 Box -->
+          <rect x="788" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="788" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="796" y="32" width="56" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="824" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CANDIDATE</text>
+          <text x="860" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Candidate 2</text>
+
+          <!-- Legend Strip at Bottom -->
+          <line x1="32" y1="568" x2="928" y2="568" stroke="rgba(45,49,66,0.12)" stroke-width="0.8" />
+          <text x="32" y="588" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+          <line x1="100" y1="586" x2="132" y2="586" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <text x="140" y="590" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Standard Bruno Request</text>
+
+          <line x1="340" y1="586" x2="372" y2="586" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <text x="380" y="590" fill="#eb6c36" font-size="9" font-family="'Geist', sans-serif">Winning Selection / Assignment Transition</text>
+
+          <line x1="660" y1="586" x2="692" y2="586" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <text x="700" y="590" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Atomic Rejection / Conversation Push</text>
+        </svg>
+      </div>
+
+      <div class="cards-grid">
+        <div class="card">
+          <p class="eyebrow">BRUNO FOLDERS</p>
+          <div class="card-header">
+            <span class="card-dot ink"></span>
+            <h3>1. Applying</h3>
+          </div>
+          <ul>
+            <li><code>Quest-Candidates / Apply as Candidate</code>: Prospective workers submit applications.</li>
+            <li><code>Quest-Candidates / Withdraw Application</code>: Allows a candidate to cancel before selection.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <p class="eyebrow">ATOMIC CONTRACT</p>
+          <div class="card-header">
+            <span class="card-dot coral"></span>
+            <h3>2. Selection Guarantee</h3>
+          </div>
+          <ul>
+            <li><code>Quest-Candidates / Select Candidate</code>: Hirer picks the winner.</li>
+            <li><strong>Single Transaction:</strong> Winner becomes <code>ASSIGNMENT_ACTIVE</code> and all other applicants are rejected atomically.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <p class="eyebrow">BRUNO FOLDERS</p>
+          <div class="card-header">
+            <span class="card-dot ink"></span>
+            <h3>3. Post-Selection</h3>
+          </div>
+          <ul>
+            <li><code>Work-Chat / Send Message</code>: Communication opens exclusively for the selected pair.</li>
+            <li><code>Quest-Proof / Submit Proof</code>: Selected worker submits deliverable for review.</li>
+          </ul>
+        </div>
+      </div>
+
+      <footer>
+        <span>KUQuest API · Quadrant 2 Single Candidate Sequence</span>
+        <span>docs/rulebook/quest/quest-mode-matrix-contract.md</span>
+      </footer>
+    </div>
+  </body>
+</html>

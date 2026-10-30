@@ -68,7 +68,10 @@ General ledger transaction query and pagination for system auditability.
   - `cursor` (optional): Base64-encoded cursor or transaction ID.
 - **Data Returned**:
   - `items`: Array of ledger transactions with:
-    - `id`, `businessReference`, `eventType`, `description`, `createdByUserId`, `correctionOfTransactionId`, `createdAt`, `sealedAt`.
+    - `id`, `displayReference`, `businessReference`, `eventType`, `description`,
+      `createdByUserId`, `correctionOfTransactionId`, `createdAt`, `sealedAt`.
+    - `displayReference` uses a readable public sequence (for example, `LTX-000001`);
+      `businessReference` remains the system reference.
     - `isBalanced`: boolean ($\sum \text{amountSatang} == 0$).
     - `postings`: Array of postings with `id`, `accountId`, `accountType`, `walletId`, `member` (`userId`, `name`, `studentId`), and `amountSatang`.
   - `nextCursor`: Next pagination cursor or `null`.

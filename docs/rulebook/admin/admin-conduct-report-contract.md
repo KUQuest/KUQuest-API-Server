@@ -31,12 +31,42 @@ A **Conduct Report** evaluates how a Member behaved on a Quest, supported by the
 - Admin resolves a `CONDUCT_REPORT_PENDING` report as:
   - `CONDUCT_REPORT_DISMISSED`: No violation; case closes.
   - `CONDUCT_REPORT_UPHELD`: Confirms a violation on the **Misconduct ladder** (see [Admin Member Penalty Contract](admin-member-penalty-contract.md)). Permanent strike; no restore path.
-- Requires a reason and a non-blank `Idempotency-Key`.
+- Each decision requires its controlled reason code and a non-blank `Idempotency-Key`. An Admin may also provide an optional `decisionReasonText` of up to 200 characters.
 - Decisions are final and create an Audit Record.
+
+### Decision reason catalog
+
+Admin Action reason catalog version `2` defines the action-specific codes for a
+Conduct Report decision.
+
+`CONDUCT_REPORT_DISMISS` accepts:
+
+- `CONDUCT_REPORT_NO_VIOLATION`
+- `CONDUCT_REPORT_INSUFFICIENT_EVIDENCE`
+- `CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM`
+- `CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE`
+
+`CONDUCT_REPORT_UPHOLD` accepts:
+
+- `CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION`
+- `CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION`
+- `CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION`
+
+An Admin selects the uphold code separately from the filed Conduct Report
+reason. The immutable `AdminAction` stores the selected code and catalog
+version. The Conduct Report's `decisionReason` stores the selected version-2
+code; its filed `reason` remains unchanged and continues to support the
+Misconduct decision and Member notification. Version-1 Admin Actions remain
+readable with their recorded version and code. Version-1 upheld reports retain
+the filed reason as their historical decision code.
+
+The optional decision note is stored separately on the immutable Admin Action
+and does not replace the filed Conduct Report reason or decision code.
 
 ## Notifications and privacy
 
-- `CONDUCT_REPORT_UPHELD` sends an Android Push Notification to the reported Member naming the reason and result.
+- `CONDUCT_REPORT_UPHELD` sends an Android Push Notification naming the filed
+  reason and result. The Admin decision note is not included in the notification.
 - Filing and dismissals send no notification.
 - The filer's identity is never revealed to the reported Member.
 

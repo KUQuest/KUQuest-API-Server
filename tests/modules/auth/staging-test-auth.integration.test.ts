@@ -2,7 +2,7 @@ import { app } from '@/app';
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { walletWallet } from '@/database/schema/wallet.schema';
-import { authPlugin, createStagingTestAuthRoute } from '@/modules/auth';
+import { authPlugin } from '@/modules/auth';
 import { getWallet } from '@/modules/wallet';
 
 import { randomUUID } from 'node:crypto';
@@ -10,6 +10,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { afterAll, describe, expect, it } from 'bun:test';
 import { eq } from 'drizzle-orm';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `staging-test-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -116,7 +118,7 @@ describe('staging test authentication', () => {
     expect(response.status).toBe(401);
   });
 
-  it('creates a configured Student and issues a normal session', async () => {
+  it('issues a normal session for an explicitly seeded Member', async () => {
     const invalidLoginResponse = await stagingTestApp.handle(
       new Request('http://localhost/api/staging/test-auth/sign-in/email', {
         method: 'POST',

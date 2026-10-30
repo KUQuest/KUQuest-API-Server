@@ -114,6 +114,7 @@ export const adminLedgerTransactionsResponseSchema = t.Object({
     items: t.Array(
       t.Object({
         id: uuid,
+        displayReference: t.String(),
         businessReference: t.String(),
         eventType: t.String(),
         description: t.Union([t.String(), t.Null()]),

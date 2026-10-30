@@ -20,12 +20,22 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 - Push is enabled by default after Android permission is granted.
 - **Delivery and deduplication**:
   - Each logical Event produces at most one alert per recipient, even after retry.
+  - FCM messages include a stable `eventKey` and use a data-only payload. The Android client records each `eventKey` before it displays an alert and ignores later copies of a recorded key. Foreground Popups use the same key.
   - Delivery state is recorded (`PUSH_DELIVERY_PENDING`, `PUSH_DELIVERY_DELIVERED`, `PUSH_DELIVERY_FAILED`, `PUSH_DELIVERY_DISABLED`).
   - Transient failures are retried. Invalid destinations end at `PUSH_DELIVERY_DISABLED`.
   - When the app is active in foreground, an in-app Popup replaces the duplicate Push.
 - **Recipients**:
   - A new Message in a Work Conversation notifies every other current Accepted Participant, never the sender.
   - Directly affected Events notify the affected recipient. Quest-wide Events notify all current Accepted Participants.
+  - A `QUEST_OPEN_EDIT_UPDATED` realtime event goes to the Hirer and Members
+    with an open Candidate Inquiry Conversation. It does not create a Push
+    Notification.
+  - An underfilled `GROUP + FCFS` Quest sends these data-only Events, one per recipient and transition:
+    - `UNDERFILLED_DECISION_PENDING` to the Hirer when the decision window opens.
+    - `UNDERFILLED_CONSENT_PENDING` to each Active Worker when the consent window opens.
+    - `UNDERFILLED_COMPLETED` and `UNDERFILLED_CANCELLED` to each Active Worker. The cancelled Event names the cancellation reason.
+    - `QUEST_ASSIGNED` to the other Active Workers when the last GROUP slot fills.
+  - These Events carry `transitionId` (equal to `eventKey`) and, for a window, the server `expiresAt`. The client counts down from `expiresAt`. The Push worker does not send an Event when the underfilled state changed before delivery.
 - **Muting and critical events**:
   - A Member can mute non-critical Push per Quest.
   - Critical Events remain deliverable: approval, non-approval, missing work at `dueAt`, `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and Quest Edits requiring a response.

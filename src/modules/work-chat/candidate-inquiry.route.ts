@@ -1,7 +1,8 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, closeSocketForActiveMemberBan, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
+import { logSocket } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
@@ -17,6 +18,16 @@ import {
   sendCandidateInquiryMessageController,
   uploadCandidateInquiryAttachmentController,
 } from './candidate-inquiry.controller';
+import {
+  extractChatSocketClientMessageId,
+  parseChatSocketSendMessage,
+  serializeChatSocketMessage,
+} from './chat-socket.schema';
+import {
+  CandidateInquiryServiceError,
+  isCurrentCandidateInquiryMember,
+  sendCandidateInquiryMessage,
+} from './candidate-inquiry.service';
 import {
   candidateInquiryAttachmentDiscardResponseSchema,
   candidateInquiryAttachmentLinkResponseSchema,
@@ -37,18 +48,33 @@ import {
   candidateInquirySendMessageSchema,
 } from './candidate-inquiry.schema';
 import { workChatDelivery } from './work-chat.delivery';
-import { isCurrentCandidateInquiryMember } from './candidate-inquiry.service';
-
 const webSocketUnsubscribers = new WeakMap<object, () => void>();
+
+const sendCandidateInquirySocketRejection = (
+  ws: { send: (message: string) => unknown },
+  clientMessageId: string | null,
+  code: string,
+  message: string
+) => {
+  ws.send(
+    JSON.stringify({
+      type: 'MESSAGE_REJECTED',
+      clientMessageId,
+      error: { code, message },
+    })
+  );
+};
 
 export const candidateInquiryRoute = new Elysia({
   name: 'candidate-inquiry-route',
   prefix: `${API_V1_PREFIX}/chat/candidate-inquiries`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .ws('/:conversationId/events', {
     params: candidateInquiryParamsSchema,
     async open(ws) {
+      logSocket(ws, 'open');
       const memberId = ws.data.session.user.id;
       const allowed = await isCurrentCandidateInquiryMember(
         memberId,
@@ -61,24 +87,63 @@ export const candidateInquiryRoute = new Elysia({
       const unsubscribe = workChatDelivery.subscribe(
         memberId,
         async (event) => {
+          if (await closeSocketForActiveMemberBan(ws, memberId)) return;
           ws.send(JSON.stringify({ type: 'CANDIDATE_INQUIRY_MESSAGE', message: event.message }));
+          logSocket(ws, 'send', { type: 'CANDIDATE_INQUIRY_MESSAGE' });
         },
         ws.data.params.conversationId
       );
       webSocketUnsubscribers.set(ws, unsubscribe);
+      logSocket(ws, 'subscribed');
     },
-    message(ws) {
-      ws.close(1008, 'Candidate Inquiry Events are read-only');
+    async message(ws, payload) {
+      const memberId = ws.data.session.user.id;
+      if (await closeSocketForActiveMemberBan(ws, memberId)) return;
+
+      const command = parseChatSocketSendMessage(payload);
+      logSocket(ws, 'received', { type: command ? 'SEND_MESSAGE' : 'INVALID_COMMAND' });
+      if (!command) {
+        sendCandidateInquirySocketRejection(
+          ws,
+          extractChatSocketClientMessageId(payload),
+          'INVALID_COMMAND',
+          'Only a valid SEND_MESSAGE command is supported'
+        );
+        logSocket(ws, 'rejected', { type: 'SEND_MESSAGE', code: 'INVALID_COMMAND' });
+        ws.close(1008, 'Invalid Candidate Inquiry command');
+        return;
+      }
+
+      try {
+        const message = await sendCandidateInquiryMessage(
+          memberId,
+          ws.data.params.conversationId,
+          command
+        );
+        ws.send(
+          JSON.stringify({
+            type: 'MESSAGE_ACCEPTED',
+            clientMessageId: command.clientMessageId,
+            message: serializeChatSocketMessage(message),
+          })
+        );
+        logSocket(ws, 'send', { type: 'MESSAGE_ACCEPTED' });
+      } catch (error) {
+        if (!(error instanceof CandidateInquiryServiceError)) throw error;
+        sendCandidateInquirySocketRejection(ws, command.clientMessageId, error.code, error.message);
+        logSocket(ws, 'rejected', { type: 'SEND_MESSAGE', code: error.code });
+      }
     },
-    close(ws) {
+    close(ws, code) {
       webSocketUnsubscribers.get(ws)?.();
       webSocketUnsubscribers.delete(ws);
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Candidate Inquiry'],
-      summary: 'Subscribe to Candidate Inquiry Events',
+      summary: 'Subscribe to Candidate Inquiry Events and send Messages',
       description:
-        'Subscribes a current Candidate Inquiry participant to committed Message Events. REST remains authoritative and this channel is read-only.',
+        'Subscribes a current Candidate Inquiry participant to committed Message Events and accepts optional SEND_MESSAGE commands. REST remains authoritative for persistence and recovery.',
       operationId: 'subscribeCandidateInquiryEvents',
       security: betterAuthSecurity,
     },
@@ -127,7 +192,7 @@ export const candidateInquiryRoute = new Elysia({
       tags: ['Candidate Inquiry'],
       summary: 'List Candidate Inquiry Participants',
       description:
-        'Lists the Hirer and Prospective Worker in an open Candidate Inquiry Conversation.',
+        'Lists the Hirer and Prospective Worker with their avatars when available in an open Candidate Inquiry Conversation.',
       operationId: 'listCandidateInquiryParticipants',
       security: betterAuthSecurity,
     },
@@ -136,12 +201,21 @@ export const candidateInquiryRoute = new Elysia({
     params: candidateInquiryParamsSchema,
     body: candidateInquiryAttachmentUploadSchema,
     type: 'multipart/form-data',
-    response: responses(candidateInquiryAttachmentResponseSchema, 401, 404, 413, 415, 429, 502),
+    response: responses(
+      candidateInquiryAttachmentResponseSchema,
+      401,
+      404,
+      413,
+      415,
+      422,
+      429,
+      502
+    ),
     detail: {
       tags: ['Candidate Inquiry'],
       summary: 'Upload a Candidate Inquiry Attachment',
       description:
-        'Uploads an image, PDF, or video up to 10 MB for the authenticated participant to attach to a Message.',
+        'Uploads an image, PDF, or video up to 10 MB. Images are limited to 25 megapixels; larger images return 422 ATTACHMENT_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadCandidateInquiryAttachment',
       security: betterAuthSecurity,
     },

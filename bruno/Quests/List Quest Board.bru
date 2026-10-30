@@ -1,0 +1,20 @@
+meta {
+  name: List Quest Board
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns compact Quest Board Cards for non-hidden, open, joinable Quests owned by another Member.
+  Eligibility is evaluated before cursor pagination.
+}

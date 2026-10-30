@@ -29,6 +29,31 @@ Key environment variables in `.env`:
 - `GOOGLE_CLIENT_ID` & `GOOGLE_CLIENT_SECRET`: OAuth 2.0 Web Application credentials for `@ku.th` student sign-in
 - `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`: Object storage configuration (points to local RustFS container)
 
+### HTTPS Candidate Team invites
+
+The API serves the browser fallback at `/invite/team` and the Android/iOS
+association files at `/.well-known/assetlinks.json` and
+`/.well-known/apple-app-site-association`. Set both association variables on
+the deployment before expecting the operating system to open the app directly:
+
+- `ANDROID_APP_LINK_TARGETS`: JSON array of `{ "packageName": string,
+"sha256CertFingerprints": string[] }` entries. Include every app package
+  that should claim this host and each actual signing-certificate SHA-256
+  fingerprint used to distribute it.
+- `IOS_APP_LINK_APP_IDS`: comma-separated Apple App IDs in
+  `TEAM_ID.bundle.identifier` form for the signed app variants.
+
+The staging deployment reads both values from GitHub Environment `staging`
+variables with the same names. The current development client uses package
+`com.kuquest.mobile.debug` and this local debug-certificate SHA-256:
+`FA:C6:17:45:DC:09:03:78:6F:B9:ED:E6:2A:96:2B:39:9F:73:48:F0:BB:6F:89:9B:83:32:66:75:91:03:3B:9C`.
+This fingerprint only verifies builds signed with that exact debug key; it
+does not cover the staging or production release packages.
+Do not use sample, debug, or placeholder fingerprints for a distributed
+Staging or Production app. The API returns `503` for an association document
+until its complete, valid configuration is present. The invite page remains
+available and lets a recipient copy the temporary Join Code.
+
 Generate 32-character secrets with:
 
 ```bash
@@ -88,6 +113,28 @@ Key Local URLs:
 - **RustFS S3 Console**: [http://localhost:9001](http://localhost:9001) _(login with credentials from `.env`)_
 - **Drizzle Studio**: `bun run db:studio` -> [https://local.drizzle.studio](https://local.drizzle.studio)
 
+### Request and WebSocket logs
+
+The Server writes one JSON `http.request` line for each completed HTTP request. Use the
+`X-Request-ID` response header to find that line. Cross-origin Admin web requests can
+read this header. The log includes the method, route template, status, duration, and
+safe error code when available. A request that never reaches the Server has no Server
+request ID.
+
+WebSocket upgrades that fail have an `http.request` line. Successful connections
+write `ws.open`, `ws.subscribed`, frame-type events, and `ws.close` with a close code.
+Browser WebSocket clients cannot read upgrade response headers. To correlate a
+connection from the frontend, generate a UUID for that connection and append
+`?traceId=<uuid>` to its WebSocket URL. Search for `clientTraceId` in Server logs;
+the Server also assigns its own `requestId`. Invalid trace IDs are ignored. A
+`ws.send` line means the Server called send, not that the frontend received a frame.
+
+These request and WebSocket log entries omit query strings, request and frame
+bodies, Session tokens, Member identifiers, and Message text. Do not put
+credentials in WebSocket URLs. In staging, read container output with
+`docker compose logs --since 10m api`; configure log rotation and retention
+on the deployment host before keeping production logs.
+
 ---
 
 ## 🧪 Testing & Code Quality
@@ -121,17 +168,50 @@ bun run db:studio             # Launch Drizzle Studio web interface
 bun run db:reset-local        # Reset local database (caution: wipes data)
 ```
 
-### Database Seeding Scripts
+### Demo seed flow
 
 ```bash
-# Seed initial Admin user (requires .env.admin with credentials)
-bun --env-file=.env.admin run db:seed-admin
-
-# Seed demo users & test data
-bun run db:seed-demo-users
-bun run db:seed-frontend-demo
-bun run db:seed-finance-test
+# Apply reference data, then run Tags → Admin → Members → funded Quests.
+# Configure Admin credentials, STAGING_TEST_AUTH_PASSWORD, and S3 storage first.
+bun run db:migrate
+bun --env-file=.env.admin run db:seed-staging
+bun --env-file=.env.admin run db:verify-staging-seed
 ```
+
+The dedicated Member step creates exactly 10 demo Members with complete Academic
+Registration, Profile pictures, Portfolio items, Certificates, and Work Experience.
+The Quest step creates one v2 Published Quest per Member with an illustrative
+picture and a start date 30–120 days after the first run. Due dates are seven days
+later. Each new Wallet has ฿1,000 in Spending Balance after funding its Quest.
+
+Mobile debug login lists these same 10 Members by name. All share the configured
+`STAGING_TEST_AUTH_PASSWORD`. Login does not create Members. Normal Google login
+remains the Member login method outside staging debug use.
+
+For a focused rerun, use `db:seed-demo-users` or `db:seed-demo-quests` in that order.
+Reruns keep Member and Quest identities, do not add starter funds again, and preserve
+Quest participation and terminal decisions. They do not restore money spent later.
+The old generic frontend, image, staging-test-user, and finance-test seed commands are removed.
+The staging flow does not create extra finance Members, completed Quests, Reviews, Dispute Cases,
+Payout Destinations, or pending Payouts.
+
+### Local Admin frontend demo seed
+
+Run this only against a local development database. Configure Admin credentials,
+`STAGING_TEST_AUTH_PASSWORD`, `PAYOUT_DESTINATION_ENCRYPTION_KEY`, and S3 storage in
+`.env.admin`. If `XENDIT_SECRET_KEY` is set, it must be an Xendit Development key.
+
+```bash
+bun --env-file=.env.admin run db:migrate
+bun --env-file=.env.admin run db:seed-demo-frontend
+```
+
+The one-command seed creates one Admin, 10 Student Members, one Staff Member, and
+one Lecturer Member. It prepares 50 v2 Quests: five in each non-open Quest State
+and 20 in `QUEST_OPEN`. It also prepares five of each `Report Case`, `Conduct
+Report`, and `Dispute Case` status, five Top-ups, five Payouts, and all four Wallet
+statuses. It uses the real Quest, Wallet, and Admin decision services. Reruns keep
+stable records and preserve Admin decisions.
 
 ### Migration Guidelines
 
@@ -166,12 +246,14 @@ ADMIN_FIRST_NAME=System
 ADMIN_LAST_NAME=Administrator
 ```
 
-The seed is the supported first-Admin bootstrap. It requires the six values
-shown above. It exits with status 1 and makes no changes when any Admin already
-exists, including an Admin with a different email. Credential creation goes
-through Better Auth, which stores a password hash in `auth_account`; the
-plaintext password is never stored or printed. Keep `.env.admin` outside source
-control and run this command only in the controlled deployment workflow.
+The standalone seed script is the supported Admin bootstrap. It requires the
+six values shown above. It creates the configured Admin when that email does
+not exist, even when another Admin exists. If the configured Admin already
+exists, the command succeeds without changing its account or password.
+Credential creation goes through Better Auth, which stores a password hash in
+`auth_account`; the plaintext password is never stored or printed. Keep
+`.env.admin` outside source control. Run the standalone command only in a
+controlled deployment process.
 
 Run the seed script:
 
@@ -179,9 +261,18 @@ Run the seed script:
 bun --env-file=.env.admin run db:seed-admin
 ```
 
-If the command reports that an Admin already exists, stop the bootstrap. This
-seed never updates or resets an existing Admin. Verify the bootstrap by signing
-in to the Admin web app with these credentials before you close the deployment.
+For UAT, `Backend UAT CD` runs the Admin seed after each successful
+`deploy` operation. It skips the seed on `rollback`. Configure these GitHub
+environment secrets for `uat`: `ADMIN_EMAIL`, `ADMIN_PASSWORD`,
+`ADMIN_FIRST_NAME`, and `ADMIN_LAST_NAME`. The workflow uses the UAT
+`DATABASE_URL` and `ADMIN_BETTER_AUTH_SECRET`.
+
+If the configured Admin email already exists, the UAT workflow treats the
+seed as a successful no-op. It does not change that Admin's credentials. The
+seed can create the configured Admin when another Admin exists.
+
+The command never updates or resets an existing Admin. Verify sign-in to the
+Admin web app with these credentials before closing the deployment.
 
 ---
 

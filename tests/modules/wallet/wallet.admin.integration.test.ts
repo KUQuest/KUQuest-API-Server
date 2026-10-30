@@ -3,7 +3,7 @@ import { db, sql } from '@/database/client';
 import { adminAction } from '@/database/schema/admin.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
-import { createWallet, getWallet } from '@/modules/wallet';
+import { changeWalletStatus, createWallet, getWallet } from '@/modules/wallet';
 
 import { beforeAll, describe, expect, it } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
@@ -14,6 +14,15 @@ let adminCookie = '';
 
 const studentId = crypto.randomUUID();
 let studentWalletId = '';
+type WalletStatusHistoryEntry = {
+  fromStatus: string | null;
+  actorUserId: string | null;
+  actorAdminId: string | null;
+  actorDisplayName: string | null;
+};
+type WalletStatusHistoryResponse = {
+  data: { history: WalletStatusHistoryEntry[] };
+};
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -65,15 +74,53 @@ describe('Admin Wallet API routes', () => {
     expect(unauthenticated.status).toBe(401);
   });
 
-  it('retrieves the status history of a Wallet', async () => {
+  it('returns null latest transaction time when a Wallet has no Ledger Transaction', async () => {
+    const response = await app.handle(
+      new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: { wallet: { displayId: string; latestTransactionAt: string | null } };
+    };
+    expect(body.data.wallet.displayId).toMatch(/^WLT-\d{6}$/);
+    expect(body.data.wallet.latestTransactionAt).toBeNull();
+  });
+
+  it('returns actor names and null for Wallet status history', async () => {
     const response = await app.handle(
       new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`, {
         headers: { cookie: adminCookie },
       })
     );
     expect(response.status).toBe(200);
-    const body = (await response.json()) as { data: { history: unknown[] } };
+    const body = (await response.json()) as WalletStatusHistoryResponse;
     expect(body.data.history.length).toBeGreaterThanOrEqual(1);
+    const initialEntry = body.data.history.find((entry) => entry.fromStatus === null);
+    expect(initialEntry?.actorDisplayName).toBeNull();
+
+    await changeWalletStatus({
+      walletId: studentWalletId,
+      toStatus: 'FROZEN',
+      reason: 'Member actor display test',
+      actorUserId: studentId,
+    });
+    const memberResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    const memberBody = (await memberResponse.json()) as WalletStatusHistoryResponse;
+    const memberEntry = memberBody.data.history.find((entry) => entry.actorUserId === studentId);
+    expect(memberEntry?.actorDisplayName).toBe('Student AdminTest');
+
+    await changeWalletStatus({
+      walletId: studentWalletId,
+      toStatus: 'ACTIVE',
+      reason: 'Restore after Member actor display test',
+      actorUserId: studentId,
+    });
   });
 
   it('freezes and restores a Wallet with status changes and history', async () => {
@@ -154,6 +201,15 @@ describe('Admin Wallet API routes', () => {
         )
       );
     expect(unfreezeActions).toHaveLength(1);
+    const historyResponse = await app.handle(
+      new Request(`http://localhost/api/v1/admin/wallets/${studentWalletId}/status-history`, {
+        headers: { cookie: adminCookie },
+      })
+    );
+    expect(historyResponse.status).toBe(200);
+    const historyBody = (await historyResponse.json()) as WalletStatusHistoryResponse;
+    const adminEntry = historyBody.data.history.find((entry) => entry.actorAdminId !== null);
+    expect(adminEntry?.actorDisplayName).toBe('Wallet Admin');
 
     const walletAfterRestore = await getWallet(studentId);
     expect(walletAfterRestore.walletStatus).toBe('ACTIVE');

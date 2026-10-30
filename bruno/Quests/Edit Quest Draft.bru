@@ -1,0 +1,40 @@
+meta {
+  name: Edit Quest Draft
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  If-Match: "{{questVersion}}"
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "title": "Design an updated promotional poster"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.version) {
+    bru.setEnvVar("questVersion", data.data.version);
+  }
+}
+
+docs {
+  Edits a Quest in QUEST_DRAFT state with optimistic locking (requires If-Match header matching the current version).
+  Updates questVersion on success.
+}

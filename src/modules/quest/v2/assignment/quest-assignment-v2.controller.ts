@@ -1,0 +1,174 @@
+import type { AuthedContext } from '@/modules/auth';
+import { apiError, apiSuccess } from '@/shared/api-response';
+
+import {
+  joinQuestV2,
+  listMyQuestV2Assignments,
+  listQuestV2Assignments,
+  type QuestV2AssignmentOutcome,
+} from './quest-assignment-v2.service';
+import {
+  mapQuestCommandOutcome,
+  requireQuestCommandId,
+} from '../../shared/command/quest-command.controller';
+import type {
+  QuestV2AssignmentMineQuery,
+  QuestV2AssignmentParams,
+} from './quest-assignment-v2.schema';
+import { WorkChatTransitionError } from '../../shared/work-chat/quest-work-chat.port';
+import { mapQuestStartWorkOutcome } from '../../shared/quest-start-work.controller';
+import { startQuestWork } from '../../shared/quest-start-work.service';
+import { loadMemberSummaries } from '../../shared/member-summary';
+
+type QuestV2Assignment = Extract<QuestV2AssignmentOutcome, { id: string }>;
+type QuestV2AssignmentError = Exclude<QuestV2AssignmentOutcome, QuestV2Assignment>;
+
+const serializeAssignment = (assignment: QuestV2Assignment) => ({
+  id: assignment.id,
+  questId: assignment.questId,
+  workerId: assignment.workerId,
+  state: assignment.state,
+  questState: assignment.questState,
+  startedAt: assignment.startedAt?.toISOString() ?? null,
+  createdAt: assignment.createdAt.toISOString(),
+  teamRole: assignment.teamRole,
+  team: assignment.team,
+});
+
+const serializeAssignments = async (assignments: QuestV2Assignment[]) => {
+  const memberOf = await loadMemberSummaries(assignments.map(({ workerId }) => workerId));
+  return assignments.map((assignment) => ({
+    ...serializeAssignment(assignment),
+    member: memberOf(assignment.workerId),
+  }));
+};
+
+const conflict = (set: AuthedContext['set'], code: string, message: string) => {
+  set.status = 409;
+  return apiError(code, message);
+};
+
+const mapJoinOutcome = (set: AuthedContext['set'], outcome: QuestV2AssignmentError) => {
+  if (outcome.outcome === 'not-found') {
+    set.status = 404;
+    return apiError('QUEST_NOT_FOUND', 'Quest not found');
+  }
+  if (outcome.outcome === 'not-first-come-first-served') {
+    return conflict(
+      set,
+      'QUEST_MODE_NOT_ALLOWED',
+      'Only FIRST_COME_FIRST_SERVED Quests accept direct joins'
+    );
+  }
+  if (outcome.outcome === 'not-supported-participation') {
+    return conflict(
+      set,
+      'QUEST_PARTICIPATION_NOT_ALLOWED',
+      'Only SINGLE or GROUP Quests accept direct joins'
+    );
+  }
+  if (outcome.outcome === 'hirer-not-allowed') {
+    return conflict(set, 'HIRER_CANNOT_JOIN', 'The Hirer cannot join their own Quest');
+  }
+  if (outcome.outcome === 'not-open') {
+    return conflict(set, 'QUEST_NOT_OPEN', 'Only an open Quest can accept a direct join');
+  }
+  if (outcome.outcome === 'red-flagged') {
+    return conflict(
+      set,
+      'MEMBER_RED_FLAGGED',
+      'A Member with an active Red Flag cannot join a direct-join Quest'
+    );
+  }
+  if (outcome.outcome === 'roster-frozen') {
+    return conflict(
+      set,
+      'QUEST_ROSTER_FROZEN',
+      'The accepted Worker roster is frozen after the Quest start boundary'
+    );
+  }
+  if (outcome.outcome === 'already-assigned') {
+    return conflict(set, 'ALREADY_JOINED', 'The Worker already has an active Assignment');
+  }
+  if (outcome.outcome === 'full') {
+    return conflict(set, 'QUEST_FULL', 'The Quest has no open Worker slots');
+  }
+  if (outcome.outcome === 'worker-schedule-conflict') {
+    return conflict(
+      set,
+      'WORKER_SCHEDULE_CONFLICT',
+      'The Worker has an active Assignment with overlapping scheduled work time'
+    );
+  }
+  return mapQuestCommandOutcome(set, outcome.outcome);
+};
+
+export const joinQuestV2Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2AssignmentParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+
+  try {
+    const result = await joinQuestV2(session.user.id, params.questId, commandId, new Date());
+    if ('outcome' in result) return mapJoinOutcome(set, result);
+    const [assignment] = await serializeAssignments([result]);
+    return apiSuccess(assignment);
+  } catch (error) {
+    if (error instanceof WorkChatTransitionError) {
+      set.status = 503;
+      return apiError('WORK_CHAT_UNAVAILABLE', 'Work Chat membership could not be updated');
+    }
+    throw error;
+  }
+};
+
+export const startQuestWorkV2Controller = async ({
+  params,
+  request,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2AssignmentParams }) => {
+  const commandId = requireQuestCommandId(request, set);
+  if (typeof commandId !== 'string') return commandId;
+  const result = await startQuestWork('v2', session.user.id, params.questId, commandId, new Date());
+  if ('outcome' in result) return mapQuestStartWorkOutcome(set, result);
+  return apiSuccess({
+    questId: result.questId,
+    assignmentId: result.assignmentId,
+    startedAt: result.startedAt.toISOString(),
+    questState: result.questStatus,
+  });
+};
+
+const mapReadOutcome = (set: AuthedContext['set']) => {
+  set.status = 404;
+  return apiError('QUEST_NOT_FOUND', 'Quest not found');
+};
+
+export const listQuestV2AssignmentsController = async ({
+  params,
+  session,
+  set,
+}: AuthedContext & { params: QuestV2AssignmentParams }) => {
+  const result = await listQuestV2Assignments(session.user.id, params.questId);
+  if ('outcome' in result) return mapReadOutcome(set);
+  return apiSuccess({ items: await serializeAssignments(result) });
+};
+
+export const listMyQuestV2AssignmentsController = async ({
+  query,
+  session,
+}: AuthedContext & { query: QuestV2AssignmentMineQuery }) => {
+  const assignments = await listMyQuestV2Assignments(session.user.id, query.status);
+  const serialized = await serializeAssignments(assignments);
+  return apiSuccess({
+    items: serialized.map((assignment, index) => ({
+      ...assignment,
+      underfilled: assignments[index]?.underfilled ?? null,
+    })),
+  });
+};

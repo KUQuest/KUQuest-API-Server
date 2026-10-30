@@ -59,6 +59,26 @@ describe('Quest Review API v2 HTTP contract', () => {
   );
 
   it.each([
+    ['GET', `/api/v2/quests/${questId}/reviews`],
+    ['GET', `/api/v2/quests/${questId}/reviews/${reviewId}`],
+  ])('requires Member authentication for %s Review reads', async (method, path) => {
+    const response = await request(method, path);
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+  });
+
+  it.each([`/api/v2/quests/not-a-uuid/reviews`, `/api/v2/quests/${questId}/reviews/not-a-uuid`])(
+    'validates Review read parameters before authentication',
+    async (path) => {
+      const response = await request('GET', path);
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error.code).toBe('VALIDATION');
+    }
+  );
+
+  it.each([
     ['POST', `/api/v2/quests/${questId}/reviews`, { rating: 5 }],
     ['PATCH', `/api/v2/quests/${questId}/reviews/${reviewId}`, { rating: 4 }],
   ] as Array<[string, string, unknown]>)(
@@ -76,7 +96,7 @@ describe('Quest Review API v2 HTTP contract', () => {
     }
   );
 
-  it('publishes the v2 create and edit operations without a v2 delete operation', async () => {
+  it('publishes authenticated v2 Review read operations and no delete operation', async () => {
     const response = await request('GET', '/openapi/json');
     const document = (await response.json()) as {
       paths: Record<
@@ -87,6 +107,7 @@ describe('Quest Review API v2 HTTP contract', () => {
               operationId?: string;
               parameters?: Array<Record<string, unknown>>;
               security?: unknown;
+              responses?: Record<string, unknown>;
             }
           >
         | undefined
@@ -95,11 +116,21 @@ describe('Quest Review API v2 HTTP contract', () => {
 
     const create = document.paths['/api/v2/quests/{questId}/reviews']?.post;
     const update = document.paths['/api/v2/quests/{questId}/reviews/{reviewId}']?.patch;
+    const list = document.paths['/api/v2/quests/{questId}/reviews']?.get;
+    const detail = document.paths['/api/v2/quests/{questId}/reviews/{reviewId}']?.get;
 
     expect(create?.operationId).toBe('createQuestReviewV2');
     expect(update?.operationId).toBe('updateQuestReviewV2');
+    expect(list?.operationId).toBe('listQuestReviewsV2');
+    expect(detail?.operationId).toBe('getQuestReviewV2');
+    expect(list?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(detail?.security).toEqual([{ betterAuthSession: [] }]);
     expect(create?.security).toEqual([{ betterAuthSession: [] }]);
     expect(update?.security).toEqual([{ betterAuthSession: [] }]);
+    expect(list?.responses).toHaveProperty('200');
+    expect(list?.responses).toHaveProperty('404');
+    expect(detail?.responses).toHaveProperty('200');
+    expect(detail?.responses).toHaveProperty('404');
     expect(create?.parameters).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'idempotency-key', in: 'header', required: true }),

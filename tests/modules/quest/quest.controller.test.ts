@@ -1,4 +1,4 @@
-import * as questService from '@/modules/quest/quest.service';
+import * as questService from '@/modules/quest/v1';
 import {
   createQuestController,
   createQuestEditRequestController,
@@ -7,7 +7,7 @@ import {
   respondToQuestEditRequestController,
   getQuestDetailController,
   listBoardQuestsController,
-} from '@/modules/quest/quest.controller';
+} from '@/modules/quest/v1';
 
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
@@ -212,6 +212,7 @@ describe('Quest controllers', () => {
       estimatedDurationMinutes: null,
       proofRequired: true,
       hirerName: 'Quest Hirer',
+      hirerRedFlagged: false,
       locations: [],
       images: [],
     };

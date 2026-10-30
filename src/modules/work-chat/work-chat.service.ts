@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { avatarStorage } from '@/modules/profile/profile.storage';
 import {
   chatAttachment,
   chatConversation,
@@ -10,6 +11,7 @@ import {
   chatReadCursor,
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { FileDimensionsTooLargeError } from '@/shared/object-storage';
 
 import {
   and,
@@ -45,6 +47,7 @@ export class WorkChatServiceError extends Error {
       | 'ATTACHMENT_NOT_FOUND'
       | 'ATTACHMENT_LINK_UNAVAILABLE'
       | 'ATTACHMENT_TOO_LARGE'
+      | 'ATTACHMENT_DIMENSIONS_TOO_LARGE'
       | 'ATTACHMENT_UNSUPPORTED'
       | 'ATTACHMENT_UPLOAD_FAILED'
       | 'CLIENT_MESSAGE_ID_REUSED'
@@ -97,7 +100,7 @@ const decodeMessageCursor = (value: string): MessageCursor => {
   }
 };
 
-const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
+export const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
   exists(
     database
       .select({ id: chatMembership.id })
@@ -106,7 +109,8 @@ const memberCanSeeMessage = (database: WorkChatDatabase, userId: string) =>
         and(
           eq(chatMembership.conversationId, chatMessage.conversationId),
           eq(chatMembership.memberId, userId),
-          or(isNull(chatMembership.leftAt), lte(chatMessage.createdAt, chatMembership.leftAt))
+          or(isNull(chatMembership.leftAt), lte(chatMessage.createdAt, chatMembership.leftAt)),
+          or(isNull(chatMessage.hiddenAt), eq(chatMembership.id, chatMessage.senderMembershipId))
         )
       )
   );
@@ -168,7 +172,36 @@ export type MessageRow = {
   createdAt: Date;
 };
 
-export const loadMessageDetails = async (database: WorkChatDatabase, rows: MessageRow[]) => {
+export type WorkChatAvatar = { fileId: string; url: string } | null;
+
+type WorkChatAvatarRow = {
+  avatarFileId: string | null;
+  avatarBucket: string | null;
+  avatarObjectKey: string | null;
+};
+
+export const toWorkChatAvatar = (row: WorkChatAvatarRow): WorkChatAvatar => {
+  if (!row.avatarFileId || !row.avatarBucket || !row.avatarObjectKey) return null;
+
+  try {
+    return {
+      fileId: row.avatarFileId,
+      url: avatarStorage.linkFor({ bucket: row.avatarBucket, objectKey: row.avatarObjectKey }),
+    };
+  } catch (error) {
+    console.error('[work-chat-avatar] Link creation failed', {
+      fileId: row.avatarFileId,
+      error,
+    });
+    return null;
+  }
+};
+
+export const loadMessageDetails = async (
+  database: WorkChatDatabase,
+  rows: MessageRow[],
+  viewerMemberId: string
+) => {
   if (rows.length === 0) return [];
 
   const senderMembershipIds = rows
@@ -188,11 +221,36 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
     memberIds.length === 0
       ? []
       : await database
-          .select({ id: authUser.id, firstName: authUser.firstName, lastName: authUser.lastName })
+          .select({
+            id: authUser.id,
+            firstName: authUser.firstName,
+            lastName: authUser.lastName,
+            avatarFileId: file.id,
+            avatarBucket: file.bucket,
+            avatarObjectKey: file.objectKey,
+          })
           .from(authUser)
+          .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
           .where(inArray(authUser.id, memberIds));
   const membershipById = new Map(memberships.map((membership) => [membership.id, membership]));
   const userById = new Map(users.map((user) => [user.id, user]));
+  const senderMessageIds = rows
+    .filter(
+      (row) =>
+        row.senderMembershipId !== null &&
+        membershipById.get(row.senderMembershipId)?.memberId === viewerMemberId
+    )
+    .map((row) => row.id);
+  const attachmentVisibility =
+    senderMessageIds.length === 0
+      ? eq(chatAttachment.status, 'CONSUMED')
+      : or(
+          eq(chatAttachment.status, 'CONSUMED'),
+          and(
+            eq(chatAttachment.status, 'HIDDEN'),
+            inArray(chatMessageAttachment.messageId, senderMessageIds)
+          )
+        );
 
   const attachments = await database
     .select({
@@ -205,13 +263,15 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
     })
     .from(chatMessageAttachment)
     .innerJoin(chatAttachment, eq(chatAttachment.id, chatMessageAttachment.attachmentId))
+    .innerJoin(chatMessage, eq(chatMessage.id, chatMessageAttachment.messageId))
     .where(
       and(
         inArray(
           chatMessageAttachment.messageId,
           rows.map(({ id }) => id)
         ),
-        eq(chatAttachment.status, 'CONSUMED'),
+        eq(chatAttachment.conversationId, chatMessage.conversationId),
+        attachmentVisibility,
         isNull(chatAttachment.deletedAt)
       )
     )
@@ -229,14 +289,19 @@ export const loadMessageDetails = async (database: WorkChatDatabase, rows: Messa
       : undefined;
     const sender =
       row.kind === 'SYSTEM'
-        ? { id: null, displayName: 'KU bot' }
-        : {
-            id: senderMembership?.memberId ?? null,
-            displayName: senderMembership?.memberId
-              ? `${userById.get(senderMembership.memberId)?.firstName ?? ''} ${userById.get(senderMembership.memberId)?.lastName ?? ''}`.trim() ||
-                'Former member'
-              : 'Former member',
-          };
+        ? { id: null, displayName: 'KU bot', avatar: null }
+        : (() => {
+            const user = senderMembership?.memberId
+              ? userById.get(senderMembership.memberId)
+              : undefined;
+            return {
+              id: senderMembership?.memberId ?? null,
+              displayName: senderMembership?.memberId
+                ? `${user?.firstName ?? ''} ${user?.lastName ?? ''}`.trim() || 'Former member'
+                : 'Former member',
+              avatar: user ? toWorkChatAvatar(user) : null,
+            };
+          })();
 
     return {
       id: row.id,
@@ -324,6 +389,7 @@ export type WorkConversation = {
   latestMessage: {
     id: string;
     kind: 'USER' | 'SYSTEM';
+    systemType: string | null;
     preview: string;
     createdAt: Date;
   } | null;
@@ -337,6 +403,7 @@ export type WorkConversationParticipant = {
   id: string | null;
   role: 'HIRER' | 'WORKER';
   displayName: string;
+  avatar: WorkChatAvatar;
 };
 
 export type WorkConversationAttachment = {
@@ -361,9 +428,13 @@ export const listWorkConversationParticipants = async (
       role: chatMembership.role,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
     })
     .from(chatMembership)
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(
       and(
         eq(chatMembership.conversationId, conversationId),
@@ -378,6 +449,7 @@ export const listWorkConversationParticipants = async (
     role: participant.role as WorkConversationParticipant['role'],
     displayName:
       `${participant.firstName ?? ''} ${participant.lastName ?? ''}`.trim() || 'Former member',
+    avatar: toWorkChatAvatar(participant),
   }));
 };
 
@@ -391,6 +463,7 @@ const loadConversationSummary = async (
       .select({
         id: chatMessage.id,
         kind: chatMessage.kind,
+        systemType: chatMessage.systemType,
         text: chatMessage.contentText,
         createdAt: chatMessage.createdAt,
       })
@@ -433,6 +506,7 @@ const loadConversationSummary = async (
       ? {
           id: latest.id,
           kind: latest.kind,
+          systemType: latest.systemType,
           preview: latest.text ?? '',
           createdAt: latest.createdAt,
         }
@@ -548,7 +622,7 @@ export const listWorkConversationMessages = async (
   const hasMore = rows.length > options.limit;
   const selectedRows = rows.slice(0, options.limit);
   if (!after) selectedRows.reverse();
-  const items = await loadMessageDetails(db, selectedRows);
+  const items = await loadMessageDetails(db, selectedRows, userId);
   const cursorMessage = after ? selectedRows[selectedRows.length - 1] : selectedRows[0];
 
   return {
@@ -632,6 +706,12 @@ const enforceSendRateLimit = async (
 };
 
 const mapAttachmentStorageError = (error: unknown): WorkChatServiceError => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    return new WorkChatServiceError(
+      'ATTACHMENT_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof WorkChatAttachmentTooLargeError) {
     return new WorkChatServiceError('ATTACHMENT_TOO_LARGE', error.message);
   }
@@ -985,7 +1065,7 @@ export const sendWorkConversationMessage = async (
         );
       }
       return {
-        message: (await loadMessageDetails(transaction, [existing]))[0]!,
+        message: (await loadMessageDetails(transaction, [existing], userId))[0]!,
         created: false,
       };
     }
@@ -1069,7 +1149,7 @@ export const sendWorkConversationMessage = async (
       .where(eq(chatConversation.id, conversationId));
 
     return {
-      message: (await loadMessageDetails(transaction, [message]))[0]!,
+      message: (await loadMessageDetails(transaction, [message], userId))[0]!,
       created: true,
     };
   });

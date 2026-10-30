@@ -34,7 +34,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 
 ### 3. Relation to Trust & Safety (Admin Moderation)
 
-- Messages in **both** conversation types can be reported for abusive language or harassment (`REPORT_ABUSIVE_OR_HARASSMENT`).
+- Messages in **both** conversation types can be reported for `REPORT_ABUSIVE_OR_HARASSMENT`, `REPORT_SPAM`, `REPORT_INAPPROPRIATE_CONTENT`, `REPORT_DANGER_OR_THREAT`, or `REPORT_OTHER`.
 - Admin access to chat content is strictly gated through Report Case **Evidence References**; Admins cannot browse conversations without an active/historical case.
 
 ---
@@ -69,6 +69,10 @@ A Candidate Inquiry Conversation lets a Prospective Worker ask the Hirer questio
 
 - A new Message notifies only the other participant in that Candidate Inquiry Conversation.
 - Active on-page users see Messages in place; otherwise it uses in-app Popup or Android Push.
+- A successful pre-participation `QUEST_OPEN` edit sends a separate realtime
+  Quest-update event to the Hirer and each Member with an open Candidate
+  Inquiry Conversation for that Quest. It does not create a Message or an
+  offline Push Notification.
 - After `INQUIRY_CLOSED`, no new Message or notification is created.
 
 ---

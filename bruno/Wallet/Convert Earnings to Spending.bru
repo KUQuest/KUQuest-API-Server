@@ -1,0 +1,32 @@
+meta {
+  name: Convert Earnings to Spending
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/wallet/earnings-conversions
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "amountSatang": 10000
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Instantly and irreversibly transfers integer satang from earningsBalanceSatang into spendingBalanceSatang without any fee.
+  Requires amountSatang >= 100 (1.00 THB).
+}

@@ -1,0 +1,265 @@
+import {
+  adminDecisionReasonTextSchema,
+  adminMemberModerationContextFieldsSchema,
+  adminMemberStatusSchema,
+} from '@/modules/admin';
+import { disputeCaseCategories } from '@/database/schema/admin.schema';
+import { MAX_PAGE_LIMIT } from '@/shared/cursor';
+
+import { t } from 'elysia';
+
+import {
+  disputeCaseDismissReasonCodes,
+  disputeCaseResolveReasonCodes,
+} from './quest-dispute-admin.policy';
+
+const disputeCaseStatusSchema = t.Union([
+  t.Literal('DISPUTE_CASE_PENDING'),
+  t.Literal('DISPUTE_CASE_DISMISSED'),
+  t.Literal('DISPUTE_CASE_RESOLVED'),
+]);
+
+const disputeCaseCategorySchema = t.Union([
+  t.Literal(disputeCaseCategories[0]),
+  t.Literal(disputeCaseCategories[1]),
+  t.Literal(disputeCaseCategories[2]),
+  t.Literal(disputeCaseCategories[3]),
+]);
+
+const nonBlankStatementSchema = t.String({ minLength: 1, pattern: '\\S' });
+
+const adminDisputeDismissReasonCodeSchema = t.Union([
+  t.Literal(disputeCaseDismissReasonCodes[0]),
+  t.Literal(disputeCaseDismissReasonCodes[1]),
+  t.Literal(disputeCaseDismissReasonCodes[2]),
+  t.Literal(disputeCaseDismissReasonCodes[3]),
+]);
+
+const adminDisputeResolveReasonCodeSchema = t.Union([
+  t.Literal(disputeCaseResolveReasonCodes[0]),
+  t.Literal(disputeCaseResolveReasonCodes[1]),
+  t.Literal(disputeCaseResolveReasonCodes[2]),
+]);
+
+export const adminDisputeParamsSchema = t.Object({
+  disputeCaseId: t.String({ format: 'uuid' }),
+});
+
+export const adminDisputeOpenParamsSchema = t.Object({
+  questId: t.String({ format: 'uuid' }),
+});
+
+export const adminDisputeOpenBodySchema = t.Object(
+  {
+    workerId: t.String({ format: 'uuid' }),
+    category: disputeCaseCategorySchema,
+    submittedDetail: nonBlankStatementSchema,
+    filerStatement: t.Optional(nonBlankStatementSchema),
+  },
+  { additionalProperties: false }
+);
+
+export const questDisputeFilingBodySchema = t.Object(
+  {
+    category: disputeCaseCategorySchema,
+    submittedDetail: nonBlankStatementSchema,
+    filerStatement: t.Optional(nonBlankStatementSchema),
+  },
+  { additionalProperties: false }
+);
+
+export const questDisputeResponseBodySchema = t.Object(
+  { respondentStatement: nonBlankStatementSchema },
+  { additionalProperties: false }
+);
+
+export const adminDisputeListQuerySchema = t.Object({
+  q: t.Optional(t.String({ maxLength: 200 })),
+  status: t.Optional(disputeCaseStatusSchema),
+  limit: t.Optional(t.Integer({ minimum: 1, maximum: MAX_PAGE_LIMIT })),
+  cursor: t.Optional(t.String()),
+  sort: t.Optional(t.Union([t.Literal('newest'), t.Literal('oldest')])),
+});
+
+const adminDisputeVersionHeaderSchema = t.String({ minLength: 1, maxLength: 100, pattern: '\\S' });
+export const adminDisputeCommandHeadersSchema = t.Union([
+  t.Object({
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'if-match': adminDisputeVersionHeaderSchema,
+    'x-resource-version': t.Optional(adminDisputeVersionHeaderSchema),
+  }),
+  t.Object({
+    'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+    'if-match': t.Optional(adminDisputeVersionHeaderSchema),
+    'x-resource-version': adminDisputeVersionHeaderSchema,
+  }),
+]);
+
+export const adminDisputeEvidenceHeadersSchema = t.Object({
+  'idempotency-key': t.String({ minLength: 1, maxLength: 200, pattern: '\\S' }),
+});
+
+export const adminDisputeDismissBodySchema = t.Object(
+  {
+    outcome: t.Literal('DISPUTE_CASE_DISMISSED'),
+    reasonCode: adminDisputeDismissReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const adminDisputeResolveDecisionBodySchema = t.Object(
+  {
+    outcome: t.Literal('DISPUTE_CASE_RESOLVED'),
+    reasonCode: adminDisputeResolveReasonCodeSchema,
+    decisionReasonText: adminDecisionReasonTextSchema,
+    workerId: t.Optional(t.String({ format: 'uuid' })),
+    amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
+  },
+  { additionalProperties: false }
+);
+
+export const adminDisputeResolveBodySchema = t.Union([
+  adminDisputeDismissBodySchema,
+  adminDisputeResolveDecisionBodySchema,
+]);
+
+export const adminDisputeSummarySchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
+  questId: t.String({ format: 'uuid' }),
+  filerUserId: t.String({ format: 'uuid' }),
+  openedByAdminId: t.Nullable(t.String({ format: 'uuid' })),
+  status: disputeCaseStatusSchema,
+  version: t.Integer({ minimum: 1 }),
+  resolvedWorkerId: t.Nullable(t.String({ format: 'uuid' })),
+  resolvedAmountSatang: t.Nullable(t.Integer({ minimum: 1 })),
+  resolvedByAdminId: t.Nullable(t.String({ format: 'uuid' })),
+  resolvedAt: t.Nullable(t.String({ format: 'date-time' })),
+  createdAt: t.String({ format: 'date-time' }),
+  updatedAt: t.String({ format: 'date-time' }),
+});
+
+export const adminDisputeListResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    items: t.Array(adminDisputeSummarySchema),
+    nextCursor: t.Nullable(t.String()),
+    totalCount: t.Integer({ minimum: 0 }),
+    countsByStatus: t.Object({
+      DISPUTE_CASE_PENDING: t.Integer({ minimum: 0 }),
+      DISPUTE_CASE_DISMISSED: t.Integer({ minimum: 0 }),
+      DISPUTE_CASE_RESOLVED: t.Integer({ minimum: 0 }),
+    }),
+  }),
+});
+
+export const adminDisputeDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Intersect([
+    adminDisputeSummarySchema,
+    adminMemberModerationContextFieldsSchema,
+    t.Object({
+      category: t.Nullable(disputeCaseCategorySchema),
+      submittedDetail: t.Nullable(t.String()),
+      filerStatement: t.Nullable(t.String()),
+      respondentStatement: t.Nullable(t.String()),
+      filerDisplayId: t.Nullable(t.String()),
+      respondentDisplayId: t.Nullable(t.String()),
+      resolvedWorkerDisplayId: t.Nullable(t.String()),
+      decision: t.Object({
+        reasonCode: t.Nullable(t.String()),
+        decisionReasonText: t.Nullable(t.String({ maxLength: 200 })),
+      }),
+      member: t.Union([t.Object({ status: adminMemberStatusSchema }), t.Null()], {
+        description:
+          'The related respondent Member record, used to distinguish an empty history from unavailable Member data.',
+      }),
+      quest: t.Object({
+        id: t.String({ format: 'uuid' }),
+        displayId: t.Nullable(t.String()),
+        title: t.String(),
+        hirerId: t.String({ format: 'uuid' }),
+        hirerDisplayId: t.Nullable(t.String()),
+        questStatus: t.String(),
+        version: t.Integer({ minimum: 1 }),
+        failedAt: t.Nullable(t.String({ format: 'date-time' })),
+        fundingReservationId: t.Nullable(t.String({ format: 'uuid' })),
+      }),
+    }),
+  ]),
+});
+
+const adminDisputeEvidenceSchema = t.Object({
+  caseId: t.String({ format: 'uuid' }),
+  questId: t.String({ format: 'uuid' }),
+  truncated: t.Boolean(),
+  quest: t.Object({
+    id: t.String({ format: 'uuid' }),
+    questStatus: t.String(),
+    version: t.Integer({ minimum: 1 }),
+    hirerId: t.String({ format: 'uuid' }),
+    failedAt: t.Nullable(t.String({ format: 'date-time' })),
+  }),
+  assignments: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      workerId: t.String({ format: 'uuid' }),
+      assignmentStatus: t.String(),
+      startedAt: t.Nullable(t.String({ format: 'date-time' })),
+      createdAt: t.String({ format: 'date-time' }),
+    })
+  ),
+  proofSubmissions: t.Array(
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      workerId: t.Nullable(t.String({ format: 'uuid' })),
+      teamId: t.Nullable(t.String({ format: 'uuid' })),
+      submittedByUserId: t.String({ format: 'uuid' }),
+      workerMessage: t.Nullable(t.String()),
+      submissionStatus: t.String(),
+      submittedAt: t.Nullable(t.String({ format: 'date-time' })),
+      files: t.Array(
+        t.Object({
+          fileId: t.String({ format: 'uuid' }),
+          url: t.String({ format: 'uri' }),
+          urlExpiresAt: t.String({ format: 'date-time' }),
+          contentType: t.String(),
+          sizeBytes: t.Integer({ minimum: 0 }),
+          position: t.Integer({ minimum: 0 }),
+        })
+      ),
+    })
+  ),
+});
+
+export const adminDisputeEvidenceResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Intersect([
+    adminDisputeEvidenceSchema,
+    t.Object({ adminActionId: t.String({ format: 'uuid' }) }),
+  ]),
+});
+
+export const adminDisputeCommandResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    resourceSummary: adminDisputeSummarySchema,
+    resourceVersion: t.Integer({ minimum: 1 }),
+    adminActionId: t.String({ format: 'uuid' }),
+  }),
+});
+
+export const adminDisputeOpenResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: adminDisputeSummarySchema,
+});
+export const questDisputeMineResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Object({
+    case: t.Nullable(adminDisputeSummarySchema),
+  }),
+});
+
+export type AdminDisputeListQuery = typeof adminDisputeListQuerySchema.static;
+export type AdminDisputeResolveBody = typeof adminDisputeResolveBodySchema.static;

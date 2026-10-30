@@ -54,6 +54,15 @@ export const openapiPlugin = openapi({
         name: 'Xendit webhooks',
         description: 'Provider callbacks for durable Top-up outcome processing.',
       },
+      {
+        name: 'Admin Reports',
+        description: 'Admin Trust and Safety Report Case queue, evidence, and decisions.',
+      },
+      {
+        name: 'Admin Search',
+        description:
+          'Searches safe fields in one or all supported Admin record types. Use kind=all to search all types.',
+      },
     ],
     components: {
       ...authOpenAPIComponents,

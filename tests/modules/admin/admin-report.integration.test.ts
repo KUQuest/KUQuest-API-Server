@@ -1,0 +1,4469 @@
+import { app } from '@/app';
+import { db, sql } from '@/database/client';
+import {
+  adminAction,
+  adminConductReport,
+  adminConductReportEvidenceHandle,
+  adminEvidenceReference,
+  adminModerationDecision,
+  adminReportCase,
+  adminReporterEntry,
+  conductReportReason,
+  memberPenaltyRecord,
+} from '@/database/schema/admin.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
+import { pushDelivery, pushDevice } from '@/database/schema/push.schema';
+import {
+  proofSubmission,
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  questTeam,
+  questTeamMember,
+  questV2ProofSubmission,
+} from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
+import {
+  walletFundingReservation,
+  walletLedgerAccount,
+  walletLedgerPosting,
+  walletLedgerTransaction,
+  walletStatusHistory,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
+import {
+  chatAttachment,
+  chatConversation,
+  chatMembership,
+  chatMessage,
+  chatMessageAttachment,
+} from '@/database/schema/work-chat.schema';
+import { auth } from '@/modules/auth';
+import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import {
+  processExpiredMemberBanWalletFreeze,
+  recordMemberConfirmedViolationInTransaction,
+} from '@/modules/admin/member-penalty';
+import {
+  createPushDeviceEncryption,
+  processPendingPushDeliveries,
+  registerAndroidPushDevice,
+} from '@/modules/push';
+import { changeWalletStatus, ensureWallet, getWallet } from '@/modules/wallet';
+import { workChatStorage } from '@/modules/work-chat';
+
+import { randomUUID } from 'node:crypto';
+
+import { and, asc, eq, inArray } from 'drizzle-orm';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  spyOn,
+} from 'bun:test';
+
+let postgresAvailable = false;
+let adminCookie = '';
+let adminId = '';
+const adminEmail = `${randomUUID()}@example.com`;
+const adminPassword = 'AdminPass1!';
+const reporterId = randomUUID();
+const senderId = randomUUID();
+const additionalWorkerId = randomUUID();
+const unrelatedCandidateId = randomUUID();
+const reporterStudentId = String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000));
+const senderStudentId = String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000));
+const tagId = randomUUID();
+const fixtureQuestIds: string[] = [];
+const fixtureConversationIds: string[] = [];
+const fixtureMessageIds: string[] = [];
+const fixtureAttachmentIds: string[] = [];
+const fixtureFileIds: string[] = [];
+const fixtureCaseIds: string[] = [];
+const fixtureConductReportIds: string[] = [];
+const fixtureConductQuestIds: string[] = [];
+const fixtureConductAssignmentIds: string[] = [];
+const fixturePushDeviceIds: string[] = [];
+const penaltyMemberIds = new Set<string>();
+const fixtureProofSubmissionIds: string[] = [];
+const fixtureMemberIds: string[] = [];
+
+const cookieHeaderFor = (response: Response): string =>
+  (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
+
+const adminRequest = (path: string, options: RequestInit = {}) =>
+  app.handle(
+    new Request(`http://localhost${path}`, {
+      ...options,
+      headers: {
+        cookie: adminCookie,
+        ...(options.body ? { 'content-type': 'application/json' } : {}),
+        ...options.headers,
+      },
+    })
+  );
+
+const adminEventsRequest = () =>
+  app.handle(
+    new Request('http://localhost/api/v1/admin/events', {
+      headers: { cookie: adminCookie },
+    })
+  );
+
+const readAdminSseFrame = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs?: number
+) => {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const frame =
+    timeoutMs === undefined
+      ? await reader.read()
+      : await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error('Timed out waiting for Admin SSE data.')),
+              timeoutMs
+            );
+          }),
+        ]).finally(() => {
+          if (timeout !== undefined) clearTimeout(timeout);
+        });
+  if (frame.done) throw new Error('Admin SSE stream closed before the expected frame.');
+  return new TextDecoder().decode(frame.value);
+};
+
+const readAdminSseEvent = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  while (true) {
+    const frame = await readAdminSseFrame(reader);
+    const dataLine = frame.split('\n').find((line) => line.startsWith('data: '));
+    if (dataLine) return JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
+  }
+};
+
+type AdminSseEventKey = { subjectType: string; subjectId: string };
+
+const adminSseEventKey = (event: Record<string, unknown>) =>
+  `${String(event.subjectType)}:${String(event.subjectId)}`;
+
+const createAdminSseEventReader = (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+  let pendingEvent: Promise<Record<string, unknown>> | undefined;
+
+  const nextEvent = async (timeoutMs = 5_000) => {
+    const pending = (pendingEvent ??= readAdminSseEvent(reader));
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const event = await Promise.race([
+        pending,
+        new Promise<undefined>((resolve) => {
+          timeout = setTimeout(() => resolve(undefined), timeoutMs);
+        }),
+      ]);
+      if (event !== undefined && pendingEvent === pending) pendingEvent = undefined;
+      return event;
+    } catch (error) {
+      if (pendingEvent === pending) pendingEvent = undefined;
+      throw error;
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+  };
+
+  const expectEvents = async (expected: Record<string, unknown>[]) => {
+    const expectedKeys = new Set(expected.map(adminSseEventKey));
+    const deadline = Date.now() + 5_000;
+    const actual: Record<string, unknown>[] = [];
+    while (actual.length < expected.length) {
+      const event = await nextEvent(Math.max(0, deadline - Date.now()));
+      if (!event) throw new Error('Timed out waiting for expected Admin SSE events.');
+      if (expectedKeys.has(adminSseEventKey(event))) actual.push(event);
+    }
+    expect(actual).toEqual(expected);
+  };
+
+  const expectNoEventsFor = async (keys: AdminSseEventKey[], timeoutMs = 500) => {
+    const expectedKeys = new Set(keys.map((key) => `${key.subjectType}:${key.subjectId}`));
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const event = await nextEvent(deadline - Date.now());
+      if (!event) return;
+      if (expectedKeys.has(adminSseEventKey(event))) {
+        throw new Error(`Received an unexpected Admin SSE event: ${JSON.stringify(event)}`);
+      }
+    }
+  };
+
+  return { expectEvents, expectNoEventsFor };
+};
+
+const memberAuthentication = (memberId: string) =>
+  spyOn(auth.api, 'getSession').mockImplementation((async () => ({
+    user: { id: memberId },
+    session: { userId: memberId },
+  })) as never);
+
+const ensureFixtureMember = async (memberId: string, firstName: string, lastName: string) => {
+  if (memberId === senderId || fixtureMemberIds.includes(memberId)) return;
+
+  fixtureMemberIds.push(memberId);
+  await db.insert(authUser).values({
+    id: memberId,
+    email: `${memberId}@ku.th`,
+    firstName,
+    lastName,
+  });
+};
+
+const createReportFixture = async (reportedMemberId = randomUUID()) => {
+  const questId = randomUUID();
+  const conversationId = randomUUID();
+  const assignmentId = randomUUID();
+  const senderMembershipId = randomUUID();
+  const reporterMembershipId = randomUUID();
+  const messageIds = Array.from({ length: 9 }, () => randomUUID());
+  const attachmentId = randomUUID();
+  const fileId = randomUUID();
+  const caseId = randomUUID();
+  const evidenceRefId = randomUUID();
+  const createdAt = new Date('2020-02-01T10:00:00.000Z');
+
+  fixtureQuestIds.push(questId);
+  fixtureConversationIds.push(conversationId);
+  fixtureMessageIds.push(...messageIds);
+  fixtureAttachmentIds.push(attachmentId);
+  fixtureFileIds.push(fileId);
+  fixtureCaseIds.push(caseId);
+  await ensureFixtureMember(reportedMemberId, 'Report', 'Sender');
+
+  await db.insert(quest).values({
+    id: questId,
+    hirerId: reportedMemberId,
+    title: `Admin report fixture ${questId}`,
+    condition: 'Review the reported Message',
+    mode: 'NO_CANDIDATE',
+    participation: 'SOLO',
+    questStatus: 'QUEST_IN_PROGRESS',
+    rewardSatang: 500,
+    headcount: 1,
+    startTime: createdAt,
+    tagId,
+  });
+  await db.insert(questAssignment).values({
+    id: assignmentId,
+    questId,
+    workerId: reporterId,
+    assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    createdAt,
+  });
+  await db.insert(chatConversation).values({
+    id: conversationId,
+    questId,
+    type: 'CONVERSATION_WORK',
+    questTitle: `Admin report fixture ${questId}`,
+    questStatus: 'QUEST_IN_PROGRESS',
+    nextSequence: 10,
+    createdAt,
+    updatedAt: new Date(createdAt.getTime() + 9 * 60_000),
+  });
+  await db.insert(chatMembership).values([
+    {
+      id: senderMembershipId,
+      conversationId,
+      memberId: reportedMemberId,
+      role: 'HIRER',
+      joinedAt: createdAt,
+      createdAt,
+    },
+    {
+      id: reporterMembershipId,
+      conversationId,
+      assignmentId,
+      memberId: reporterId,
+      role: 'WORKER',
+      joinedAt: createdAt,
+      createdAt,
+    },
+  ]);
+  await db.insert(chatMessage).values(
+    messageIds.map((id, index) => ({
+      id,
+      conversationId,
+      sequence: index + 1,
+      kind: 'USER' as const,
+      senderMembershipId,
+      clientMessageId: `admin-report-fixture-${id}`,
+      contentText: index === 4 ? 'The reported Message content.' : `Context Message ${index + 1}`,
+      createdAt: new Date(createdAt.getTime() + index * 60_000),
+    }))
+  );
+  await db.insert(file).values({
+    id: fileId,
+    bucket: 'admin-report-fixture',
+    objectKey: `admin-report-fixture/${fileId}`,
+    contentType: 'image/png',
+    sizeBytes: 3,
+    uploadedByUserId: reportedMemberId,
+    createdAt,
+  });
+  await db.insert(chatAttachment).values({
+    id: attachmentId,
+    conversationId,
+    uploadedByMemberId: senderMembershipId,
+    fileId,
+    status: 'CONSUMED',
+    originalFilename: 'reported.png',
+    mimeType: 'image/png',
+    sizeBytes: 3,
+    validatedAt: createdAt,
+    consumedAt: createdAt,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  await db.insert(chatMessageAttachment).values({
+    messageId: messageIds[4]!,
+    attachmentId,
+    position: 1,
+    attachedAt: createdAt,
+  });
+  await db.insert(adminReportCase).values({
+    id: caseId,
+    messageId: messageIds[4]!,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  await db.insert(adminReporterEntry).values({
+    id: randomUUID(),
+    reportCaseId: caseId,
+    messageId: messageIds[4]!,
+    reporterMemberId: reporterId,
+    reason: 'REPORT_SPAM',
+    detail: 'The Message repeats an unwanted promotion.',
+    createdAt: new Date(createdAt.getTime() + 1_000),
+  });
+  await db.insert(adminEvidenceReference).values({
+    id: evidenceRefId,
+    reportCaseId: caseId,
+    messageId: messageIds[4]!,
+    createdAt: new Date(createdAt.getTime() + 2_000),
+  });
+
+  return {
+    caseId,
+    evidenceRefId,
+    messageId: messageIds[4]!,
+    attachmentId,
+    assignmentId,
+    conversationId,
+    questId,
+    reportedMemberId,
+  };
+};
+
+const createConductReportFixture = async (
+  input: {
+    mode?: 'FIRST_COME_FIRST_SERVED' | 'CANDIDATE';
+    participation?: 'SINGLE' | 'GROUP';
+    reason?: (typeof conductReportReason)[keyof typeof conductReportReason];
+    filerId?: string;
+    hirerId?: string;
+    reportedMemberId?: string;
+    assignmentWorkerId?: string;
+    assignmentWorkerIds?: string[];
+    candidateTeamLeaderId?: string;
+    includeTeamProof?: boolean;
+    includeDraftProof?: boolean;
+  } = {}
+) => {
+  const questId = randomUUID();
+  const reportId = randomUUID();
+  const createdAt = new Date('2020-02-02T10:00:00.000Z');
+  const mode = input.mode ?? 'FIRST_COME_FIRST_SERVED';
+  const participation = input.participation ?? 'SINGLE';
+  const filerId = input.filerId ?? senderId;
+  const hirerId = input.hirerId ?? senderId;
+  const reportedMemberId = input.reportedMemberId ?? randomUUID();
+  if (!input.reportedMemberId) {
+    await ensureFixtureMember(reportedMemberId, 'Conduct', 'Reported Member');
+  }
+  const assignmentWorkerId = input.assignmentWorkerId ?? reportedMemberId;
+  const assignmentWorkerIds = [...new Set(input.assignmentWorkerIds ?? [assignmentWorkerId])];
+
+  fixtureConductReportIds.push(reportId);
+  fixtureConductQuestIds.push(questId);
+
+  await db.insert(quest).values({
+    id: questId,
+    hirerId,
+    apiVersion: 'v2',
+    title: `Conduct report fixture ${questId}`,
+    condition: 'Complete the reported Quest work.',
+    mode: mode === 'CANDIDATE' ? 'CANDIDATE' : 'NO_CANDIDATE',
+    participation: participation === 'GROUP' ? 'GROUP' : 'SOLO',
+    v2Mode: mode,
+    v2Participation: participation,
+    questStatus: 'QUEST_IN_PROGRESS',
+    rewardSatang: participation === 'GROUP' ? 2_000 : 1_000,
+    questFundingTotalSatang: participation === 'GROUP' ? 2_000 : 1_000,
+    questEscrowSatang: participation === 'GROUP' ? 2_040 : 1_020,
+    headcount: participation === 'GROUP' ? 2 : 1,
+    startTime: createdAt,
+    dueAt: new Date(createdAt.getTime() + 60 * 60 * 1000),
+    tagId,
+  });
+  const assignmentRows = await db
+    .insert(questAssignment)
+    .values(
+      assignmentWorkerIds.map((workerId) => ({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_ACTIVE' as const,
+        createdAt,
+      }))
+    )
+    .returning({ id: questAssignment.id, workerId: questAssignment.workerId });
+  fixtureConductAssignmentIds.push(...assignmentRows.map(({ id }) => id));
+  const assignmentId = assignmentRows.find(
+    (assignment) => assignment.workerId === assignmentWorkerId
+  )?.id;
+  if (!assignmentId) throw new Error('Conduct Report test Assignment was not created.');
+
+  let candidateTeamId: string | undefined;
+  let proofSubmissionId: string | undefined;
+  let draftProofSubmissionId: string | undefined;
+  if (mode === 'CANDIDATE' && participation === 'GROUP') {
+    const leaderId = input.candidateTeamLeaderId;
+    if (!leaderId || !assignmentWorkerIds.includes(leaderId) || assignmentWorkerIds.length < 2) {
+      throw new Error('GROUP + CANDIDATE test fixtures need a selected two-member Team.');
+    }
+
+    candidateTeamId = randomUUID();
+    await db.insert(questCandidateTeamV2).values({
+      id: candidateTeamId,
+      questId,
+      leaderId,
+      name: 'Admin Report test Team',
+      headcount: assignmentWorkerIds.length,
+      state: 'TEAM_SELECTED',
+      submissionText: 'Candidate Team proof.',
+      submittedAt: createdAt,
+      createdAt,
+    });
+    await db.insert(questCandidateTeamV2Member).values(
+      assignmentWorkerIds.map((memberId) => ({
+        teamId: candidateTeamId!,
+        memberId,
+        joinedAt: createdAt,
+      }))
+    );
+
+    if (input.includeTeamProof) {
+      proofSubmissionId = randomUUID();
+      await db.insert(questV2ProofSubmission).values({
+        id: proofSubmissionId,
+        questId,
+        teamId: candidateTeamId,
+        submittedByUserId: leaderId,
+        description: 'Team Proof Submission description.',
+        workerMessage: 'Team Proof Submission message.',
+        submissionStatus: 'PROOF_PENDING',
+        sentAt: createdAt,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    }
+  }
+
+  if (input.includeDraftProof) {
+    draftProofSubmissionId = randomUUID();
+    await db.insert(questV2ProofSubmission).values({
+      id: draftProofSubmissionId,
+      questId,
+      workerId: assignmentWorkerId,
+      teamId: null,
+      submittedByUserId: assignmentWorkerId,
+      description: 'Private unsent Proof Submission draft.',
+      workerMessage: 'Private unsent Worker Message.',
+      submissionStatus: null,
+      sentAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  }
+
+  await db.insert(adminConductReport).values({
+    id: reportId,
+    questId,
+    filerUserId: filerId,
+    reportedMemberId,
+    assignmentId,
+    reason: input.reason ?? conductReportReason.abandoned,
+    detail: 'The Quest record requires Admin review.',
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  return {
+    assignmentId,
+    assignmentWorkerIds,
+    candidateTeamId,
+    proofSubmissionId,
+    draftProofSubmissionId,
+    filerId,
+    reportedMemberId,
+    questId,
+    reportId,
+  };
+};
+
+const createGroupConductFixture = async (apiVersion: 'v1' | 'v2') => {
+  const fixture = await createReportFixture();
+  const leaderId = randomUUID();
+  const leaderStudentId = String(1_000_000_000 + Math.floor(Math.random() * 9_000_000_000));
+  const teamId = randomUUID();
+  const conductReportId = randomUUID();
+  const proofSubmissionId = randomUUID();
+  const createdAt = new Date('2020-02-01T10:10:00.000Z');
+  const submittedAt = new Date('2020-02-01T10:15:00.000Z');
+
+  fixtureMemberIds.push(leaderId);
+  fixtureConductReportIds.push(conductReportId);
+  await db.insert(authUser).values({
+    id: leaderId,
+    email: `${leaderId}@ku.th`,
+    firstName: 'Team',
+    lastName: 'Leader',
+    studentId: leaderStudentId,
+  });
+  if (apiVersion === 'v1') {
+    await db
+      .update(quest)
+      .set({ mode: 'CANDIDATE', participation: 'GROUP', headcount: 2 })
+      .where(eq(quest.id, fixture.questId));
+    await db.insert(questTeam).values({
+      id: teamId,
+      questId: fixture.questId,
+      leaderId,
+      name: 'Conduct Report team',
+      teamStatus: 'TEAM_SELECTED',
+      createdAt,
+    });
+    await db.insert(questTeamMember).values([
+      { teamId, userId: leaderId, joinedAt: createdAt },
+      { teamId, userId: reporterId, joinedAt: createdAt },
+    ]);
+    fixtureProofSubmissionIds.push(proofSubmissionId);
+    await db.insert(proofSubmission).values({
+      id: proofSubmissionId,
+      questId: fixture.questId,
+      teamId,
+      submittedByUserId: leaderId,
+      content: 'The Team submitted its work.',
+      submissionStatus: 'PROOF_APPROVED',
+      submittedAt,
+      reviewedAt: new Date('2020-02-01T10:18:00.000Z'),
+    });
+  } else {
+    await db
+      .update(quest)
+      .set({
+        apiVersion: 'v2',
+        v2Mode: 'CANDIDATE',
+        v2Participation: 'GROUP',
+        headcount: 2,
+      })
+      .where(eq(quest.id, fixture.questId));
+    await db.insert(questCandidateTeamV2).values({
+      id: teamId,
+      questId: fixture.questId,
+      leaderId,
+      name: 'Conduct Report team',
+      headcount: 2,
+      state: 'TEAM_SELECTED',
+      submissionText: 'Team submission',
+      submittedAt: createdAt,
+      createdAt,
+    });
+    await db.insert(questCandidateTeamV2Member).values([
+      { teamId, memberId: leaderId, joinedAt: createdAt },
+      { teamId, memberId: reporterId, joinedAt: createdAt },
+    ]);
+    await db.insert(questV2ProofSubmission).values({
+      id: proofSubmissionId,
+      questId: fixture.questId,
+      teamId,
+      submittedByUserId: leaderId,
+      description: 'The Team submitted its v2 work.',
+      submissionStatus: 'PROOF_APPROVED',
+      sentAt: submittedAt,
+      createdAt: submittedAt,
+      updatedAt: submittedAt,
+    });
+  }
+  await db.insert(questAssignment).values({
+    id: randomUUID(),
+    questId: fixture.questId,
+    workerId: leaderId,
+    assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    createdAt,
+  });
+  await db.insert(adminConductReport).values({
+    id: conductReportId,
+    questId: fixture.questId,
+    filerUserId: reporterId,
+    reportedMemberId: senderId,
+    assignmentId: fixture.assignmentId,
+    reason: 'CONDUCT_OUT_OF_SCOPE',
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  return { conductReportId, leaderId, leaderStudentId, proofSubmissionId };
+};
+
+const createBanConductReportFixture = async (
+  input: { discretionaryFreeze?: boolean; permanentBan?: boolean } = {}
+) => {
+  const reportedMemberId = randomUUID();
+  const createdAt = new Date('2020-01-01T00:00:00.000Z');
+  await db.insert(authUser).values({
+    id: reportedMemberId,
+    email: `${reportedMemberId}@ku.th`,
+    firstName: 'Conduct',
+    lastName: 'Reported Member',
+    createdAt,
+  });
+
+  const fixture = await createConductReportFixture({
+    reportedMemberId,
+    assignmentWorkerId: reportedMemberId,
+  });
+  const wallet = await ensureWallet(reportedMemberId);
+  if (input.discretionaryFreeze) {
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'FROZEN',
+      actorAdminId: adminId,
+      reason: 'Administrative investigation',
+    });
+  }
+
+  const firstViolationAt = new Date(
+    Date.now() - (input.permanentBan ? 8 : 0) * 24 * 60 * 60 * 1000 - 60_000
+  );
+  const priorViolationCount = input.permanentBan ? 2 : 1;
+  await db.transaction(async (transaction) => {
+    for (let index = 0; index < priorViolationCount; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const penalty = await recordMemberConfirmedViolationInTransaction(transaction, {
+        memberId: reportedMemberId,
+        source: 'CONDUCT_REPORT',
+        sourceId: randomUUID(),
+        actorAdminId: adminId,
+        reasonCode: 'SAFETY_REVIEW',
+        now: firstViolationAt,
+      });
+      const expectedPriorResult = index === 0 ? 'PENALTY_RED_FLAG' : 'PENALTY_TEMPORARY_BAN_7_DAYS';
+      if (penalty.result !== expectedPriorResult) {
+        throw new Error('The Conduct Report fixture did not reach the expected penalty threshold.');
+      }
+    }
+  });
+
+  if (input.permanentBan) {
+    const [temporaryBan] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    if (!temporaryBan?.bannedUntil) {
+      throw new Error('The Conduct Report fixture did not create a temporary Ban.');
+    }
+    await processExpiredMemberBanWalletFreeze(reportedMemberId, new Date());
+  }
+
+  return { fixture, reportedMemberId, wallet };
+};
+
+const createConductReportChatFixture = async (
+  fixture: Awaited<ReturnType<typeof createConductReportFixture>>,
+  input: { messageCount?: number; candidateWorkerIds?: string[]; attachmentSequence?: number } = {}
+) => {
+  const createdAt = new Date('2020-02-02T10:00:00.000Z');
+  const messageCount = input.messageCount ?? 0;
+  const workConversationId = randomUUID();
+  const hirerMembershipId = randomUUID();
+  const workMessageIds = Array.from({ length: messageCount }, () => randomUUID());
+  const candidateConversationIds: string[] = [];
+
+  fixtureConversationIds.push(workConversationId);
+  fixtureMessageIds.push(...workMessageIds);
+
+  await db.insert(chatConversation).values({
+    id: workConversationId,
+    questId: fixture.questId,
+    type: 'CONVERSATION_WORK',
+    questTitle: `Conduct report fixture ${fixture.questId}`,
+    questStatus: 'QUEST_IN_PROGRESS',
+    nextSequence: messageCount + 1,
+    createdAt,
+    updatedAt: new Date(createdAt.getTime() + messageCount * 60_000),
+  });
+
+  const assignments = await db
+    .select({ id: questAssignment.id, workerId: questAssignment.workerId })
+    .from(questAssignment)
+    .where(eq(questAssignment.questId, fixture.questId));
+  await db.insert(chatMembership).values([
+    {
+      id: hirerMembershipId,
+      conversationId: workConversationId,
+      memberId: senderId,
+      role: 'HIRER',
+      joinedAt: createdAt,
+      createdAt,
+    },
+    ...assignments.map((assignment) => ({
+      id: randomUUID(),
+      conversationId: workConversationId,
+      assignmentId: assignment.id,
+      memberId: assignment.workerId,
+      role: 'WORKER' as const,
+      joinedAt: createdAt,
+      createdAt,
+    })),
+  ]);
+
+  if (workMessageIds.length > 0) {
+    await db.insert(chatMessage).values(
+      workMessageIds.map((id, index) => ({
+        id,
+        conversationId: workConversationId,
+        sequence: index + 1,
+        kind: 'USER' as const,
+        senderMembershipId: hirerMembershipId,
+        clientMessageId: `conduct-report-history-${id}`,
+        contentText: `Conduct Report history message ${index + 1}`,
+        createdAt: new Date(createdAt.getTime() + (index + 1) * 60_000),
+      }))
+    );
+  }
+
+  if (input.attachmentSequence) {
+    const messageId = workMessageIds[input.attachmentSequence - 1];
+    if (!messageId)
+      throw new Error('Attachment sequence is outside the Work Conversation history.');
+    const attachmentId = randomUUID();
+    const fileId = randomUUID();
+    fixtureAttachmentIds.push(attachmentId);
+    fixtureFileIds.push(fileId);
+    await db.insert(file).values({
+      id: fileId,
+      bucket: 'conduct-report-fixture',
+      objectKey: `conduct-report-fixture/${fileId}`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: senderId,
+      createdAt,
+    });
+    await db.insert(chatAttachment).values({
+      id: attachmentId,
+      conversationId: workConversationId,
+      uploadedByMemberId: hirerMembershipId,
+      fileId,
+      status: 'CONSUMED',
+      originalFilename: 'conduct-evidence.png',
+      mimeType: 'image/png',
+      sizeBytes: 3,
+      validatedAt: createdAt,
+      consumedAt: createdAt,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    await db.insert(chatMessageAttachment).values({
+      messageId,
+      attachmentId,
+      position: 1,
+      attachedAt: createdAt,
+    });
+  }
+
+  for (const candidateWorkerId of new Set(input.candidateWorkerIds ?? [])) {
+    if (candidateWorkerId === senderId) continue;
+    const conversationId = randomUUID();
+    const hirerInquiryMembershipId = randomUUID();
+    const candidateMembershipId = randomUUID();
+    const messageId = randomUUID();
+    candidateConversationIds.push(conversationId);
+    fixtureConversationIds.push(conversationId);
+    fixtureMessageIds.push(messageId);
+
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatConversation).values({
+      id: conversationId,
+      questId: fixture.questId,
+      type: 'CONVERSATION_CANDIDATE_INQUIRY',
+      questTitle: `Conduct report fixture ${fixture.questId}`,
+      questStatus: 'QUEST_ASSIGNED',
+      state: 'INQUIRY_CLOSED',
+      candidateWorkerId,
+      closedAt: createdAt,
+      nextSequence: 2,
+      createdAt,
+      updatedAt: createdAt,
+    });
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatMembership).values([
+      {
+        id: hirerInquiryMembershipId,
+        conversationId,
+        memberId: senderId,
+        role: 'HIRER',
+        joinedAt: createdAt,
+        createdAt,
+      },
+      {
+        id: candidateMembershipId,
+        conversationId,
+        memberId: candidateWorkerId,
+        role: 'PROSPECTIVE_WORKER',
+        joinedAt: createdAt,
+        createdAt,
+      },
+    ]);
+    // eslint-disable-next-line no-await-in-loop
+    await db.insert(chatMessage).values({
+      id: messageId,
+      conversationId,
+      sequence: 1,
+      kind: 'USER',
+      senderMembershipId: candidateMembershipId,
+      clientMessageId: `conduct-candidate-inquiry-${messageId}`,
+      contentText: `Candidate Inquiry from ${candidateWorkerId}`,
+      createdAt: new Date(createdAt.getTime() + 60_000),
+    });
+  }
+
+  return { workConversationId, workMessageIds, candidateConversationIds };
+};
+const cleanFixtures = async () => {
+  if (!postgresAvailable) return;
+
+  await db.transaction(async (transaction) => {
+    const penaltySourceIds = [...fixtureConductReportIds, ...fixtureCaseIds];
+    if (penaltySourceIds.length > 0) {
+      const penaltyMembers = await transaction
+        .select({ memberId: memberPenaltyRecord.memberId })
+        .from(memberPenaltyRecord)
+        .where(inArray(memberPenaltyRecord.sourceId, penaltySourceIds));
+      for (const penaltyMember of penaltyMembers) {
+        penaltyMemberIds.add(penaltyMember.memberId);
+      }
+    }
+    if (fixtureConductReportIds.length > 0) {
+      await transaction.delete(pushDelivery).where(
+        inArray(
+          pushDelivery.eventKey,
+          fixtureConductReportIds.map((reportId) => `conduct-report-upheld:${reportId}`)
+        )
+      );
+      await transaction
+        .delete(adminConductReportEvidenceHandle)
+        .where(inArray(adminConductReportEvidenceHandle.reportId, fixtureConductReportIds));
+      await transaction
+        .delete(adminConductReport)
+        .where(inArray(adminConductReport.id, fixtureConductReportIds));
+    }
+    if (fixturePushDeviceIds.length > 0) {
+      await transaction.delete(pushDevice).where(inArray(pushDevice.id, fixturePushDeviceIds));
+    }
+    if (fixtureProofSubmissionIds.length > 0) {
+      await transaction
+        .delete(proofSubmission)
+        .where(inArray(proofSubmission.id, fixtureProofSubmissionIds));
+    }
+    if (fixtureCaseIds.length > 0) {
+      await transaction
+        .delete(adminModerationDecision)
+        .where(inArray(adminModerationDecision.reportCaseId, fixtureCaseIds));
+      await transaction
+        .delete(adminEvidenceReference)
+        .where(inArray(adminEvidenceReference.reportCaseId, fixtureCaseIds));
+      await transaction
+        .delete(adminReporterEntry)
+        .where(inArray(adminReporterEntry.reportCaseId, fixtureCaseIds));
+      await transaction.delete(adminReportCase).where(inArray(adminReportCase.id, fixtureCaseIds));
+    }
+    if (fixtureMessageIds.length > 0) {
+      await transaction
+        .delete(chatMessageAttachment)
+        .where(inArray(chatMessageAttachment.messageId, fixtureMessageIds));
+      await transaction.delete(chatMessage).where(inArray(chatMessage.id, fixtureMessageIds));
+    }
+    if (fixtureAttachmentIds.length > 0) {
+      await transaction
+        .delete(chatAttachment)
+        .where(inArray(chatAttachment.id, fixtureAttachmentIds));
+    }
+    if (fixtureConversationIds.length > 0) {
+      await transaction
+        .delete(chatMembership)
+        .where(inArray(chatMembership.conversationId, fixtureConversationIds));
+      await transaction
+        .delete(chatConversation)
+        .where(inArray(chatConversation.id, fixtureConversationIds));
+    }
+    if (fixtureConductAssignmentIds.length > 0) {
+      await transaction
+        .delete(questAssignment)
+        .where(inArray(questAssignment.id, fixtureConductAssignmentIds));
+    }
+    if (fixtureConductQuestIds.length > 0) {
+      await transaction.delete(quest).where(inArray(quest.id, fixtureConductQuestIds));
+    }
+    if (fixtureQuestIds.length > 0) {
+      await transaction
+        .delete(questAssignment)
+        .where(inArray(questAssignment.questId, fixtureQuestIds));
+      await transaction.delete(quest).where(inArray(quest.id, fixtureQuestIds));
+    }
+    if (fixtureFileIds.length > 0) {
+      await transaction.delete(file).where(inArray(file.id, fixtureFileIds));
+    }
+    if (fixtureMemberIds.length > 0) {
+      const removableMemberIds = fixtureMemberIds.filter(
+        (memberId) => !penaltyMemberIds.has(memberId)
+      );
+      if (removableMemberIds.length > 0) {
+        await transaction.delete(authUser).where(inArray(authUser.id, removableMemberIds));
+      }
+    }
+  });
+
+  fixtureQuestIds.length = 0;
+  fixtureConversationIds.length = 0;
+  fixtureMessageIds.length = 0;
+  fixtureAttachmentIds.length = 0;
+  fixtureFileIds.length = 0;
+  fixtureCaseIds.length = 0;
+  fixtureConductReportIds.length = 0;
+  fixtureConductQuestIds.length = 0;
+  fixtureConductAssignmentIds.length = 0;
+  fixturePushDeviceIds.length = 0;
+  fixtureProofSubmissionIds.length = 0;
+  fixtureMemberIds.length = 0;
+};
+
+beforeAll(async () => {
+  try {
+    await sql`select 1`;
+  } catch {
+    return;
+  }
+  postgresAvailable = true;
+
+  await db.insert(authUser).values([
+    {
+      id: senderId,
+      email: `${senderId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Sender',
+      studentId: senderStudentId,
+    },
+    {
+      id: reporterId,
+      email: `${reporterId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Reporter',
+      studentId: reporterStudentId,
+    },
+    {
+      id: additionalWorkerId,
+      email: `${additionalWorkerId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Additional Worker',
+    },
+    {
+      id: unrelatedCandidateId,
+      email: `${unrelatedCandidateId}@ku.th`,
+      firstName: 'Report',
+      lastName: 'Unrelated Candidate',
+    },
+  ]);
+  await db.insert(tag).values({ id: tagId, name: `Admin report ${tagId}` });
+
+  const seedAuth = createAdminAuth({
+    allowSignUp: true,
+    autoSignIn: false,
+    markEmailVerified: true,
+  });
+  await seedAuth.api.signUpEmail({
+    body: {
+      email: adminEmail,
+      password: adminPassword,
+      name: 'Report Admin',
+      firstName: 'Report',
+      lastName: 'Admin',
+    },
+  });
+  const loginResponse = await app.handle(
+    new Request('http://localhost/api/admin/auth/sign-in/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: adminEmail, password: adminPassword }),
+    })
+  );
+  if (loginResponse.status !== 200)
+    throw new Error('Report Admin test session could not be created.');
+  adminCookie = cookieHeaderFor(loginResponse);
+  const [admin] = await db
+    .select({ id: authAdmin.id })
+    .from(authAdmin)
+    .where(eq(authAdmin.email, adminEmail));
+  adminId = admin!.id;
+});
+
+afterEach(async () => {
+  mock.restore();
+  await cleanFixtures();
+});
+
+beforeEach(() => {
+  spyOn(workChatStorage, 'linkForWithExpiry').mockReturnValue({
+    url: 'https://storage.example/report-evidence',
+    expiresAt: new Date('2030-02-01T10:15:00.000Z'),
+  });
+});
+
+afterAll(async () => {
+  await cleanFixtures();
+  if (!postgresAvailable) return;
+  await db.delete(tag).where(eq(tag.id, tagId));
+  const removableMemberIds = [reporterId, additionalWorkerId, unrelatedCandidateId].filter(
+    (memberId) => !penaltyMemberIds.has(memberId)
+  );
+  if (removableMemberIds.length > 0) {
+    await db.delete(authUser).where(inArray(authUser.id, removableMemberIds));
+  }
+});
+
+describe('Admin Report Case API', () => {
+  it('publishes the four Admin surfaces and rejects anonymous and Member Sessions', async () => {
+    const openApiResponse = await app.handle(new Request('http://localhost/openapi/json'));
+    const document = (await openApiResponse.json()) as {
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            operationId?: string;
+            security?: unknown;
+            parameters?: Array<{
+              name?: string;
+              in?: string;
+              required?: boolean;
+              schema?: unknown;
+            }>;
+            requestBody?: { content?: Record<string, { schema?: unknown }> };
+            responses?: Record<string, { content?: Record<string, { schema?: unknown }> }>;
+          }
+        >
+      >;
+    };
+    const listOperation = document.paths['/api/v1/admin/reports']?.get;
+    const detailOperation = document.paths['/api/v1/admin/reports/{reportId}']?.get;
+    const decisionOperation = document.paths['/api/v1/admin/reports/{reportId}/decide']?.post;
+    expect(listOperation?.operationId).toBe('listAdminReports');
+    expect(document.paths['/api/v1/admin/reports/{reportId}']?.get?.operationId).toBe(
+      'getAdminReport'
+    );
+    expect(decisionOperation?.operationId).toBe('decideAdminReport');
+    expect(document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get?.operationId).toBe(
+      'getAdminReportEvidence'
+    );
+
+    const listSchema = listOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    const detailSchema = detailOperation?.responses?.['200']?.content?.['application/json']?.schema;
+    const decisionRequestSchema =
+      decisionOperation?.requestBody?.content?.['application/json']?.schema;
+    const detailSchemaText = JSON.stringify(detailSchema);
+    const decisionRequestSchemaText = JSON.stringify(decisionRequestSchema);
+    expect(JSON.stringify(listSchema)).toContain('REPORT_CASE');
+    expect(JSON.stringify(listSchema)).toContain('CONDUCT_REPORT');
+    expect(detailSchemaText).toContain('REPORT_CASE');
+    expect(detailSchemaText).toContain('CONDUCT_REPORT');
+    expect(detailSchemaText).toContain('REPORT_ABUSIVE_OR_HARASSMENT');
+    expect(detailSchemaText).toContain('REPORT_SPAM');
+    expect(detailSchemaText).toContain('REPORT_INAPPROPRIATE_CONTENT');
+    expect(detailSchemaText).toContain('REPORT_DANGER_OR_THREAT');
+    expect(detailSchemaText).toContain('REPORT_OTHER');
+    expect(detailSchemaText).toContain('CONDUCT_ABANDONED');
+    expect(detailSchemaText).toContain('CONDUCT_OUT_OF_SCOPE');
+    expect(detailSchemaText).toContain('CONDUCT_NO_SHOW');
+    expect(detailSchemaText).toContain('assignment');
+    expect(detailSchemaText).toContain('proofSubmission');
+    expect(detailSchemaText).toContain('memberStatus');
+    expect(detailSchemaText).toContain('previousReportCount');
+    expect(detailSchemaText).toContain('confirmedViolationCount');
+    expect(detailSchemaText).toContain('previousModerationActions');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_DISMISSED');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_UPHELD');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_NO_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_INSUFFICIENT_EVIDENCE');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION');
+    expect(decisionRequestSchemaText).toContain(
+      'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION'
+    );
+    expect(decisionRequestSchemaText).toContain('REPORT_NO_POLICY_VIOLATION');
+    expect(decisionRequestSchemaText).toContain('REPORT_INSUFFICIENT_EVIDENCE');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_SUPPORTS_MESSAGE');
+    expect(decisionRequestSchemaText).toContain('REPORT_HARASSMENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_SPAM_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_THREAT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_INAPPROPRIATE_CONTENT_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_OTHER_POLICY_VIOLATION_CONFIRMED');
+    expect(decisionRequestSchemaText).toContain('REPORT_MESSAGE_COMPLIES_WITH_POLICY');
+    expect(decisionRequestSchemaText).toContain('REPORT_CONTEXT_WAS_MISUNDERSTOOD');
+    expect(decisionRequestSchemaText).toContain('REPORT_NEW_EVIDENCE_OVERTURNS_HIDE');
+    expect(decisionRequestSchemaText).toContain('decisionReasonCode');
+    expect(decisionRequestSchemaText).not.toContain('POLICY_REVIEW');
+    expect(decisionRequestSchemaText).not.toContain('SAFETY_REVIEW');
+    expect(decisionRequestSchemaText).toContain('decisionReasonText');
+    expect(decisionRequestSchemaText).toContain('"maxLength":200');
+    const listParameters = listOperation?.parameters ?? [];
+    const submittedByParameter = listParameters.find(
+      (parameter) => parameter.name === 'submittedByMemberId'
+    );
+    expect(submittedByParameter).toMatchObject({
+      name: 'submittedByMemberId',
+      in: 'query',
+      required: false,
+      schema: { type: 'string', format: 'uuid' },
+    });
+    const statusModeParameter = listParameters.find((parameter) => parameter.name === 'statusMode');
+    expect(statusModeParameter).toMatchObject({
+      name: 'statusMode',
+      in: 'query',
+      required: false,
+    });
+    const statusModeSchema = statusModeParameter?.schema as
+      { enum?: string[]; anyOf?: Array<{ const?: string }> } | undefined;
+    const allowedStatusModes =
+      statusModeSchema?.enum ?? statusModeSchema?.anyOf?.map((option) => option.const);
+    expect(allowedStatusModes).toEqual(['OPEN_QUEUE', 'FULL_HISTORY']);
+    const listSchemaText = JSON.stringify(listSchema);
+    expect(listSchemaText).toContain('MEM-[0-9]{6,}');
+    expect(listSchemaText).toContain('RPT-[0-9]{6,}');
+    expect(listSchemaText).toContain('CND-[0-9]{6,}');
+    expect(listSchemaText).toContain('QST-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('MEM-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('RPT-[0-9]{6,}');
+    expect(JSON.stringify(detailSchema)).toContain('QST-[0-9]{6,}');
+    for (const operation of [
+      listOperation,
+      detailOperation,
+      decisionOperation,
+      document.paths['/api/v1/admin/evidence/{evidenceRef}']?.get,
+    ]) {
+      expect(operation?.security).toBeDefined();
+    }
+
+    const guardedRoutes: Array<{ path: string; init?: RequestInit }> = [
+      { path: '/reports' },
+      { path: `/reports/${randomUUID()}` },
+      {
+        path: `/reports/${randomUUID()}/decide`,
+        init: {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'report-auth-decision',
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_DISMISSED',
+            reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+          }),
+        },
+      },
+      {
+        path: `/evidence/${randomUUID()}`,
+        init: { headers: { 'idempotency-key': 'report-auth-evidence' } },
+      },
+    ];
+
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(401);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('UNAUTHORIZED');
+    }
+
+    memberAuthentication(reporterId);
+    for (const route of guardedRoutes) {
+      // eslint-disable-next-line no-await-in-loop
+      const response = await app.handle(
+        new Request(`http://localhost/api/v1/admin${route.path}`, route.init)
+      );
+      expect(response.status).toBe(403);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await response.json()).error.code).toBe('FORBIDDEN');
+    }
+  });
+
+  it('invalidates Report Case and Conduct Report reads with related Member and Admin Action IDs', async () => {
+    if (!postgresAvailable) return;
+    const reportCase = await createReportFixture();
+    const conductReport = await createConductReportFixture();
+    const response = await adminEventsRequest();
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const eventStream = createAdminSseEventReader(reader);
+
+    try {
+      expect(await readAdminSseFrame(reader, 5_000)).toContain(': connected');
+
+      const reportCaseDecision = await adminRequest(
+        `/api/v1/admin/reports/${reportCase.caseId}/decide`,
+        {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `sse-report-case-${reportCase.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_SPAM_CONFIRMED',
+          }),
+        }
+      );
+      expect(reportCaseDecision.status).toBe(200);
+      const reportCaseCommand = (await reportCaseDecision.json()).data as {
+        adminActionId: string;
+      };
+      const reportCaseEvents = [
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'REPORT_CASE',
+          subjectId: reportCase.caseId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'MEMBER',
+          subjectId: reportCase.reportedMemberId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'ADMIN_ACTIVITY_LOG',
+          subjectId: reportCaseCommand.adminActionId,
+        },
+      ];
+      await eventStream.expectEvents(reportCaseEvents);
+      await eventStream.expectNoEventsFor(
+        reportCaseEvents.map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+      );
+
+      const conductDecision = await adminRequest(
+        `/api/v1/admin/reports/${conductReport.reportId}/decide`,
+        {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `sse-conduct-report-${conductReport.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_UPHELD',
+            decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+          }),
+        }
+      );
+      expect(conductDecision.status).toBe(200);
+      const conductCommand = (await conductDecision.json()).data as { adminActionId: string };
+      const conductEvents = [
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'CONDUCT_REPORT',
+          subjectId: conductReport.reportId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'MEMBER',
+          subjectId: conductReport.reportedMemberId,
+        },
+        {
+          type: 'RESOURCE_UPDATED',
+          subjectType: 'ADMIN_ACTIVITY_LOG',
+          subjectId: conductCommand.adminActionId,
+        },
+      ];
+      await eventStream.expectEvents(conductEvents);
+      await eventStream.expectNoEventsFor(
+        conductEvents.map(({ subjectType, subjectId }) => ({ subjectType, subjectId }))
+      );
+
+      expect(JSON.stringify([...reportCaseEvents, ...conductEvents])).not.toContain(
+        'The Message repeats an unwanted promotion.'
+      );
+      expect(JSON.stringify([...reportCaseEvents, ...conductEvents])).not.toContain(
+        'The Quest record requires Admin review.'
+      );
+      for (const event of [...reportCaseEvents, ...conductEvents]) {
+        expect(Object.keys(event).sort()).toEqual(['subjectId', 'subjectType', 'type']);
+      }
+    } finally {
+      await reader.cancel();
+    }
+  }, 15_000);
+
+  it('returns Report Case Member and Quest summaries without Message content', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createReportFixture(senderId);
+
+    const list = await adminRequest(`/api/v1/admin/reports?questId=${fixture.questId}`);
+    expect(list.status).toBe(200);
+    const listBody = await list.json();
+    expect(listBody.data.items).toHaveLength(1);
+    expect(listBody.data.items[0]).toMatchObject({
+      kind: 'REPORT_CASE',
+      id: fixture.caseId,
+      displayId: expect.stringMatching(/^RPT-/),
+      source: 'CONVERSATION_WORK',
+      type: 'USER',
+      status: 'REPORT_CASE_PENDING',
+      reportedMember: {
+        id: senderId,
+        email: `${senderId}@ku.th`,
+        firstName: 'Report',
+        lastName: 'Sender',
+        studentId: senderStudentId,
+      },
+      quest: {
+        id: fixture.questId,
+        title: `Admin report fixture ${fixture.questId}`,
+        questStatus: 'QUEST_IN_PROGRESS',
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+      },
+      reporterEntries: [
+        {
+          reason: 'REPORT_SPAM',
+          detail: 'The Message repeats an unwanted promotion.',
+          reporter: { id: reporterId, studentId: reporterStudentId },
+        },
+      ],
+    });
+    expect(listBody.data.items[0]).not.toHaveProperty('contentText');
+    expect(listBody.data.items[0]).not.toHaveProperty('attachments');
+    expect(listBody.data.items[0]).not.toHaveProperty('reportedAt');
+
+    const reportedMemberList = await adminRequest(`/api/v1/admin/reports?memberId=${senderId}`);
+    expect(reportedMemberList.status).toBe(200);
+    expect((await reportedMemberList.json()).data.items).toHaveLength(1);
+
+    const reporterMemberList = await adminRequest(`/api/v1/admin/reports?memberId=${reporterId}`);
+    expect(reporterMemberList.status).toBe(200);
+    expect((await reporterMemberList.json()).data.items).toHaveLength(0);
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}`);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.json();
+    expect(detailBody.data).toMatchObject({
+      kind: 'REPORT_CASE',
+      messageId: fixture.messageId,
+      reportedMember: { id: senderId, studentId: senderStudentId },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      quest: { id: fixture.questId, title: `Admin report fixture ${fixture.questId}` },
+      reporterEntries: [{ reporter: { id: reporterId, studentId: reporterStudentId } }],
+      source: 'CONVERSATION_WORK',
+      type: 'USER',
+    });
+    expect(detailBody.data).not.toHaveProperty('contentText');
+    expect(detailBody.data).not.toHaveProperty('fileUrl');
+
+    expect(detailBody.data).not.toHaveProperty('attachments');
+    const firstEvidence = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
+      headers: { 'idempotency-key': `report-evidence-${fixture.caseId}` },
+    });
+    expect(firstEvidence.status).toBe(200);
+    const firstEvidenceBody = await firstEvidence.json();
+    expect(firstEvidenceBody.data).toMatchObject({
+      caseId: fixture.caseId,
+      evidenceRefId: fixture.evidenceRefId,
+      reportedMessageId: fixture.messageId,
+      truncated: true,
+    });
+    expect(
+      firstEvidenceBody.data.messages.map((message: { sequence: number }) => message.sequence)
+    ).toEqual([2, 3, 4, 5, 6, 7, 8]);
+    expect(
+      firstEvidenceBody.data.messages.find(
+        (message: { id: string }) => message.id === fixture.messageId
+      )
+    ).toMatchObject({
+      contentText: 'The reported Message content.',
+      attachments: [
+        {
+          url: 'https://storage.example/report-evidence',
+          urlExpiresAt: '2030-02-01T10:15:00.000Z',
+        },
+      ],
+    });
+
+    const replay = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
+      headers: { 'idempotency-key': `report-evidence-${fixture.caseId}` },
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(firstEvidenceBody.data.adminActionId);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.adminId, adminId),
+            eq(adminAction.action, 'REPORT_CASE_EVIDENCE_ACCESS'),
+            eq(adminAction.resourceId, fixture.caseId)
+          )
+        )
+    ).toHaveLength(1);
+
+    await db
+      .update(chatAttachment)
+      .set({ objectDeletedAt: new Date('2030-02-01T10:16:00.000Z') })
+      .where(eq(chatAttachment.id, fixture.attachmentId));
+    const deletedObjectEvidence = await adminRequest(
+      `/api/v1/admin/evidence/${fixture.evidenceRefId}`,
+      { headers: { 'idempotency-key': `report-deleted-object-${fixture.caseId}` } }
+    );
+    expect(deletedObjectEvidence.status).toBe(200);
+    expect(
+      (await deletedObjectEvidence.json()).data.messages.find(
+        (message: { id: string }) => message.id === fixture.messageId
+      ).attachments
+    ).toEqual([expect.objectContaining({ url: null, urlExpiresAt: null })]);
+  });
+
+  it('returns earlier Report Cases and Conduct Reports in Member moderation context', async () => {
+    if (!postgresAvailable) return;
+    const priorReportCase = await createReportFixture(senderId);
+    const priorConductReport = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const reportCaseDetail = await createReportFixture(senderId);
+    const conductReportDetail = await createConductReportFixture({
+      filerId: reporterId,
+      hirerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: senderId,
+    });
+    const currentCaseCreatedAt = new Date('2020-02-03T10:00:00.000Z');
+    const priorConductResolvedAt = new Date('2020-02-02T11:00:00.000Z');
+
+    await db
+      .update(adminReportCase)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminReportCase.id, reportCaseDetail.caseId));
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_UPHELD',
+        decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt: priorConductResolvedAt,
+        createdAt: new Date('2020-02-02T10:00:00.000Z'),
+        updatedAt: priorConductResolvedAt,
+      })
+      .where(eq(adminConductReport.id, priorConductReport.reportId));
+    await db
+      .update(adminConductReport)
+      .set({ createdAt: currentCaseCreatedAt, updatedAt: currentCaseCreatedAt })
+      .where(eq(adminConductReport.id, conductReportDetail.reportId));
+    await db.insert(adminModerationDecision).values({
+      reportCaseId: priorReportCase.caseId,
+      adminId,
+      previousStatus: 'REPORT_CASE_PENDING',
+      newStatus: 'REPORT_CASE_HIDDEN',
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_SPAM_CONFIRMED',
+      createdAt: new Date('2020-02-01T10:01:00.000Z'),
+    });
+    await db.insert(memberPenaltyRecord).values({
+      memberId: senderId,
+      ladder: 'MISCONDUCT',
+      source: 'CONDUCT_REPORT',
+      sourceId: priorConductReport.reportId,
+      sequenceNumber: 1,
+      result: 'PENALTY_EXEMPT',
+      actorType: 'ADMIN',
+      actorAdminId: adminId,
+      reasonCode: 'CONDUCT_REPORT_CONFIRMED',
+      createdAt: priorConductResolvedAt,
+    });
+
+    for (const reportId of [reportCaseDetail.caseId, conductReportDetail.reportId]) {
+      // eslint-disable-next-line no-await-in-loop
+      const detail = await adminRequest(`/api/v1/admin/reports/${reportId}`);
+      expect(detail.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      expect((await detail.json()).data).toMatchObject({
+        memberStatus: expect.any(String),
+        previousReportCount: 2,
+        confirmedViolationCount: 1,
+        previousModerationActions: ['CONDUCT_REPORT_UPHOLD', 'REPORT_CASE_HIDE'],
+      });
+    }
+  });
+
+  it('returns null for a system Message Member and empty Report Case collections', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createReportFixture();
+    await db
+      .update(chatMessage)
+      .set({
+        kind: 'SYSTEM',
+        senderMembershipId: null,
+        clientMessageId: null,
+        contentText: null,
+        eventId: `admin-report-system-${randomUUID()}`,
+        systemType: 'QUEST_EVENT',
+        systemPayload: {},
+      })
+      .where(eq(chatMessage.id, fixture.messageId));
+    await db.delete(adminReporterEntry).where(eq(adminReporterEntry.reportCaseId, fixture.caseId));
+    await db
+      .delete(adminEvidenceReference)
+      .where(eq(adminEvidenceReference.reportCaseId, fixture.caseId));
+
+    const list = await adminRequest(`/api/v1/admin/reports?questId=${fixture.questId}`);
+    expect(list.status).toBe(200);
+    expect((await list.json()).data.items).toMatchObject([
+      {
+        type: 'SYSTEM',
+        reportedMember: null,
+        reporterEntries: [],
+        evidenceReferences: [],
+      },
+    ]);
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data).toMatchObject({
+      type: 'SYSTEM',
+      reportedMember: null,
+      memberStatus: null,
+      previousReportCount: null,
+      confirmedViolationCount: null,
+      previousModerationActions: [],
+      reporterEntries: [],
+      evidenceReferences: [],
+      quest: { id: fixture.questId },
+    });
+  });
+
+  it('lists and details a Conduct Report with its Quest record discriminator', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({ reportedMemberId: reporterId });
+
+    const list = await adminRequest(
+      `/api/v1/admin/reports?kind=CONDUCT_REPORT&status=CONDUCT_REPORT_PENDING&memberId=${reporterId}&questId=${fixture.questId}`
+    );
+    expect(list.status).toBe(200);
+    const listBody = await list.json();
+    expect(listBody.data.items).toHaveLength(1);
+    expect(listBody.data.items[0]).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      displayId: expect.stringMatching(/^CND-\d{6}$/),
+      filer: { id: senderId, studentId: senderStudentId },
+      reportedMember: { id: reporterId, studentId: reporterStudentId },
+      quest: {
+        id: fixture.questId,
+        mode: 'FIRST_COME_FIRST_SERVED',
+        participation: 'SINGLE',
+        hirer: { id: senderId, studentId: senderStudentId },
+      },
+      reason: 'CONDUCT_ABANDONED',
+      status: 'CONDUCT_REPORT_PENDING',
+      version: 1,
+    });
+    expect(listBody.data.items[0]).not.toHaveProperty('assignment');
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.json();
+    expect(detailBody.data).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      displayId: expect.stringMatching(/^CND-\d{6}$/),
+      reportedMember: { id: reporterId, studentId: reporterStudentId },
+      memberStatus: expect.any(String),
+      previousReportCount: 0,
+      confirmedViolationCount: 0,
+      previousModerationActions: [],
+      quest: { failedAt: null, hirer: { id: senderId, studentId: senderStudentId } },
+      assignment: {
+        id: fixture.assignmentId,
+        worker: { id: reporterId, studentId: reporterStudentId },
+        assignmentStatus: 'ASSIGNMENT_ACTIVE',
+      },
+      proofSubmission: null,
+      decision: null,
+      detail: 'The Quest record requires Admin review.',
+    });
+
+    const failedAt = new Date('2020-02-02T10:30:00.000Z');
+    await db
+      .update(quest)
+      .set({ questStatus: 'QUEST_FAILED', failedAt, moneyHoldStartedAt: failedAt })
+      .where(eq(quest.id, fixture.questId));
+    const failedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(failedDetail.status).toBe(200);
+    expect((await failedDetail.json()).data.quest.failedAt).toBe(failedAt.toISOString());
+
+    const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_DISMISSED',
+        decisionReason: 'CONDUCT_REPORT_NO_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt,
+        version: 2,
+        updatedAt: resolvedAt,
+      })
+      .where(eq(adminConductReport.id, fixture.reportId));
+
+    const resolvedDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(resolvedDetail.status).toBe(200);
+    expect((await resolvedDetail.json()).data).toMatchObject({
+      status: 'CONDUCT_REPORT_DISMISSED',
+      resolvedAt: resolvedAt.toISOString(),
+      decision: {
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        reason: 'CONDUCT_REPORT_NO_VIOLATION',
+        resolvedAt: resolvedAt.toISOString(),
+        admin: { id: adminId, email: adminEmail },
+      },
+    });
+
+    const legacyDecisionReason = 'The Quest record confirms the dismissal.';
+    await db
+      .update(adminConductReport)
+      .set({ decisionReason: legacyDecisionReason })
+      .where(eq(adminConductReport.id, fixture.reportId));
+    const legacyDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(legacyDetail.status).toBe(200);
+    const legacyBody = (await legacyDetail.json()).data;
+    expect(legacyBody.decision).toMatchObject({
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      reason: null,
+      resolvedAt: resolvedAt.toISOString(),
+      admin: { id: adminId, email: adminEmail },
+    });
+    expect(JSON.stringify(legacyBody)).not.toContain(legacyDecisionReason);
+    await db
+      .update(adminConductReport)
+      .set({ decisionReason: conductReportReason.abandoned })
+      .where(eq(adminConductReport.id, fixture.reportId));
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const invalidDismissal = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(invalidDismissal.status).toBe(500);
+    } finally {
+      expectedFailureLog.mockRestore();
+    }
+  });
+
+  it('filters, counts, and paginates full Admin Report history', async () => {
+    if (!postgresAvailable) return;
+    const reportCases = [
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
+      await createReportFixture(senderId),
+    ];
+    const conductReports = [
+      await createConductReportFixture({ reportedMemberId: reporterId }),
+      await createConductReportFixture({ reportedMemberId: reporterId }),
+      await createConductReportFixture({ reportedMemberId: reporterId }),
+    ];
+    const searchTerm = `report-history-${randomUUID()}`;
+    const createdAt = '2035-04-01T00:00:00.101300Z';
+    const resolvedAt = '2035-04-01T00:00:01.101300Z';
+    const reportCaseStatuses = [
+      'REPORT_CASE_PENDING',
+      'REPORT_CASE_DISMISSED',
+      'REPORT_CASE_HIDDEN',
+      'REPORT_CASE_RESTORED',
+    ] as const;
+    const conductReportStatuses = [
+      'CONDUCT_REPORT_PENDING',
+      'CONDUCT_REPORT_UPHELD',
+      'CONDUCT_REPORT_DISMISSED',
+    ] as const;
+    const allStatuses = [...reportCaseStatuses, ...conductReportStatuses];
+
+    const multipleReporterCase = reportCases[0]!;
+    await db.insert(adminReporterEntry).values({
+      id: randomUUID(),
+      reportCaseId: multipleReporterCase.caseId,
+      messageId: multipleReporterCase.messageId,
+      reporterMemberId: senderId,
+      reason: 'REPORT_OTHER',
+      detail: searchTerm,
+      createdAt: new Date('2035-04-01T00:00:00.102Z'),
+    });
+
+    for (const [index, fixture] of reportCases.entries()) {
+      const status = reportCaseStatuses[index]!;
+      const caseClosedAt =
+        status === 'REPORT_CASE_DISMISSED' || status === 'REPORT_CASE_RESTORED' ? resolvedAt : null;
+      const updatedAt = caseClosedAt ?? createdAt;
+      // eslint-disable-next-line no-await-in-loop
+      await db
+        .update(adminReporterEntry)
+        .set({ detail: searchTerm })
+        .where(eq(adminReporterEntry.reportCaseId, fixture.caseId));
+      // Raw SQL keeps every Report Case on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_report_cases
+        SET status = ${status},
+            case_closed_at = ${caseClosedAt}::timestamptz,
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.caseId}
+      `;
+    }
+
+    for (const [index, fixture] of conductReports.entries()) {
+      const status = conductReportStatuses[index]!;
+      const decisionReason =
+        status === 'CONDUCT_REPORT_UPHELD'
+          ? 'CONDUCT_ABANDONED'
+          : status === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_NO_VIOLATION'
+            : null;
+      const resolvedByAdminId = decisionReason ? adminId : null;
+      const decisionAt = decisionReason ? resolvedAt : null;
+      const updatedAt = decisionAt ?? createdAt;
+      // Raw SQL keeps every Conduct Report on the same microsecond timestamp.
+      // eslint-disable-next-line no-await-in-loop
+      await sql`
+        UPDATE admin_conduct_reports
+        SET detail = ${searchTerm},
+            status = ${status},
+            decision_reason = ${decisionReason},
+            resolved_by_admin_id = ${resolvedByAdminId},
+            resolved_at = ${decisionAt}::timestamptz,
+            version = ${decisionReason ? 2 : 1},
+            created_at = ${createdAt}::timestamptz,
+            updated_at = ${updatedAt}::timestamptz
+        WHERE id = ${fixture.reportId}
+      `;
+    }
+
+    type MemberSummary = { id: string; displayId: string };
+    type ReportHistoryItem = {
+      kind: 'REPORT_CASE' | 'CONDUCT_REPORT';
+      id: string;
+      displayId: string;
+      status: string;
+      createdAt: string;
+      updatedAt: string;
+      caseClosedAt?: string | null;
+      resolvedAt?: string | null;
+      reportedMember?: MemberSummary | null;
+      filer?: MemberSummary;
+      quest?: { displayId: string } | null;
+      reporterEntries?: Array<{ reporter: MemberSummary }>;
+      assignment?: { worker: MemberSummary };
+    };
+    type ReportHistoryPage = {
+      items: ReportHistoryItem[];
+      nextCursor: string | null;
+      totalCount: number;
+      countsByStatus: Record<string, number>;
+    };
+    const list = (query: Record<string, string> = {}) => {
+      const params = new URLSearchParams({ q: searchTerm, ...query });
+      return adminRequest(`/api/v1/admin/reports?${params.toString()}`);
+    };
+
+    const defaultQueueResponse = await list();
+    expect(defaultQueueResponse.status).toBe(200);
+    const defaultQueue = (await defaultQueueResponse.json()).data as ReportHistoryPage;
+    expect(defaultQueue.totalCount).toBe(3);
+    expect(defaultQueue.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+    expect(new Set(defaultQueue.items.map((item) => item.status))).toEqual(
+      new Set(['REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN', 'CONDUCT_REPORT_PENDING'])
+    );
+
+    const fullHistoryResponse = await list({
+      statusMode: 'FULL_HISTORY',
+      limit: '20',
+    });
+    expect(fullHistoryResponse.status).toBe(200);
+    const fullHistory = (await fullHistoryResponse.json()).data as ReportHistoryPage;
+    expect(fullHistory.totalCount).toBe(7);
+    expect(fullHistory.countsByStatus).toEqual({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 1,
+      REPORT_CASE_HIDDEN: 1,
+      REPORT_CASE_RESTORED: 1,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 1,
+      CONDUCT_REPORT_DISMISSED: 1,
+    });
+    expect(new Set(fullHistory.items.map((item) => item.createdAt))).toEqual(
+      new Set(['2035-04-01T00:00:00.101Z'])
+    );
+    for (const item of fullHistory.items) {
+      expect(item.displayId).toMatch(item.kind === 'REPORT_CASE' ? /^RPT-/ : /^CND-/);
+      expect(item.quest?.displayId).toMatch(/^QST-/);
+      expect(item.reportedMember?.displayId).toMatch(/^MEM-/);
+      if (item.kind === 'REPORT_CASE') {
+        expect(
+          item.reporterEntries?.every(({ reporter }) => /^MEM-/.test(reporter.displayId))
+        ).toBe(true);
+      } else {
+        expect(item.filer?.displayId).toMatch(/^MEM-/);
+        expect(item.quest?.displayId).toMatch(/^QST-/);
+      }
+    }
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[2]!.caseId)?.caseClosedAt
+    ).toBeNull();
+    expect(
+      fullHistory.items.find((item) => item.id === reportCases[3]!.caseId)?.caseClosedAt
+    ).toBeString();
+
+    const filteredReportCaseResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
+    });
+    expect(filteredReportCaseResponse.status).toBe(200);
+    const filteredReportCase = (await filteredReportCaseResponse.json()).data as ReportHistoryPage;
+    expect(filteredReportCase.totalCount).toBe(1);
+    expect(filteredReportCase.items).toHaveLength(1);
+    expect(filteredReportCase.items[0]).toMatchObject({
+      kind: 'REPORT_CASE',
+      id: multipleReporterCase.caseId,
+      status: 'REPORT_CASE_PENDING',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      reportedMember: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+    expect(filteredReportCase.items[0]?.reporterEntries).toHaveLength(2);
+    expect(
+      filteredReportCase.items[0]?.reporterEntries?.every(({ reporter }) =>
+        /^MEM-\d{6,}$/.test(reporter.displayId)
+      )
+    ).toBe(true);
+    expect(filteredReportCase.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 1,
+      REPORT_CASE_DISMISSED: 0,
+      REPORT_CASE_HIDDEN: 0,
+      REPORT_CASE_RESTORED: 0,
+      CONDUCT_REPORT_PENDING: 0,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+
+    const secondReporterResponse = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      status: 'REPORT_CASE_PENDING',
+      memberId: senderId,
+      submittedByMemberId: senderId,
+    });
+    expect((await secondReporterResponse.json()).data.items).toHaveLength(1);
+    const wrongReportedMember = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect((await wrongReportedMember.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+    });
+
+    const filteredConductResponse = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      status: 'CONDUCT_REPORT_PENDING',
+      memberId: reporterId,
+      submittedByMemberId: senderId,
+    });
+    expect(filteredConductResponse.status).toBe(200);
+    const filteredConduct = (await filteredConductResponse.json()).data as ReportHistoryPage;
+    expect(filteredConduct.totalCount).toBe(1);
+    expect(filteredConduct.items[0]).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: conductReports[0]!.reportId,
+      status: 'CONDUCT_REPORT_PENDING',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      filer: { id: senderId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { id: reporterId, displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: {
+        displayId: expect.stringMatching(/^QST-\d{6,}$/),
+        hirer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      },
+    });
+    expect(filteredConduct.countsByStatus).toMatchObject({
+      REPORT_CASE_PENDING: 0,
+      CONDUCT_REPORT_PENDING: 1,
+      CONDUCT_REPORT_UPHELD: 0,
+      CONDUCT_REPORT_DISMISSED: 0,
+    });
+    const wrongConductFiler = await list({
+      kind: 'CONDUCT_REPORT',
+      statusMode: 'FULL_HISTORY',
+      memberId: senderId,
+      submittedByMemberId: reporterId,
+    });
+    expect((await wrongConductFiler.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+    });
+
+    for (const status of allStatuses) {
+      // eslint-disable-next-line no-await-in-loop
+      const filteredResponse = await list({ statusMode: 'FULL_HISTORY', status });
+      // eslint-disable-next-line no-await-in-loop
+      const filtered = (await filteredResponse.json()).data as ReportHistoryPage;
+      expect(filtered.totalCount).toBe(1);
+      expect(filtered.items).toHaveLength(1);
+      expect(filtered.items[0]?.status).toBe(status);
+      expect(filtered.countsByStatus).toEqual(
+        Object.fromEntries(allStatuses.map((value) => [value, value === status ? 1 : 0]))
+      );
+    }
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const rows: Array<{ kind: ReportHistoryItem['kind']; id: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 7; page += 1) {
+        const query: Record<string, string> = {
+          statusMode: 'FULL_HISTORY',
+          limit: '1',
+          sort,
+        };
+        if (cursor) query.cursor = cursor;
+        // Each cursor comes from the prior response, so these requests stay sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await list(query);
+        // eslint-disable-next-line no-await-in-loop
+        const body = (await response.json()).data as ReportHistoryPage;
+        expect(response.status).toBe(200);
+        expect(body.totalCount).toBe(7);
+        rows.push(...body.items.map(({ kind, id }) => ({ kind, id })));
+        cursor = body.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return rows;
+    };
+    const newest = await readEveryPage('newest');
+    const repeatedNewest = await readEveryPage('newest');
+    const oldest = await readEveryPage('oldest');
+    const expectedRows = new Set([
+      ...reportCases.map((fixture) => `REPORT_CASE:${fixture.caseId}`),
+      ...conductReports.map((fixture) => `CONDUCT_REPORT:${fixture.reportId}`),
+    ]);
+    expect(newest).toHaveLength(7);
+    expect(new Set(newest.map((row) => `${row.kind}:${row.id}`))).toEqual(expectedRows);
+    expect(repeatedNewest).toEqual(newest);
+    expect(oldest).toEqual([...newest].reverse());
+
+    const restoredCaseDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${reportCases[3]!.caseId}`
+    );
+    expect(restoredCaseDetailResponse.status).toBe(200);
+    const restoredCaseDetail = (await restoredCaseDetailResponse.json()).data as ReportHistoryItem;
+    expect(restoredCaseDetail).toMatchObject({
+      kind: 'REPORT_CASE',
+      status: 'REPORT_CASE_RESTORED',
+      displayId: expect.stringMatching(/^RPT-\d{6,}$/),
+      caseClosedAt: expect.any(String),
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+    });
+
+    const upheldReportDetailResponse = await adminRequest(
+      `/api/v1/admin/reports/${conductReports[1]!.reportId}`
+    );
+    expect(upheldReportDetailResponse.status).toBe(200);
+    const upheldReportDetail = (await upheldReportDetailResponse.json()).data as ReportHistoryItem;
+    expect(upheldReportDetail).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      status: 'CONDUCT_REPORT_UPHELD',
+      displayId: expect.stringMatching(/^CND-\d{6,}$/),
+      resolvedAt: expect.any(String),
+      filer: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      reportedMember: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) },
+      quest: { displayId: expect.stringMatching(/^QST-\d{6,}$/) },
+      assignment: { worker: { displayId: expect.stringMatching(/^MEM-\d{6,}$/) } },
+    });
+
+    const empty = await list({
+      kind: 'REPORT_CASE',
+      statusMode: 'FULL_HISTORY',
+      submittedByMemberId: randomUUID(),
+    });
+    expect((await empty.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+      countsByStatus: {
+        REPORT_CASE_PENDING: 0,
+        REPORT_CASE_DISMISSED: 0,
+        REPORT_CASE_HIDDEN: 0,
+        REPORT_CASE_RESTORED: 0,
+        CONDUCT_REPORT_PENDING: 0,
+        CONDUCT_REPORT_UPHELD: 0,
+        CONDUCT_REPORT_DISMISSED: 0,
+      },
+    });
+
+    const invalidCursor = await adminRequest('/api/v1/admin/reports?cursor=not-a-cursor');
+    expect(invalidCursor.status).toBe(400);
+    expect((await invalidCursor.json()).error.code).toBe('INVALID_CURSOR');
+    const missingReport = await adminRequest(`/api/v1/admin/reports/${randomUUID()}`);
+    expect(missingReport.status).toBe(404);
+    expect((await missingReport.json()).error.code).toBe('REPORT_NOT_FOUND');
+
+    const privateMessageSearch = await list({ q: 'The reported Message content.' });
+    expect(privateMessageSearch.status).toBe(200);
+    expect((await privateMessageSearch.json()).data).toMatchObject({
+      items: [],
+      totalCount: 0,
+    });
+  });
+
+  it('does not expose an unsent v2 Proof Submission draft in Conduct Report detail', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      mode: 'CANDIDATE',
+      participation: 'SINGLE',
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+      includeDraftProof: true,
+    });
+    expect(fixture.draftProofSubmissionId).toBeDefined();
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detail.status).toBe(200);
+    const detailBody = await detail.json();
+    expect(detailBody.data.proofSubmission).toBeNull();
+    expect(JSON.stringify(detailBody)).not.toContain('Private unsent Proof Submission draft.');
+    expect(JSON.stringify(detailBody)).not.toContain('Private unsent Worker Message.');
+  });
+
+  it('lists all Quest mode and participation combinations and all Conduct Report reasons', async () => {
+    if (!postgresAvailable) return;
+    const cases = [
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: reporterId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: reporterId,
+      },
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.noShow,
+        filerId: reporterId,
+        reportedMemberId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: additionalWorkerId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+        candidateTeamLeaderId: reporterId,
+        includeTeamProof: true,
+      },
+    ];
+
+    for (const scenario of cases) {
+      // Each response checks a valid Rulebook relationship through the Admin HTTP boundary.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createConductReportFixture(scenario);
+      // eslint-disable-next-line no-await-in-loop
+      const response = await adminRequest(
+        '/api/v1/admin/reports?' +
+          new URLSearchParams({
+            kind: 'CONDUCT_REPORT',
+            questId: fixture.questId,
+          }).toString()
+      );
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = await response.json();
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0]).toMatchObject({
+        kind: 'CONDUCT_REPORT',
+        id: fixture.reportId,
+        quest: {
+          mode: scenario.mode,
+          participation: scenario.participation,
+        },
+        reason: scenario.reason,
+      });
+      expect(body.data.items[0]).not.toHaveProperty('proofSubmission');
+
+      if (fixture.proofSubmissionId) {
+        // eslint-disable-next-line no-await-in-loop
+        const detail = await adminRequest('/api/v1/admin/reports/' + fixture.reportId);
+        expect(detail.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const detailBody = await detail.json();
+        expect(detailBody.data.proofSubmission).toMatchObject({
+          id: fixture.proofSubmissionId,
+          teamId: fixture.candidateTeamId,
+          submittedBy: { id: reporterId, studentId: reporterStudentId },
+          description: 'Team Proof Submission description.',
+          workerMessage: 'Team Proof Submission message.',
+          submissionStatus: 'PROOF_PENDING',
+        });
+      }
+    }
+  });
+
+  it('reads selected v1 and v2 Team Proof with Student IDs for the Worker and Submitter', async () => {
+    if (!postgresAvailable) return;
+
+    for (const apiVersion of ['v1', 'v2'] as const) {
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createGroupConductFixture(apiVersion);
+      // eslint-disable-next-line no-await-in-loop
+      const detail = await adminRequest(`/api/v1/admin/reports/${fixture.conductReportId}`);
+      expect(detail.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await detail.json()).data;
+      expect(body).toMatchObject({
+        kind: 'CONDUCT_REPORT',
+        quest: { mode: 'CANDIDATE', participation: 'GROUP' },
+        assignment: {
+          worker: { id: reporterId, studentId: reporterStudentId },
+        },
+        decision: null,
+      });
+      if (apiVersion === 'v1') {
+        expect(body.proofSubmission).toMatchObject({
+          id: fixture.proofSubmissionId,
+          content: 'The Team submitted its work.',
+          submissionStatus: 'PROOF_APPROVED',
+          submittedBy: { id: fixture.leaderId, studentId: fixture.leaderStudentId },
+        });
+      } else {
+        expect(body.proofSubmission).toMatchObject({
+          id: fixture.proofSubmissionId,
+          description: 'The Team submitted its v2 work.',
+          submissionStatus: 'PROOF_APPROVED',
+          submittedBy: { id: fixture.leaderId, studentId: fixture.leaderStudentId },
+        });
+      }
+    }
+  });
+
+  it('exposes case-scoped handles and paginates Work history for all Quest shapes', async () => {
+    if (!postgresAvailable) return;
+    const scenarios = [
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'SINGLE' as const,
+        reason: conductReportReason.outOfScope,
+        filerId: reporterId,
+        reportedMemberId: senderId,
+        assignmentWorkerId: reporterId,
+      },
+      {
+        mode: 'FIRST_COME_FIRST_SERVED' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.noShow,
+        filerId: reporterId,
+        reportedMemberId: additionalWorkerId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+      },
+      {
+        mode: 'CANDIDATE' as const,
+        participation: 'GROUP' as const,
+        reason: conductReportReason.abandoned,
+        filerId: senderId,
+        reportedMemberId: reporterId,
+        assignmentWorkerIds: [reporterId, additionalWorkerId],
+        candidateTeamLeaderId: reporterId,
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      // Each shape gets separate persisted Chat data and Admin evidence reads.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createConductReportFixture(scenario);
+      const candidateWorkerIds = [fixture.filerId, fixture.reportedMemberId].filter(
+        (memberId) => memberId !== senderId
+      );
+      // eslint-disable-next-line no-await-in-loop
+      await createConductReportChatFixture(fixture, {
+        messageCount: 2,
+        candidateWorkerIds,
+      });
+
+      // eslint-disable-next-line no-await-in-loop
+      const detailResponse = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(detailResponse.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const detail = (await detailResponse.json()).data;
+      const workHandle = detail.evidenceHandles.find(
+        (handle: { conversationType: string }) => handle.conversationType === 'CONVERSATION_WORK'
+      );
+      expect(workHandle.handle).toMatch(/^CRH_[A-Za-z0-9_-]{43}$/);
+      expect(
+        detail.evidenceHandles.filter(
+          (handle: { conversationType: string }) =>
+            handle.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY'
+        )
+      ).toHaveLength(candidateWorkerIds.length);
+
+      // eslint-disable-next-line no-await-in-loop
+      const firstPage = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}?limit=1`, {
+        headers: { 'idempotency-key': `conduct-page-one-${fixture.reportId}` },
+      });
+      expect(firstPage.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const firstPageBody = (await firstPage.json()).data;
+      expect(
+        firstPageBody.messages.map((message: { sequence: number }) => message.sequence)
+      ).toEqual([1]);
+      expect(firstPageBody.nextCursor).toEqual(expect.any(String));
+
+      const secondPageQuery = new URLSearchParams({ limit: '1', cursor: firstPageBody.nextCursor });
+      // eslint-disable-next-line no-await-in-loop
+      const secondPage = await adminRequest(
+        `/api/v1/admin/evidence/${workHandle.handle}?${secondPageQuery}`,
+        { headers: { 'idempotency-key': `conduct-page-two-${fixture.reportId}` } }
+      );
+      expect(secondPage.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const secondPageBody = (await secondPage.json()).data;
+      expect(
+        secondPageBody.messages.map((message: { sequence: number }) => message.sequence)
+      ).toEqual([2]);
+      expect(secondPageBody.nextCursor).toBeNull();
+    }
+  });
+
+  it('limits Candidate Inquiry access, audits each page and Attachment link, and enforces retention', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      mode: 'FIRST_COME_FIRST_SERVED',
+      participation: 'GROUP',
+      reason: conductReportReason.noShow,
+      filerId: reporterId,
+      reportedMemberId: additionalWorkerId,
+      assignmentWorkerId: reporterId,
+      assignmentWorkerIds: [reporterId, additionalWorkerId],
+    });
+    const conversations = await createConductReportChatFixture(fixture, {
+      messageCount: 5,
+      attachmentSequence: 2,
+      candidateWorkerIds: [reporterId, additionalWorkerId, unrelatedCandidateId],
+    });
+    const detailResponse = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detailResponse.status).toBe(200);
+    const detail = (await detailResponse.json()).data;
+    const workHandle = detail.evidenceHandles.find(
+      (handle: { conversationType: string }) => handle.conversationType === 'CONVERSATION_WORK'
+    );
+    const candidateHandles = detail.evidenceHandles.filter(
+      (handle: { conversationType: string }) =>
+        handle.conversationType === 'CONVERSATION_CANDIDATE_INQUIRY'
+    );
+    expect(
+      candidateHandles.map((handle: { candidate: { id: string } }) => handle.candidate.id).sort()
+    ).toEqual([reporterId, additionalWorkerId].sort());
+    const reportedCandidateHandle = candidateHandles.find(
+      (handle: { candidate: { id: string } }) => handle.candidate.id === reporterId
+    );
+    const otherCandidateHandle = candidateHandles.find(
+      (handle: { candidate: { id: string } }) => handle.candidate.id === additionalWorkerId
+    );
+
+    const initialMemberships = await db
+      .select({ id: chatMembership.id })
+      .from(chatMembership)
+      .where(
+        inArray(
+          chatMembership.conversationId,
+          conversations.candidateConversationIds.concat(conversations.workConversationId)
+        )
+      );
+    const pages: Array<{
+      messages: Array<{ sequence: number; attachments: unknown[] }>;
+      nextCursor: string | null;
+    }> = [];
+    let cursor: string | null = null;
+    for (let index = 0; index < 3; index += 1) {
+      const query = new URLSearchParams({ limit: '2' });
+      if (cursor) query.set('cursor', cursor);
+      // eslint-disable-next-line no-await-in-loop
+      const response = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}?${query}`, {
+        headers: { 'idempotency-key': `conduct-history-${index}-${fixture.reportId}` },
+      });
+      expect(response.status).toBe(200);
+      // eslint-disable-next-line no-await-in-loop
+      const body = (await response.json()).data;
+      pages.push(body);
+      cursor = body.nextCursor;
+    }
+    expect(pages.map((page) => page.messages.map((message) => message.sequence))).toEqual([
+      [1, 2],
+      [3, 4],
+      [5],
+    ]);
+    expect(pages[0]!.messages[1]!.attachments).toEqual([
+      expect.objectContaining({
+        originalFilename: 'conduct-evidence.png',
+        url: 'https://storage.example/report-evidence',
+        urlExpiresAt: '2030-02-01T10:15:00.000Z',
+      }),
+    ]);
+    expect(pages[2]!.nextCursor).toBeNull();
+
+    const candidatePage = await adminRequest(
+      `/api/v1/admin/evidence/${reportedCandidateHandle.handle}?limit=2`,
+      { headers: { 'idempotency-key': `conduct-candidate-page-${fixture.reportId}` } }
+    );
+    expect(candidatePage.status).toBe(200);
+    expect((await candidatePage.json()).data).toMatchObject({
+      conductReportId: fixture.reportId,
+      conversationType: 'CONVERSATION_CANDIDATE_INQUIRY',
+      messages: [{ contentText: `Candidate Inquiry from ${reporterId}` }],
+    });
+
+    const unrelatedConversationRead = await adminRequest(
+      `/api/v1/admin/evidence/${conversations.candidateConversationIds[2]}`,
+      { headers: { 'idempotency-key': `conduct-unrelated-${fixture.reportId}` } }
+    );
+    expect(unrelatedConversationRead.status).toBe(404);
+
+    await db
+      .update(adminConductReportEvidenceHandle)
+      .set({ conversationId: conversations.candidateConversationIds[2]! })
+      .where(eq(adminConductReportEvidenceHandle.id, otherCandidateHandle.handle));
+    const reassignedHandleRead = await adminRequest(
+      `/api/v1/admin/evidence/${otherCandidateHandle.handle}`,
+      { headers: { 'idempotency-key': `conduct-reassigned-${fixture.reportId}` } }
+    );
+    expect(reassignedHandleRead.status).toBe(404);
+    await db
+      .update(adminConductReportEvidenceHandle)
+      .set({ conversationId: conversations.candidateConversationIds[1]! })
+      .where(eq(adminConductReportEvidenceHandle.id, otherCandidateHandle.handle));
+
+    const actions = await db
+      .select({
+        action: adminAction.action,
+        metadata: adminAction.metadata,
+        resultData: adminAction.resultData,
+      })
+      .from(adminAction)
+      .where(eq(adminAction.resourceId, fixture.reportId));
+    expect(
+      actions.filter((action) => action.action === 'CONDUCT_REPORT_EVIDENCE_ACCESS')
+    ).toHaveLength(4);
+    expect(
+      actions.filter((action) => action.action === 'CONDUCT_REPORT_EVIDENCE_FILE_ACCESS')
+    ).toHaveLength(1);
+    expect(JSON.stringify(actions)).not.toContain('Conduct Report history message');
+    expect(JSON.stringify(actions)).not.toContain('https://storage.example');
+    expect(JSON.stringify(actions)).not.toContain('conduct-report-fixture/');
+
+    const directConversationRead = await adminRequest(
+      `/api/v1/admin/evidence/${conversations.workConversationId}`,
+      { headers: { 'idempotency-key': `conduct-direct-work-${fixture.reportId}` } }
+    );
+    expect(directConversationRead.status).toBe(404);
+    const noWriteRoute = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}`, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-no-write-${fixture.reportId}` },
+    });
+    expect(noWriteRoute.status).toBe(404);
+    expect(
+      await db
+        .select({ id: chatMembership.id })
+        .from(chatMembership)
+        .where(
+          inArray(
+            chatMembership.conversationId,
+            conversations.candidateConversationIds.concat(conversations.workConversationId)
+          )
+        )
+    ).toHaveLength(initialMemberships.length);
+
+    const terminalAt = new Date('2020-02-03T10:00:00.000Z');
+    await db
+      .update(quest)
+      .set({
+        questStatus: 'QUEST_FAILED',
+        failedAt: terminalAt,
+        moneyHoldStartedAt: terminalAt,
+        updatedAt: terminalAt,
+      })
+      .where(eq(quest.id, fixture.questId));
+    await db
+      .update(chatConversation)
+      .set({
+        questStatus: 'QUEST_FAILED',
+        readOnlyAt: terminalAt,
+        archivedAt: terminalAt,
+        latestTerminalAt: terminalAt,
+        updatedAt: terminalAt,
+      })
+      .where(eq(chatConversation.id, conversations.workConversationId));
+    const expiredRead = await adminRequest(`/api/v1/admin/evidence/${workHandle.handle}`, {
+      headers: { 'idempotency-key': `conduct-expired-${fixture.reportId}` },
+    });
+    expect(expiredRead.status).toBe(404);
+    const expiredDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect((await expiredDetail.json()).data.evidenceHandles).toEqual([]);
+  });
+
+  it('walks the shared Report queue at limit 1 in both sort directions across microsecond rows', async () => {
+    if (!postgresAvailable) return;
+    const reportCaseEarly = await createReportFixture(senderId);
+    const conductReportEarly = await createConductReportFixture({
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+    });
+    const reportCaseLate = await createReportFixture(senderId);
+    const conductReportLate = await createConductReportFixture({
+      filerId: reporterId,
+      reportedMemberId: senderId,
+      assignmentWorkerId: reporterId,
+    });
+    const seeded = [
+      {
+        kind: 'REPORT_CASE' as const,
+        id: reportCaseEarly.caseId,
+        createdAt: '2035-04-01T00:00:00.100200Z',
+      },
+      {
+        kind: 'CONDUCT_REPORT' as const,
+        id: conductReportEarly.reportId,
+        createdAt: '2035-04-01T00:00:00.100800Z',
+      },
+      {
+        kind: 'REPORT_CASE' as const,
+        id: reportCaseLate.caseId,
+        createdAt: '2035-04-01T00:00:00.101300Z',
+      },
+      {
+        kind: 'CONDUCT_REPORT' as const,
+        id: conductReportLate.reportId,
+        createdAt: '2035-04-01T00:00:00.101300Z',
+      },
+    ];
+
+    for (const row of seeded) {
+      // Raw SQL preserves microseconds that JavaScript Date would truncate.
+      if (row.kind === 'REPORT_CASE') {
+        // eslint-disable-next-line no-await-in-loop
+        await sql`UPDATE admin_report_cases SET created_at = ${row.createdAt}::timestamptz WHERE id = ${row.id}`;
+      } else {
+        // eslint-disable-next-line no-await-in-loop
+        await sql`UPDATE admin_conduct_reports SET created_at = ${row.createdAt}::timestamptz WHERE id = ${row.id}`;
+      }
+    }
+
+    const readEveryPage = async (sort: 'newest' | 'oldest') => {
+      const rows: Array<{ kind: 'REPORT_CASE' | 'CONDUCT_REPORT'; id: string }> = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 8; page += 1) {
+        const params = new URLSearchParams({ limit: '1', sort, memberId: senderId });
+        if (cursor) params.set('cursor', cursor);
+        // Each cursor comes from the prior response, so these requests stay sequential.
+        // eslint-disable-next-line no-await-in-loop
+        const response = await adminRequest('/api/v1/admin/reports?' + params.toString());
+        expect(response.status).toBe(200);
+        // eslint-disable-next-line no-await-in-loop
+        const body = await response.json();
+        rows.push(
+          ...body.data.items.map(
+            (item: { kind: 'REPORT_CASE' | 'CONDUCT_REPORT'; id: string }) => ({
+              kind: item.kind,
+              id: item.id,
+            })
+          )
+        );
+        cursor = body.data.nextCursor;
+        if (!cursor) break;
+      }
+      expect(cursor).toBeNull();
+      return rows;
+    };
+
+    const timestampTiesAscending = [
+      { kind: 'REPORT_CASE' as const, id: reportCaseLate.caseId },
+      { kind: 'CONDUCT_REPORT' as const, id: conductReportLate.reportId },
+    ].sort((left, right) => left.id.localeCompare(right.id));
+    expect(await readEveryPage('oldest')).toEqual([
+      { kind: 'REPORT_CASE', id: reportCaseEarly.caseId },
+      { kind: 'CONDUCT_REPORT', id: conductReportEarly.reportId },
+      ...timestampTiesAscending,
+    ]);
+    expect(await readEveryPage('newest')).toEqual([
+      ...timestampTiesAscending.reverse(),
+      { kind: 'CONDUCT_REPORT', id: conductReportEarly.reportId },
+      { kind: 'REPORT_CASE', id: reportCaseEarly.caseId },
+    ]);
+  });
+
+  it('dismisses a pending Conduct Report and replays the same Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    const requestKey = `conduct-dismiss-${fixture.reportId}`;
+    const [questBefore] = await db
+      .select({
+        questStatus: quest.questStatus,
+        rewardSatang: quest.rewardSatang,
+        questFundingTotalSatang: quest.questFundingTotalSatang,
+        questEscrowSatang: quest.questEscrowSatang,
+      })
+      .from(quest)
+      .where(eq(quest.id, fixture.questId));
+    const [assignmentBefore] = await db
+      .select({ assignmentStatus: questAssignment.assignmentStatus })
+      .from(questAssignment)
+      .where(eq(questAssignment.id, fixture.assignmentId));
+    const decisionReasonText = 'x'.repeat(200);
+    const body = {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      decisionReasonText,
+    };
+
+    const first = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.resourceSummary).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      status: 'CONDUCT_REPORT_DISMISSED',
+      version: 2,
+      resolvedAt: expect.any(String),
+    });
+    expect(firstBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
+
+    const [report] = await db
+      .select({
+        status: adminConductReport.status,
+        version: adminConductReport.version,
+        decisionReason: adminConductReport.decisionReason,
+        resolvedByAdminId: adminConductReport.resolvedByAdminId,
+        resolvedAt: adminConductReport.resolvedAt,
+      })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toMatchObject({
+      status: 'CONDUCT_REPORT_DISMISSED',
+      version: 2,
+      decisionReason: 'CONDUCT_REPORT_NO_VIOLATION',
+      resolvedByAdminId: adminId,
+      resolvedAt: expect.any(Date),
+    });
+
+    const [action] = await db
+      .select()
+      .from(adminAction)
+      .where(eq(adminAction.id, firstBody.data.adminActionId));
+    expect(action).toMatchObject({
+      adminId,
+      action: 'CONDUCT_REPORT_DISMISS',
+      resourceType: 'conduct_report',
+      resourceId: fixture.reportId,
+      requestKey,
+      reasonCatalogVersion: 2,
+      reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      expectedVersion: 1,
+      resultVersion: 2,
+      metadata: { outcome: 'CONDUCT_REPORT_DISMISSED' },
+    });
+    expect(action?.decisionReasonText).toBe(decisionReasonText);
+    expect(action?.metadata).not.toHaveProperty('decisionReasonText');
+    expect(action?.resultData).not.toHaveProperty('decisionReasonText');
+    expect(action?.resultData).not.toHaveProperty('detail');
+    expect(
+      await db
+        .select({
+          questStatus: quest.questStatus,
+          rewardSatang: quest.rewardSatang,
+          questFundingTotalSatang: quest.questFundingTotalSatang,
+          questEscrowSatang: quest.questEscrowSatang,
+        })
+        .from(quest)
+        .where(eq(quest.id, fixture.questId))
+    ).toEqual([questBefore]);
+    expect(
+      await db
+        .select({ assignmentStatus: questAssignment.assignmentStatus })
+        .from(questAssignment)
+        .where(eq(questAssignment.id, fixture.assignmentId))
+    ).toEqual([assignmentBefore]);
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText,
+      })
+    );
+
+    const replay = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(firstBody.data.adminActionId);
+    const changedNoteReplay = await adminRequest(
+      `/api/v1/admin/reports/${fixture.reportId}/decide`,
+      {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify({
+          ...body,
+          decisionReasonText: 'A different note must not replay the original decision.',
+        }),
+      }
+    );
+    expect(changedNoteReplay.status).toBe(409);
+    expect((await changedNoteReplay.json()).error.code).toBe('ADMIN_ACTION_KEY_REUSED');
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_DISMISS'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+  });
+
+  it('upholds a Conduct Report, records a Misconduct violation, and replays the Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+    const decisionReasonText = 'Admin-only note for the upheld Conduct Report.';
+    const body = {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      decisionReasonText,
+    };
+    const requestKey = `conduct-uphold-${fixture.reportId}`;
+
+    const first = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.data.resourceSummary).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      id: fixture.reportId,
+      status: 'CONDUCT_REPORT_UPHELD',
+      version: 2,
+      resolvedAt: expect.any(String),
+    });
+
+    const [report] = await db
+      .select({
+        status: adminConductReport.status,
+        version: adminConductReport.version,
+        reason: adminConductReport.reason,
+        decisionReason: adminConductReport.decisionReason,
+        resolvedByAdminId: adminConductReport.resolvedByAdminId,
+        resolvedAt: adminConductReport.resolvedAt,
+      })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toMatchObject({
+      status: 'CONDUCT_REPORT_UPHELD',
+      version: 2,
+      reason: 'CONDUCT_OUT_OF_SCOPE',
+      decisionReason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      resolvedByAdminId: adminId,
+      resolvedAt: expect.any(Date),
+    });
+
+    const [action] = await db
+      .select()
+      .from(adminAction)
+      .where(eq(adminAction.id, firstBody.data.adminActionId));
+    expect(action).toMatchObject({
+      adminId,
+      action: 'CONDUCT_REPORT_UPHOLD',
+      resourceType: 'conduct_report',
+      resourceId: fixture.reportId,
+      requestKey,
+      reasonCatalogVersion: 2,
+      reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      expectedVersion: 1,
+      resultVersion: 2,
+      metadata: { outcome: 'CONDUCT_REPORT_UPHELD' },
+    });
+    expect(action?.decisionReasonText).toBe(decisionReasonText);
+    const activityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+    );
+    expect(activityLog.status).toBe(200);
+    expect((await activityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        decisionReasonText,
+      })
+    );
+
+    const penaltyRows = await db
+      .select({
+        ladder: memberPenaltyRecord.ladder,
+        source: memberPenaltyRecord.source,
+        sourceId: memberPenaltyRecord.sourceId,
+        result: memberPenaltyRecord.result,
+        actorType: memberPenaltyRecord.actorType,
+        actorAdminId: memberPenaltyRecord.actorAdminId,
+        reasonCode: memberPenaltyRecord.reasonCode,
+      })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+          eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+          eq(memberPenaltyRecord.sourceId, fixture.reportId)
+        )
+      );
+    expect(penaltyRows).toEqual([
+      {
+        ladder: 'MISCONDUCT',
+        source: 'CONDUCT_REPORT',
+        sourceId: fixture.reportId,
+        result: 'PENALTY_RED_FLAG',
+        actorType: 'ADMIN',
+        actorAdminId: adminId,
+        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+      },
+    ]);
+
+    const [delivery] = await db
+      .select()
+      .from(pushDelivery)
+      .where(
+        and(
+          eq(pushDelivery.recipientMemberId, fixture.reportedMemberId),
+          eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`)
+        )
+      );
+    expect(delivery).toMatchObject({
+      eventType: 'CONDUCT_REPORT_UPHELD',
+      title: 'Conduct Report decision',
+      status: 'PUSH_DELIVERY_PENDING',
+      data: {
+        eventType: 'CONDUCT_REPORT_UPHELD',
+        reportId: fixture.reportId,
+        reasonCode: 'CONDUCT_OUT_OF_SCOPE',
+        decision: 'UPHELD',
+        penaltyResult: 'PENALTY_RED_FLAG',
+      },
+    });
+    expect(delivery?.body).toBe(
+      'Your Conduct Report was upheld for work outside the agreed scope. The result is a 7-day Red Flag.'
+    );
+    expect(delivery?.body).not.toContain(decisionReasonText);
+    expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
+
+    const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).data).toMatchObject({
+      kind: 'CONDUCT_REPORT',
+      status: 'CONDUCT_REPORT_UPHELD',
+      decision: {
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        reason: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        resolvedAt: expect.any(String),
+        admin: { id: adminId, email: adminEmail },
+      },
+    });
+
+    const replay = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(firstBody.data.adminActionId);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+
+    const repeated = await adminRequest(path, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-again-${fixture.reportId}`,
+        'if-match': '2',
+      },
+      body: JSON.stringify(body),
+    });
+    expect(repeated.status).toBe(409);
+    expect((await repeated.json()).error.code).toBe('CONDUCT_REPORT_OUTCOME_INVALID');
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_UPHOLD'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+    await db
+      .update(adminConductReport)
+      .set({ decisionReason: 'NOT_AN_APPROVED_DECISION_CODE' })
+      .where(eq(adminConductReport.id, fixture.reportId));
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const inconsistentDetail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(inconsistentDetail.status).toBe(500);
+    } finally {
+      expectedFailureLog.mockRestore();
+    }
+  });
+
+  it('freezes the reported Member Wallet for a temporary Ban and restores it after expiry', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
+    await ensureWallet(senderId);
+    const walletOwnerIds = [senderId, reportedMemberId];
+
+    const [questBefore] = await db.select().from(quest).where(eq(quest.id, fixture.questId));
+    const assignmentsBefore = await db
+      .select()
+      .from(questAssignment)
+      .where(eq(questAssignment.questId, fixture.questId));
+    const legacyProofBefore = await db
+      .select()
+      .from(proofSubmission)
+      .where(eq(proofSubmission.questId, fixture.questId));
+    const v2ProofBefore = await db
+      .select()
+      .from(questV2ProofSubmission)
+      .where(eq(questV2ProofSubmission.questId, fixture.questId));
+    const balancesBefore = await db
+      .select({
+        userId: walletWallet.userId,
+        spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+        earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+        fundingReservedSatang: walletWallet.fundingReservedSatang,
+        reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+      })
+      .from(walletWallet)
+      .where(inArray(walletWallet.userId, walletOwnerIds))
+      .orderBy(asc(walletWallet.userId));
+    const questEscrowBefore = await db
+      .select()
+      .from(walletFundingReservation)
+      .where(
+        and(
+          eq(walletFundingReservation.callerScope, 'quest'),
+          eq(walletFundingReservation.callerReference, fixture.questId)
+        )
+      );
+    const ledgerBefore = await db
+      .selectDistinct({
+        id: walletLedgerTransaction.id,
+        eventType: walletLedgerTransaction.eventType,
+      })
+      .from(walletLedgerTransaction)
+      .innerJoin(
+        walletLedgerPosting,
+        eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+      )
+      .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+      .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+      .where(inArray(walletWallet.userId, walletOwnerIds))
+      .orderBy(asc(walletLedgerTransaction.id));
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-temp-ban-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
+    });
+    expect(decision.status).toBe(200);
+
+    const [penalty] = await db
+      .select({ result: memberPenaltyRecord.result })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, reportedMemberId),
+          eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+          eq(memberPenaltyRecord.sourceId, fixture.reportId)
+        )
+      );
+    expect(penalty?.result).toBe('PENALTY_TEMPORARY_BAN_7_DAYS');
+    const [frozenWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(frozenWallet?.walletStatus).toBe('FROZEN');
+    const freezeHistory = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        actorUserId: walletStatusHistory.actorUserId,
+        fromStatus: walletStatusHistory.fromStatus,
+        toStatus: walletStatusHistory.toStatus,
+        reason: walletStatusHistory.reason,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(freezeHistory).toHaveLength(2);
+    expect(freezeHistory[1]).toMatchObject({
+      actorAdminId: null,
+      actorUserId: null,
+      fromStatus: 'ACTIVE',
+      toStatus: 'FROZEN',
+      reason: expect.stringMatching(/^Automatic Member Ban freeze: /),
+    });
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    const expiryRunAt = new Date(bannedMember!.bannedUntil!.getTime() + 1);
+    expect(await processExpiredMemberBanWalletFreeze(reportedMemberId, expiryRunAt)).toBe(true);
+
+    const [restoredWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(restoredWallet?.walletStatus).toBe('ACTIVE');
+    expect(
+      await db
+        .select({ bannedUntil: authUser.bannedUntil })
+        .from(authUser)
+        .where(eq(authUser.id, reportedMemberId))
+    ).toEqual([{ bannedUntil: null }]);
+    const restoredHistory = await db
+      .select({
+        fromStatus: walletStatusHistory.fromStatus,
+        toStatus: walletStatusHistory.toStatus,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(restoredHistory.map(({ toStatus }) => toStatus)).toEqual(['ACTIVE', 'FROZEN', 'ACTIVE']);
+
+    expect(await db.select().from(quest).where(eq(quest.id, fixture.questId))).toEqual([
+      questBefore,
+    ]);
+    expect(
+      await db.select().from(questAssignment).where(eq(questAssignment.questId, fixture.questId))
+    ).toEqual(assignmentsBefore);
+    expect(
+      await db.select().from(proofSubmission).where(eq(proofSubmission.questId, fixture.questId))
+    ).toEqual(legacyProofBefore);
+    expect(
+      await db
+        .select()
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, fixture.questId))
+    ).toEqual(v2ProofBefore);
+    expect(
+      await db
+        .select({
+          userId: walletWallet.userId,
+          spendingBalanceSatang: walletWallet.spendingBalanceSatang,
+          earningsBalanceSatang: walletWallet.earningsBalanceSatang,
+          fundingReservedSatang: walletWallet.fundingReservedSatang,
+          reservedForPayoutsSatang: walletWallet.reservedForPayoutsSatang,
+        })
+        .from(walletWallet)
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletWallet.userId))
+    ).toEqual(balancesBefore);
+    expect(
+      await db
+        .select()
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.callerScope, 'quest'),
+            eq(walletFundingReservation.callerReference, fixture.questId)
+          )
+        )
+    ).toEqual(questEscrowBefore);
+    expect(
+      await db
+        .selectDistinct({
+          id: walletLedgerTransaction.id,
+          eventType: walletLedgerTransaction.eventType,
+        })
+        .from(walletLedgerTransaction)
+        .innerJoin(
+          walletLedgerPosting,
+          eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+        )
+        .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+        .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletLedgerTransaction.id))
+    ).toEqual(ledgerBefore);
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+  });
+
+  it('freezes the Wallet when an upheld Conduct Report creates a permanent Ban', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture({
+      permanentBan: true,
+    });
+    const [activeWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(activeWallet?.walletStatus).toBe('ACTIVE');
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-permanent-ban-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
+    });
+    expect(decision.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_PERMANENT_BAN' }]);
+    expect(
+      await db
+        .select({ walletStatus: walletWallet.walletStatus })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, wallet.id))
+    ).toEqual([{ walletStatus: 'FROZEN' }]);
+    expect(
+      await db
+        .select({ bannedUntil: authUser.bannedUntil })
+        .from(authUser)
+        .where(eq(authUser.id, reportedMemberId))
+    ).toEqual([{ bannedUntil: null }]);
+  });
+
+  it('keeps a discretionary Wallet freeze after the temporary Ban expires', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture({
+      discretionaryFreeze: true,
+    });
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-existing-freeze-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
+    });
+    expect(decision.status).toBe(200);
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    expect(
+      await processExpiredMemberBanWalletFreeze(
+        reportedMemberId,
+        new Date(bannedMember!.bannedUntil!.getTime() + 1)
+      )
+    ).toBe(true);
+
+    const [unchangedWallet] = await db
+      .select({ walletStatus: walletWallet.walletStatus })
+      .from(walletWallet)
+      .where(eq(walletWallet.id, wallet.id));
+    expect(unchangedWallet?.walletStatus).toBe('FROZEN');
+    const history = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        reason: walletStatusHistory.reason,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(history).toHaveLength(2);
+    expect(history[1]).toEqual({
+      actorAdminId: adminId,
+      reason: 'Administrative investigation',
+    });
+  });
+
+  it('keeps an Admin-suspended Wallet after the temporary Ban expires', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-suspended-wallet-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
+    });
+    expect(decision.status).toBe(200);
+
+    await changeWalletStatus({
+      walletId: wallet.id,
+      toStatus: 'SUSPENDED',
+      actorAdminId: adminId,
+      reason: 'Administrative suspension',
+    });
+
+    const [bannedMember] = await db
+      .select({ bannedUntil: authUser.bannedUntil })
+      .from(authUser)
+      .where(eq(authUser.id, reportedMemberId));
+    expect(bannedMember?.bannedUntil).toBeInstanceOf(Date);
+    expect(
+      await processExpiredMemberBanWalletFreeze(
+        reportedMemberId,
+        new Date(bannedMember!.bannedUntil!.getTime() + 1)
+      )
+    ).toBe(true);
+
+    expect(
+      await db
+        .select({ walletStatus: walletWallet.walletStatus })
+        .from(walletWallet)
+        .where(eq(walletWallet.id, wallet.id))
+    ).toEqual([{ walletStatus: 'SUSPENDED' }]);
+    const history = await db
+      .select({
+        actorAdminId: walletStatusHistory.actorAdminId,
+        reason: walletStatusHistory.reason,
+        toStatus: walletStatusHistory.toStatus,
+      })
+      .from(walletStatusHistory)
+      .where(eq(walletStatusHistory.walletId, wallet.id))
+      .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+    expect(history.map(({ toStatus }) => toStatus)).toEqual(['ACTIVE', 'FROZEN', 'SUSPENDED']);
+    expect(history[2]).toEqual({
+      actorAdminId: adminId,
+      reason: 'Administrative suspension',
+      toStatus: 'SUSPENDED',
+    });
+  });
+
+  it('keeps an upheld decision final after Push delivery fails and leaves Quest money state unchanged', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({
+      reason: conductReportReason.outOfScope,
+      includeDraftProof: true,
+    });
+    const walletOwnerIds = [...new Set([senderId, fixture.reportedMemberId])];
+    await Promise.all(walletOwnerIds.map((memberId) => ensureWallet(memberId)));
+
+    const encryption = createPushDeviceEncryption({
+      key: '9f'.repeat(32),
+      keyVersion: 'admin-report-test',
+    });
+    const device = await registerAndroidPushDevice(
+      fixture.reportedMemberId,
+      `admin-report-fcm-${randomUUID()}-android`,
+      { encryption }
+    );
+    fixturePushDeviceIds.push(device.id);
+
+    const snapshotState = async () => ({
+      quest: await db.select().from(quest).where(eq(quest.id, fixture.questId)),
+      assignments: await db
+        .select()
+        .from(questAssignment)
+        .where(eq(questAssignment.questId, fixture.questId)),
+      legacyProofSubmissions: await db
+        .select()
+        .from(proofSubmission)
+        .where(eq(proofSubmission.questId, fixture.questId)),
+      v2ProofSubmissions: await db
+        .select()
+        .from(questV2ProofSubmission)
+        .where(eq(questV2ProofSubmission.questId, fixture.questId)),
+      wallets: await Promise.all(walletOwnerIds.map((memberId) => getWallet(memberId))),
+      walletStatusHistory: await db
+        .select({
+          id: walletStatusHistory.id,
+          fromStatus: walletStatusHistory.fromStatus,
+          toStatus: walletStatusHistory.toStatus,
+          occurredAt: walletStatusHistory.occurredAt,
+        })
+        .from(walletStatusHistory)
+        .innerJoin(walletWallet, eq(walletWallet.id, walletStatusHistory.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id)),
+      ledgerTransactions: await db
+        .selectDistinct({
+          id: walletLedgerTransaction.id,
+          eventType: walletLedgerTransaction.eventType,
+        })
+        .from(walletLedgerTransaction)
+        .innerJoin(
+          walletLedgerPosting,
+          eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+        )
+        .innerJoin(walletLedgerAccount, eq(walletLedgerAccount.id, walletLedgerPosting.accountId))
+        .innerJoin(walletWallet, eq(walletWallet.id, walletLedgerAccount.walletId))
+        .where(inArray(walletWallet.userId, walletOwnerIds))
+        .orderBy(asc(walletLedgerTransaction.id)),
+      questEscrows: await db
+        .select({
+          id: walletFundingReservation.id,
+          ownerUserId: walletFundingReservation.ownerUserId,
+          questId: walletFundingReservation.callerReference,
+          policyRevisionId: walletFundingReservation.policyRevisionId,
+          totalReservedSatang: walletFundingReservation.totalReservedSatang,
+          remainingSatang: walletFundingReservation.remainingSatang,
+          status: walletFundingReservation.status,
+          createdLedgerTransactionId: walletFundingReservation.createdLedgerTransactionId,
+        })
+        .from(walletFundingReservation)
+        .where(
+          and(
+            eq(walletFundingReservation.ownerUserId, senderId),
+            eq(walletFundingReservation.callerScope, 'quest'),
+            eq(walletFundingReservation.callerReference, fixture.questId)
+          )
+        ),
+    });
+    const stateBefore = await snapshotState();
+
+    const decision = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-uphold-push-failure-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_UPHELD',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      }),
+    });
+    expect(decision.status).toBe(200);
+
+    const eventKey = `conduct-report-upheld:${fixture.reportId}`;
+    let attemptedEvent = false;
+    const processed = await processPendingPushDeliveries({
+      now: () => new Date(Date.now() + 1),
+      encryption,
+      send: async (_token, message) => {
+        if (message.data.eventKey === eventKey) attemptedEvent = true;
+        return { kind: 'RETRYABLE_FAILURE', errorCode: 'FCM_HTTP_503' };
+      },
+    });
+    expect(processed).toBeGreaterThan(0);
+    expect(attemptedEvent).toBe(true);
+
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ source: memberPenaltyRecord.source, sourceId: memberPenaltyRecord.sourceId })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ status: pushDelivery.status, lastErrorCode: pushDelivery.lastErrorCode })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, eventKey))
+    ).toEqual([{ status: 'PUSH_DELIVERY_PENDING', lastErrorCode: 'FCM_HTTP_503' }]);
+    expect(await snapshotState()).toEqual(stateBefore);
+  });
+
+  it('creates one penalty and one Push event when two Admin requests uphold the same Conduct Report', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+    const responses = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        adminRequest(path, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `conduct-uphold-race-${suffix}-${fixture.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_UPHELD',
+            decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+          }),
+        })
+      )
+    );
+    const bodies = await Promise.all(responses.map((response) => response.json()));
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(bodies.find((body) => body.error)?.error.code).toBe('ADMIN_ACTION_CONFLICT');
+    expect(
+      await db
+        .select({ status: adminConductReport.status, version: adminConductReport.version })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId))
+    ).toEqual([{ status: 'CONDUCT_REPORT_UPHELD', version: 2 }]);
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_UPHOLD'),
+            eq(adminAction.resourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: memberPenaltyRecord.id })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.source, 'CONDUCT_REPORT'),
+            eq(memberPenaltyRecord.sourceId, fixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: pushDelivery.id })
+        .from(pushDelivery)
+        .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+  });
+
+  it('validates the Conduct Report dismissal catalog and keeps Admin-only access', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    const path = `/api/v1/admin/reports/${fixture.reportId}/decide`;
+
+    const invalidCode = await adminRequest(path, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-dismiss-invalid-${fixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'POLICY_REVIEW',
+      }),
+    });
+    expect(invalidCode.status).toBe(400);
+    expect((await invalidCode.json()).error.code).toBe('VALIDATION');
+
+    const overLimitText = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-dismiss-text-${fixture.reportId}`, 'if-match': '1' },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText: 'x'.repeat(201),
+      }),
+    });
+    expect(overLimitText.status).toBe(400);
+    expect((await overLimitText.json()).error.code).toBe('VALIDATION');
+    const emptyText = await adminRequest(path, {
+      method: 'POST',
+      headers: { 'idempotency-key': `conduct-dismiss-empty-${fixture.reportId}`, 'if-match': '1' },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        decisionReasonText: '',
+      }),
+    });
+    expect(emptyText.status).toBe(400);
+    expect((await emptyText.json()).error.code).toBe('VALIDATION');
+
+    const anonymous = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'conduct-anonymous',
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      })
+    );
+    expect(anonymous.status).toBe(401);
+
+    mock.restore();
+    memberAuthentication(reporterId);
+    const member = await app.handle(
+      new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'conduct-member',
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      })
+    );
+    expect(member.status).toBe(403);
+
+    const [report] = await db
+      .select({ status: adminConductReport.status, version: adminConductReport.version })
+      .from(adminConductReport)
+      .where(eq(adminConductReport.id, fixture.reportId));
+    expect(report).toEqual({ status: 'CONDUCT_REPORT_PENDING', version: 1 });
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.resourceId, fixture.reportId))
+    ).toHaveLength(0);
+  });
+
+  it('rejects stale versions and terminal Conduct Reports without a second decision', async () => {
+    if (!postgresAvailable) return;
+    const concurrentFixture = await createConductReportFixture();
+    const concurrentPath = `/api/v1/admin/reports/${concurrentFixture.reportId}/decide`;
+    const concurrentResponses = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        adminRequest(concurrentPath, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `conduct-dismiss-${suffix}-${concurrentFixture.reportId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'CONDUCT_REPORT_DISMISSED',
+            decisionReasonCode: 'CONDUCT_REPORT_INSUFFICIENT_EVIDENCE',
+          }),
+        })
+      )
+    );
+    const concurrentBodies = await Promise.all(
+      concurrentResponses.map((response) => response.json())
+    );
+    expect(concurrentResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(concurrentBodies.find((body) => body.error)?.error.code).toBe('ADMIN_ACTION_CONFLICT');
+
+    const stale = await adminRequest(concurrentPath, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `conduct-dismiss-stale-${concurrentFixture.reportId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+      }),
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(
+          and(
+            eq(adminAction.action, 'CONDUCT_REPORT_DISMISS'),
+            eq(adminAction.resourceId, concurrentFixture.reportId)
+          )
+        )
+    ).toHaveLength(1);
+
+    const terminalFixture = await createConductReportFixture();
+    const resolvedAt = new Date('2020-02-02T11:00:00.000Z');
+    await db
+      .update(adminConductReport)
+      .set({
+        status: 'CONDUCT_REPORT_DISMISSED',
+        version: 2,
+        decisionReason: 'CONDUCT_REPORT_NO_VIOLATION',
+        resolvedByAdminId: adminId,
+        resolvedAt,
+        updatedAt: resolvedAt,
+      })
+      .where(eq(adminConductReport.id, terminalFixture.reportId));
+    const terminal = await adminRequest(
+      `/api/v1/admin/reports/${terminalFixture.reportId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-dismiss-terminal-${terminalFixture.reportId}`,
+          'if-match': '2',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      }
+    );
+    expect(terminal.status).toBe(409);
+    expect((await terminal.json()).error.code).toBe('CONDUCT_REPORT_OUTCOME_INVALID');
+    expect(
+      await db
+        .select({ id: adminAction.id })
+        .from(adminAction)
+        .where(eq(adminAction.resourceId, terminalFixture.reportId))
+    ).toHaveLength(0);
+  });
+
+  it('rolls back a Conduct Report dismissal when AdminAction persistence fails', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createConductReportFixture();
+    const eventResponse = await adminEventsRequest();
+    expect(eventResponse.status).toBe(200);
+    const eventReader = eventResponse.body!.getReader();
+    const eventStream = createAdminSseEventReader(eventReader);
+    expect(await readAdminSseFrame(eventReader, 5_000)).toContain(': connected');
+    await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_dismiss() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'CONDUCT_REPORT_DISMISS' THEN
+          RAISE EXCEPTION 'forced Conduct Report AdminAction failure';
+        END IF;
+        RETURN NEW;
+      END;
+    $$`;
+    await sql`CREATE TRIGGER admin_report_test_fail_conduct_dismiss_trigger
+      BEFORE INSERT ON admin_action
+      FOR EACH ROW EXECUTE FUNCTION admin_report_test_fail_conduct_dismiss()`;
+
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-dismiss-atomic-${fixture.reportId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_DISMISSED',
+          decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+        }),
+      });
+      expect(response.status).toBe(500);
+
+      const [report] = await db
+        .select({
+          status: adminConductReport.status,
+          version: adminConductReport.version,
+          decisionReason: adminConductReport.decisionReason,
+          resolvedByAdminId: adminConductReport.resolvedByAdminId,
+          resolvedAt: adminConductReport.resolvedAt,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(report).toEqual({
+        status: 'CONDUCT_REPORT_PENDING',
+        version: 1,
+        decisionReason: null,
+        resolvedByAdminId: null,
+        resolvedAt: null,
+      });
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.resourceId, fixture.reportId))
+      ).toHaveLength(0);
+      await eventStream.expectNoEventsFor([
+        { subjectType: 'CONDUCT_REPORT', subjectId: fixture.reportId },
+      ]);
+    } finally {
+      await eventReader.cancel();
+      expectedFailureLog.mockRestore();
+      await sql`DROP TRIGGER IF EXISTS admin_report_test_fail_conduct_dismiss_trigger ON admin_action`;
+      await sql`DROP FUNCTION IF EXISTS admin_report_test_fail_conduct_dismiss()`;
+    }
+  });
+
+  it('rolls back a Conduct Report penalty when AdminAction persistence fails', async () => {
+    if (!postgresAvailable) return;
+    const { fixture, reportedMemberId, wallet } = await createBanConductReportFixture();
+    await sql`CREATE OR REPLACE FUNCTION admin_report_test_fail_conduct_uphold() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.action = 'CONDUCT_REPORT_UPHOLD' THEN
+          RAISE EXCEPTION 'forced Conduct Report AdminAction failure';
+        END IF;
+        RETURN NEW;
+      END;
+    $$`;
+    await sql`CREATE TRIGGER admin_report_test_fail_conduct_uphold_trigger
+      BEFORE INSERT ON admin_action
+      FOR EACH ROW EXECUTE FUNCTION admin_report_test_fail_conduct_uphold()`;
+
+    const expectedFailureLog = spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `conduct-uphold-atomic-${fixture.reportId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'CONDUCT_REPORT_UPHELD',
+          decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+        }),
+      });
+      expect(response.status).toBe(500);
+
+      const [report] = await db
+        .select({
+          status: adminConductReport.status,
+          version: adminConductReport.version,
+          decisionReason: adminConductReport.decisionReason,
+          resolvedByAdminId: adminConductReport.resolvedByAdminId,
+          resolvedAt: adminConductReport.resolvedAt,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(report).toEqual({
+        status: 'CONDUCT_REPORT_PENDING',
+        version: 1,
+        decisionReason: null,
+        resolvedByAdminId: null,
+        resolvedAt: null,
+      });
+      expect(
+        await db
+          .select({ id: memberPenaltyRecord.id })
+          .from(memberPenaltyRecord)
+          .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select({ walletStatus: walletWallet.walletStatus })
+          .from(walletWallet)
+          .where(eq(walletWallet.id, wallet.id))
+      ).toEqual([{ walletStatus: 'ACTIVE' }]);
+      expect(
+        await db
+          .select({ id: walletStatusHistory.id })
+          .from(walletStatusHistory)
+          .where(eq(walletStatusHistory.walletId, wallet.id))
+      ).toHaveLength(1);
+      expect(
+        await db
+          .select({ bannedUntil: authUser.bannedUntil })
+          .from(authUser)
+          .where(eq(authUser.id, reportedMemberId))
+      ).toEqual([{ bannedUntil: null }]);
+      expect(
+        await db
+          .select({ id: pushDelivery.id })
+          .from(pushDelivery)
+          .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.resourceId, fixture.reportId))
+      ).toHaveLength(0);
+    } finally {
+      expectedFailureLog.mockRestore();
+      await sql`DROP TRIGGER IF EXISTS admin_report_test_fail_conduct_uphold_trigger ON admin_action`;
+      await sql`DROP FUNCTION IF EXISTS admin_report_test_fail_conduct_uphold()`;
+    }
+  });
+  it('applies Hide and Restore atomically, hides the Message from other Members, and rejects stale commands', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createReportFixture();
+
+    const hideResponses = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-hide-${suffix}-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
+            decisionReasonText: 'Admin confirmed a safety policy violation.',
+          }),
+        })
+      )
+    );
+    expect(hideResponses.map((response) => response.status).sort()).toEqual([200, 409]);
+    const hide = hideResponses.find((response) => response.status === 200)!;
+    const concurrentConflict = hideResponses.find((response) => response.status === 409)!;
+    expect(hide.status).toBe(200);
+    expect((await hide.json()).data.resourceSummary).toMatchObject({
+      id: fixture.caseId,
+      status: 'REPORT_CASE_HIDDEN',
+      version: 2,
+    });
+    expect((await concurrentConflict.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
+
+    const hiddenQueue = await adminRequest(
+      `/api/v1/admin/reports?kind=REPORT_CASE&questId=${fixture.questId}`
+    );
+    expect(hiddenQueue.status).toBe(200);
+    expect((await hiddenQueue.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        id: fixture.caseId,
+        kind: 'REPORT_CASE',
+        status: 'REPORT_CASE_HIDDEN',
+      })
+    );
+
+    const [hiddenMessage] = await db
+      .select({ hiddenAt: chatMessage.hiddenAt, hiddenByAdminId: chatMessage.hiddenByAdminId })
+      .from(chatMessage)
+      .where(eq(chatMessage.id, fixture.messageId));
+    expect(hiddenMessage).toMatchObject({ hiddenAt: expect.any(Date), hiddenByAdminId: adminId });
+    expect(
+      await db
+        .select({ id: adminModerationDecision.id })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
+    ).toHaveLength(1);
+    const hideActivityLog = await adminRequest(
+      `/api/v1/admin/activity-log?resourceType=report_case&resourceId=${fixture.caseId}`
+    );
+    expect(hideActivityLog.status).toBe(200);
+    expect((await hideActivityLog.json()).data.items).toContainEqual(
+      expect.objectContaining({
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
+        decisionReasonText: 'Admin confirmed a safety policy violation.',
+      })
+    );
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.sourceId, fixture.caseId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
+
+    const rehide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `report-rehide-${fixture.caseId}`,
+        'if-match': '2',
+      },
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED',
+      }),
+    });
+    expect(rehide.status).toBe(200);
+    expect((await rehide.json()).data.resourceSummary).toMatchObject({
+      status: 'REPORT_CASE_HIDDEN',
+      version: 3,
+    });
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(
+          and(
+            eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+            eq(memberPenaltyRecord.sourceId, fixture.caseId)
+          )
+        )
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
+
+    const hiddenEvidence = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
+      headers: { 'idempotency-key': `report-hidden-evidence-${fixture.caseId}` },
+    });
+    expect(hiddenEvidence.status).toBe(200);
+    expect((await hiddenEvidence.json()).data.messages).toContainEqual(
+      expect.objectContaining({
+        id: fixture.messageId,
+        contentText: 'The reported Message content.',
+      })
+    );
+
+    mock.restore();
+    memberAuthentication(reporterId);
+    const memberMessages = await app.handle(
+      new Request(`http://localhost/api/v1/chat/conversations/${fixture.conversationId}/messages`)
+    );
+    expect(memberMessages.status).toBe(200);
+    expect(
+      (await memberMessages.json()).data.items.some(
+        (message: { id: string }) => message.id === fixture.messageId
+      )
+    ).toBe(false);
+    const hiddenReport = await app.handle(
+      new Request('http://localhost/api/v1/chat/reports', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messageId: fixture.messageId, reason: 'REPORT_SPAM' }),
+      })
+    );
+    expect(hiddenReport.status).toBe(404);
+    expect((await hiddenReport.json()).error.code).toBe('MESSAGE_NOT_FOUND');
+
+    mock.restore();
+    memberAuthentication(fixture.reportedMemberId);
+    const senderMessages = await app.handle(
+      new Request(`http://localhost/api/v1/chat/conversations/${fixture.conversationId}/messages`)
+    );
+    expect(senderMessages.status).toBe(200);
+    expect(
+      (await senderMessages.json()).data.items.some(
+        (message: { id: string; text: string }) =>
+          message.id === fixture.messageId && message.text === 'The reported Message content.'
+      )
+    ).toBe(true);
+
+    mock.restore();
+    const stale = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `report-stale-${fixture.caseId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_DISMISSED',
+        reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+      }),
+    });
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).error.code).toBe('ADMIN_ACTION_CONFLICT');
+
+    const restore = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `report-restore-${fixture.caseId}`,
+        'if-match': '3',
+      },
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_RESTORED',
+        reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY',
+      }),
+    });
+    expect(restore.status).toBe(200);
+    expect((await restore.json()).data.resourceSummary).toMatchObject({
+      status: 'REPORT_CASE_RESTORED',
+      version: 4,
+    });
+    const [restoredMessage] = await db
+      .select({ hiddenAt: chatMessage.hiddenAt, hiddenByAdminId: chatMessage.hiddenByAdminId })
+      .from(chatMessage)
+      .where(eq(chatMessage.id, fixture.messageId));
+    expect(restoredMessage).toEqual({ hiddenAt: null, hiddenByAdminId: null });
+    expect(
+      await db
+        .select({ id: adminModerationDecision.id })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
+    ).toHaveLength(3);
+    const penaltyRows = await db
+      .select({
+        result: memberPenaltyRecord.result,
+        reversalOfRecordId: memberPenaltyRecord.reversalOfRecordId,
+      })
+      .from(memberPenaltyRecord)
+      .where(
+        and(
+          eq(memberPenaltyRecord.memberId, fixture.reportedMemberId),
+          eq(memberPenaltyRecord.sourceId, fixture.caseId)
+        )
+      );
+    expect(penaltyRows).toHaveLength(2);
+    expect(penaltyRows.map((row) => row.result)).toContain('PENALTY_EXEMPT');
+    expect(
+      penaltyRows.find((row) => row.result === 'PENALTY_REVERSAL')?.reversalOfRecordId
+    ).toEqual(expect.any(String));
+  });
+
+  it('does not use the exemption for a pending dismissal and keeps a hidden penalty after dismissal', async () => {
+    if (!postgresAvailable) return;
+    const reportedMemberId = randomUUID();
+    const dismissedBeforeHide = await createReportFixture(reportedMemberId);
+    const firstConfirmedReportCase = await createReportFixture(reportedMemberId);
+    const hiddenThenDismissed = await createReportFixture(reportedMemberId);
+
+    const pendingDismissal = await adminRequest(
+      `/api/v1/admin/reports/${dismissedBeforeHide.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-dismiss-before-hide-${dismissedBeforeHide.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_DISMISSED',
+          reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+        }),
+      }
+    );
+    expect(pendingDismissal.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, dismissedBeforeHide.caseId))
+    ).toEqual([]);
+
+    const firstHide = await adminRequest(
+      `/api/v1/admin/reports/${firstConfirmedReportCase.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-first-confirmed-hide-${firstConfirmedReportCase.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_HIDDEN',
+          reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+        }),
+      }
+    );
+    expect(firstHide.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, firstConfirmedReportCase.caseId))
+    ).toEqual([{ result: 'PENALTY_EXEMPT' }]);
+
+    const secondHide = await adminRequest(
+      `/api/v1/admin/reports/${hiddenThenDismissed.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-second-confirmed-hide-${hiddenThenDismissed.caseId}`,
+          'if-match': '1',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_HIDDEN',
+          reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+        }),
+      }
+    );
+    expect(secondHide.status).toBe(200);
+    expect(
+      await db
+        .select({ result: memberPenaltyRecord.result })
+        .from(memberPenaltyRecord)
+        .where(eq(memberPenaltyRecord.sourceId, hiddenThenDismissed.caseId))
+    ).toEqual([{ result: 'PENALTY_RED_FLAG' }]);
+
+    const dismissalAfterHide = await adminRequest(
+      `/api/v1/admin/reports/${hiddenThenDismissed.caseId}/decide`,
+      {
+        method: 'POST',
+        headers: {
+          'idempotency-key': `report-dismiss-after-hide-${hiddenThenDismissed.caseId}`,
+          'if-match': '2',
+        },
+        body: JSON.stringify({
+          outcome: 'REPORT_CASE_DISMISSED',
+          reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+        }),
+      }
+    );
+    expect(dismissalAfterHide.status).toBe(200);
+    expect((await dismissalAfterHide.json()).data.resourceSummary).toMatchObject({
+      status: 'REPORT_CASE_DISMISSED',
+      version: 3,
+    });
+    const retainedPenaltyRows = await db
+      .select({ result: memberPenaltyRecord.result })
+      .from(memberPenaltyRecord)
+      .where(eq(memberPenaltyRecord.sourceId, hiddenThenDismissed.caseId));
+    expect(retainedPenaltyRows).toEqual([{ result: 'PENALTY_RED_FLAG' }]);
+  });
+
+  it('dismisses a pending Report Case without hiding the Message and rejects a repeated transition', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createReportFixture();
+    const requestKey = `report-dismiss-${fixture.caseId}`;
+    const body = { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' };
+
+    const dismiss = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(dismiss.status).toBe(200);
+    const dismissBody = await dismiss.json();
+
+    const legacyRequest = JSON.stringify({
+      action: 'REPORT_CASE_DISMISS',
+      adminId,
+      expectedTimestamp: null,
+      expectedVersion: 1,
+      kind: 'COMMAND',
+      metadata: { outcome: 'REPORT_CASE_DISMISSED' },
+      reasonCatalogVersion: 2,
+      reasonCode: 'REPORT_NO_POLICY_VIOLATION',
+      request: { outcome: 'REPORT_CASE_DISMISSED' },
+      requestKey,
+      resourceId: fixture.caseId,
+      resourceType: 'report_case',
+    });
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(legacyRequest));
+    const legacyRequestHash = Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, '0')
+    ).join('');
+    const [action] = await db
+      .select({ id: adminAction.id, requestHash: adminAction.requestHash })
+      .from(adminAction)
+      .where(eq(adminAction.id, dismissBody.data.adminActionId));
+    expect(action?.requestHash).toBe(legacyRequestHash);
+
+    const replay = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+      body: JSON.stringify(body),
+    });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).data.adminActionId).toBe(dismissBody.data.adminActionId);
+    const openQueue = await adminRequest(
+      `/api/v1/admin/reports?kind=REPORT_CASE&questId=${fixture.questId}`
+    );
+    expect(openQueue.status).toBe(200);
+    expect((await openQueue.json()).data.items).toEqual([]);
+
+    const [row] = await db
+      .select({ status: adminReportCase.status, caseClosedAt: adminReportCase.caseClosedAt })
+      .from(adminReportCase)
+      .where(eq(adminReportCase.id, fixture.caseId));
+    expect(row).toMatchObject({ status: 'REPORT_CASE_DISMISSED', caseClosedAt: expect.any(Date) });
+    const [message] = await db
+      .select({ hiddenAt: chatMessage.hiddenAt })
+      .from(chatMessage)
+      .where(eq(chatMessage.id, fixture.messageId));
+    expect(message).toEqual({ hiddenAt: null });
+
+    const closedEvidence = await adminRequest(`/api/v1/admin/evidence/${fixture.evidenceRefId}`, {
+      headers: { 'idempotency-key': `report-closed-evidence-${fixture.caseId}` },
+    });
+    expect(closedEvidence.status).toBe(404);
+    expect((await closedEvidence.json()).error.code).toBe('REPORT_NOT_FOUND');
+
+    const repeated = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+      method: 'POST',
+      headers: {
+        'idempotency-key': `report-repeated-${fixture.caseId}`,
+        'if-match': '2',
+      },
+      body: JSON.stringify({
+        outcome: 'REPORT_CASE_HIDDEN',
+        reasonCode: 'REPORT_SPAM_CONFIRMED',
+      }),
+    });
+    expect(repeated.status).toBe(409);
+    expect((await repeated.json()).error.code).toBe('REPORT_CASE_OUTCOME_INVALID');
+    expect(
+      await db
+        .select({ id: adminModerationDecision.id })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId))
+    ).toHaveLength(1);
+  });
+  const reportCaseReasonCodeCases = [
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_INSUFFICIENT_EVIDENCE' },
+    { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_HARASSMENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_SPAM_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_THREAT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_INAPPROPRIATE_CONTENT_CONFIRMED' },
+    { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_OTHER_POLICY_VIOLATION_CONFIRMED' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_MESSAGE_COMPLIES_WITH_POLICY' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_WAS_MISUNDERSTOOD' },
+    { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_NEW_EVIDENCE_OVERTURNS_HIDE' },
+  ] as const;
+
+  for (const { outcome, reasonCode } of reportCaseReasonCodeCases) {
+    it(`${outcome} records ${reasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-catalog-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+
+      const action =
+        outcome === 'REPORT_CASE_DISMISSED'
+          ? 'REPORT_CASE_DISMISS'
+          : outcome === 'REPORT_CASE_HIDDEN'
+            ? 'REPORT_CASE_HIDE'
+            : 'REPORT_CASE_RESTORE';
+      const requestKey = `report-catalog-${reasonCode}-${fixture.caseId}`;
+      const expectedVersion = outcome === 'REPORT_CASE_RESTORED' ? '2' : '1';
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': expectedVersion },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({ action, reasonCatalogVersion: 2, reasonCode });
+
+      const moderationDecisions = await db
+        .select({
+          newStatus: adminModerationDecision.newStatus,
+          reasonCatalogVersion: adminModerationDecision.reasonCatalogVersion,
+          reasonCode: adminModerationDecision.reasonCode,
+        })
+        .from(adminModerationDecision)
+        .where(eq(adminModerationDecision.reportCaseId, fixture.caseId));
+      expect(moderationDecisions).toContainEqual({
+        newStatus: outcome,
+        reasonCatalogVersion: 2,
+        reasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=report_case&resourceId=${fixture.caseId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ action, reasonCatalogVersion: 2, reasonCode })
+      );
+    });
+  }
+
+  const conductReportDecisionReasonCodeCases = [
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_NO_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_INSUFFICIENT_EVIDENCE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_DISPROVES_CLAIM',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_DISMISSED',
+      decisionReasonCode: 'CONDUCT_REPORT_OUTSIDE_RULEBOOK_SCOPE',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_PROOF_RECORD_CONFIRMS_VIOLATION',
+    },
+    {
+      outcome: 'CONDUCT_REPORT_UPHELD',
+      decisionReasonCode: 'CONDUCT_REPORT_CHAT_CONTEXT_CORROBORATES_VIOLATION',
+    },
+  ] as const;
+
+  for (const { outcome, decisionReasonCode } of conductReportDecisionReasonCodeCases) {
+    it(`${outcome} records Admin-selected ${decisionReasonCode} with catalog version 2`, async () => {
+      if (!postgresAvailable) return;
+      const filedReason = conductReportReason.outOfScope;
+      const fixture = await createConductReportFixture({ reason: filedReason });
+      const requestKey = `conduct-catalog-${decisionReasonCode}-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify({ outcome, decisionReasonCode }),
+      });
+      expect(response.status).toBe(200);
+
+      const [storedReport] = await db
+        .select({
+          reason: adminConductReport.reason,
+          status: adminConductReport.status,
+          decisionReason: adminConductReport.decisionReason,
+        })
+        .from(adminConductReport)
+        .where(eq(adminConductReport.id, fixture.reportId));
+      expect(storedReport).toEqual({
+        reason: filedReason,
+        status: outcome,
+        decisionReason: decisionReasonCode,
+      });
+
+      const [actionRow] = await db
+        .select({
+          action: adminAction.action,
+          reasonCatalogVersion: adminAction.reasonCatalogVersion,
+          reasonCode: adminAction.reasonCode,
+        })
+        .from(adminAction)
+        .where(eq(adminAction.requestKey, requestKey));
+      expect(actionRow).toEqual({
+        action:
+          outcome === 'CONDUCT_REPORT_DISMISSED'
+            ? 'CONDUCT_REPORT_DISMISS'
+            : 'CONDUCT_REPORT_UPHOLD',
+        reasonCatalogVersion: 2,
+        reasonCode: decisionReasonCode,
+      });
+
+      const activityLog = await adminRequest(
+        `/api/v1/admin/activity-log?resourceType=conduct_report&resourceId=${fixture.reportId}`
+      );
+      expect(activityLog.status).toBe(200);
+      expect((await activityLog.json()).data.items).toContainEqual(
+        expect.objectContaining({ reasonCatalogVersion: 2, reasonCode: decisionReasonCode })
+      );
+
+      const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
+      expect(detail.status).toBe(200);
+      expect((await detail.json()).data).toMatchObject({
+        reason: filedReason,
+        decision: { outcome, reason: decisionReasonCode },
+      });
+      if (outcome === 'CONDUCT_REPORT_UPHELD') {
+        expect(
+          await db
+            .select({ reasonCode: memberPenaltyRecord.reasonCode })
+            .from(memberPenaltyRecord)
+            .where(eq(memberPenaltyRecord.sourceId, fixture.reportId))
+        ).toEqual([{ reasonCode: filedReason }]);
+      }
+    });
+  }
+
+  it('rejects old or outcome-mismatched Report Case codes without writing an Admin Action', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'REPORT_CASE_DISMISSED', reasonCode: 'POLICY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'SAFETY_REVIEW' },
+      { outcome: 'REPORT_CASE_HIDDEN', reasonCode: 'REPORT_NO_POLICY_VIOLATION' },
+      { outcome: 'REPORT_CASE_RESTORED', reasonCode: 'REPORT_CONTEXT_SUPPORTS_MESSAGE' },
+    ] as const;
+
+    for (const { outcome, reasonCode } of invalidCases) {
+      const fixture = await createReportFixture();
+      if (outcome === 'REPORT_CASE_RESTORED') {
+        const hide = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+          method: 'POST',
+          headers: {
+            'idempotency-key': `report-invalid-hide-${fixture.caseId}`,
+            'if-match': '1',
+          },
+          body: JSON.stringify({
+            outcome: 'REPORT_CASE_HIDDEN',
+            reasonCode: 'REPORT_HARASSMENT_CONFIRMED',
+          }),
+        });
+        expect(hide.status).toBe(200);
+      }
+      const requestKey = `report-invalid-${reasonCode}-${fixture.caseId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.caseId}/decide`, {
+        method: 'POST',
+        headers: {
+          'idempotency-key': requestKey,
+          'if-match': outcome === 'REPORT_CASE_RESTORED' ? '2' : '1',
+        },
+        body: JSON.stringify({ outcome, reasonCode }),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
+  });
+
+  it('requires a separate approved Admin decision code for Conduct Report uphold', async () => {
+    if (!postgresAvailable) return;
+    const invalidCases = [
+      { outcome: 'CONDUCT_REPORT_UPHELD' },
+      { outcome: 'CONDUCT_REPORT_UPHELD', decisionReasonCode: 'CONDUCT_OUT_OF_SCOPE' },
+      {
+        outcome: 'CONDUCT_REPORT_DISMISSED',
+        decisionReasonCode: 'CONDUCT_REPORT_QUEST_RECORD_CONFIRMS_VIOLATION',
+      },
+    ] as const;
+
+    for (const body of invalidCases) {
+      const fixture = await createConductReportFixture({ reason: conductReportReason.outOfScope });
+      const requestKey = `conduct-invalid-${fixture.reportId}`;
+      const response = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}/decide`, {
+        method: 'POST',
+        headers: { 'idempotency-key': requestKey, 'if-match': '1' },
+        body: JSON.stringify(body),
+      });
+      expect(response.status).toBe(400);
+      expect(
+        await db
+          .select({ id: adminAction.id })
+          .from(adminAction)
+          .where(eq(adminAction.requestKey, requestKey))
+      ).toHaveLength(0);
+    }
+  });
+});

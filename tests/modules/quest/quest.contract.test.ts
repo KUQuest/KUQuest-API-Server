@@ -9,7 +9,7 @@ import {
   questParticipations,
   questStatuses,
   teamStatuses,
-} from '@/modules/quest/quest.contract';
+} from '@/modules/quest/shared';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

@@ -14,8 +14,9 @@ export const apiErrorSchema = t.Object({
 });
 
 export const betterAuthSecurity = [{ betterAuthSession: [] }];
+export const betterAuthAdminSecurity = [{ betterAuthAdminSession: [] }];
 
-type ErrorCode = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 429 | 500 | 502 | 503;
+type ErrorCode = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 429 | 500 | 502 | 503;
 type ResponseOptions = { successStatus?: 200 | 201 | 202 };
 
 export const responses = <T>(success: T, ...items: Array<ErrorCode | ResponseOptions>) => {

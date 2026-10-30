@@ -4,6 +4,7 @@ import { readResourceVersion } from '@/shared/resource-version';
 import type { ApiResponse } from '@/shared/api-response';
 import {
   ImageTooLargeError,
+  ImageDimensionsTooLargeError,
   ImageUploadError,
   UnsupportedImageTypeError,
   createDebugLogger,
@@ -242,6 +243,13 @@ export const setCertificateImage = async ({
   try {
     storedImage = await certificateStorage.upload(session.user.id, body.image);
   } catch (error) {
+    if (error instanceof ImageDimensionsTooLargeError) {
+      set.status = 422;
+      return apiError(
+        'CERTIFICATE_IMAGE_DIMENSIONS_TOO_LARGE',
+        'Image dimensions must not exceed 25 megapixels'
+      );
+    }
     if (error instanceof ImageTooLargeError) {
       set.status = 413;
       return apiError('CERTIFICATE_IMAGE_TOO_LARGE', error.message);

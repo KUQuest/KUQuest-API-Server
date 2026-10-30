@@ -1,7 +1,10 @@
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import {
   quest,
+  questApplication,
+  questAssignment,
   questTeam,
   questTeamInvitation,
   questTeamMember,
@@ -12,8 +15,10 @@ import {
   listTeamInvitations,
   listTeamMembers,
   listTeams,
+  selectCandidate,
+  submitTeam,
   updateTeam,
-} from '@/modules/quest/quest-candidate.service';
+} from '@/modules/quest/v1';
 
 import { randomUUID } from 'node:crypto';
 
@@ -28,6 +33,7 @@ const tagId = randomUUID();
 const questId = randomUUID();
 const teamId = randomUUID();
 const invitationId = randomUUID();
+const testQuestIds: string[] = [];
 
 beforeAll(async () => {
   try {
@@ -83,7 +89,10 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db.delete(quest).where(eq(quest.id, questId));
+  await db
+    .delete(auditRecord)
+    .where(inArray(auditRecord.actorUserId, [hirerId, leaderId, memberId, invitedUserId]));
+  await db.delete(quest).where(inArray(quest.id, [questId, ...testQuestIds]));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db
     .delete(authUser)
@@ -111,5 +120,155 @@ describe('Candidate Team authorization persistence', () => {
     expect((await listTeamInvitations(leaderId, questId, teamId))?.map(({ id }) => id)).toEqual([
       invitationId,
     ]);
+  });
+
+  it('does not submit a Candidate Team that has a Member with an active Red Flag', async () => {
+    const now = new Date('2031-01-01T00:00:00.000Z');
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(now.getTime() + 60_000) })
+      .where(eq(authUser.id, memberId));
+
+    try {
+      expect(await submitTeam(leaderId, questId, teamId, now)).toEqual({ outcome: 'red-flagged' });
+      const [team] = await db
+        .select({ teamStatus: questTeam.teamStatus })
+        .from(questTeam)
+        .where(eq(questTeam.id, teamId));
+      expect(team?.teamStatus).toBe('TEAM_FORMING');
+    } finally {
+      await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, memberId));
+    }
+  });
+
+  it('keeps a Candidate application selectable when an overlapping Worker Assignment blocks selection', async () => {
+    const activeQuestId = randomUUID();
+    const selectionQuestId = randomUUID();
+    const applicationId = randomUUID();
+    testQuestIds.push(activeQuestId, selectionQuestId);
+    await db.insert(quest).values([
+      {
+        id: activeQuestId,
+        hirerId,
+        title: 'Existing Worker Quest',
+        condition: 'Complete the work',
+        mode: 'CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_ASSIGNED',
+        rewardSatang: 500,
+        tagId,
+        headcount: 1,
+        startTime: new Date('2030-01-01T10:00:00.000Z'),
+        dueAt: new Date('2030-01-01T12:00:00.000Z'),
+      },
+      {
+        id: selectionQuestId,
+        hirerId,
+        title: 'Overlapping Candidate Quest',
+        condition: 'Complete the work',
+        mode: 'CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_OPEN',
+        rewardSatang: 500,
+        tagId,
+        headcount: 1,
+        startTime: new Date('2030-01-01T11:00:00.000Z'),
+        dueAt: new Date('2030-01-01T13:00:00.000Z'),
+      },
+    ]);
+    await db.insert(questAssignment).values({
+      questId: activeQuestId,
+      workerId: leaderId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    await db.insert(questApplication).values({
+      id: applicationId,
+      questId: selectionQuestId,
+      workerId: leaderId,
+      applicationStatus: 'APPLICATION_APPLIED',
+    });
+
+    expect(
+      await selectCandidate(
+        hirerId,
+        selectionQuestId,
+        { type: 'APPLICATION', id: applicationId },
+        { commandId: `candidate-overlap-${applicationId}` }
+      )
+    ).toEqual({ outcome: 'worker-schedule-conflict' });
+    expect(
+      await db
+        .select({ state: questApplication.applicationStatus })
+        .from(questApplication)
+        .where(eq(questApplication.id, applicationId))
+    ).toEqual([{ state: 'APPLICATION_APPLIED' }]);
+  });
+
+  it('keeps a submitted Candidate Team selectable when a Team Member has an overlapping Worker Assignment', async () => {
+    const activeQuestId = randomUUID();
+    const selectionQuestId = randomUUID();
+    const selectionTeamId = randomUUID();
+    testQuestIds.push(activeQuestId, selectionQuestId);
+    await db.insert(quest).values([
+      {
+        id: activeQuestId,
+        hirerId,
+        title: 'Existing Worker Team Quest',
+        condition: 'Complete the work',
+        mode: 'CANDIDATE',
+        participation: 'GROUP',
+        questStatus: 'QUEST_ASSIGNED',
+        rewardSatang: 500,
+        tagId,
+        headcount: 1,
+        startTime: new Date('2030-01-01T10:00:00.000Z'),
+        dueAt: new Date('2030-01-01T12:00:00.000Z'),
+      },
+      {
+        id: selectionQuestId,
+        hirerId,
+        title: 'Overlapping Candidate Team Quest',
+        condition: 'Complete the work',
+        mode: 'CANDIDATE',
+        participation: 'GROUP',
+        questStatus: 'QUEST_OPEN',
+        rewardSatang: 500,
+        tagId,
+        headcount: 2,
+        startTime: new Date('2030-01-01T11:00:00.000Z'),
+        dueAt: new Date('2030-01-01T13:00:00.000Z'),
+      },
+    ]);
+    await db.insert(questAssignment).values({
+      questId: activeQuestId,
+      workerId: memberId,
+      assignmentStatus: 'ASSIGNMENT_ACTIVE',
+    });
+    await db.insert(questTeam).values({
+      id: selectionTeamId,
+      questId: selectionQuestId,
+      leaderId,
+      name: 'Overlapping Candidate Team',
+      teamStatus: 'TEAM_SUBMITTED',
+    });
+    await db.insert(questTeamMember).values([
+      { teamId: selectionTeamId, userId: leaderId, joinedAt: new Date('2030-01-01T09:00:00.000Z') },
+      { teamId: selectionTeamId, userId: memberId, joinedAt: new Date('2030-01-01T09:01:00.000Z') },
+    ]);
+
+    expect(
+      await selectCandidate(
+        hirerId,
+        selectionQuestId,
+        { type: 'TEAM', id: selectionTeamId },
+        { commandId: `candidate-team-overlap-${selectionTeamId}` }
+      )
+    ).toEqual({ outcome: 'worker-schedule-conflict' });
+    expect(
+      await db
+        .select({ state: questTeam.teamStatus })
+        .from(questTeam)
+        .where(eq(questTeam.id, selectionTeamId))
+    ).toEqual([{ state: 'TEAM_SUBMITTED' }]);
   });
 });

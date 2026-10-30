@@ -1,15 +1,22 @@
 import { db } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { walletWallet, type WalletStatus } from '@/database/schema/wallet.schema';
+import {
+  walletLedgerAccount,
+  walletLedgerPosting,
+  walletLedgerTransaction,
+  walletWallet,
+  type WalletStatus,
+} from '@/database/schema/wallet.schema';
 import {
   createAdminActionService,
+  formatWalletDisplayId,
   type AdminActionReasonCatalog,
   type AdminActionResult,
 } from '@/modules/admin';
 import { CursorInputError, decodeCursor, encodeCursor, parsePageLimit } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, eq, ilike, or } from 'drizzle-orm';
+import { and, eq, ilike, inArray, max, or } from 'drizzle-orm';
 
 import { MoneyDomainError } from './wallet.money';
 import { walletProjectionMatchesLedger } from './wallet.service';
@@ -23,6 +30,31 @@ import type {
 export type AdminWalletListPage = {
   items: AdminWalletListItem[];
   nextCursor: string | null;
+};
+const latestTransactionTimesByWalletId = async (
+  walletIds: string[]
+): Promise<Map<string, Date>> => {
+  if (walletIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      walletId: walletLedgerAccount.walletId,
+      latestTransactionAt: max(walletLedgerTransaction.createdAt),
+    })
+    .from(walletLedgerAccount)
+    .innerJoin(walletLedgerPosting, eq(walletLedgerPosting.accountId, walletLedgerAccount.id))
+    .innerJoin(
+      walletLedgerTransaction,
+      eq(walletLedgerPosting.transactionId, walletLedgerTransaction.id)
+    )
+    .where(inArray(walletLedgerAccount.walletId, walletIds))
+    .groupBy(walletLedgerAccount.walletId);
+
+  return new Map(
+    rows.flatMap(({ walletId, latestTransactionAt }) =>
+      walletId && latestTransactionAt ? [[walletId, latestTransactionAt] as const] : []
+    )
+  );
 };
 
 export const listAdminWallets = async (
@@ -51,6 +83,7 @@ export const listAdminWallets = async (
       db
         .select({
           id: walletWallet.id,
+          publicSequence: walletWallet.publicSequence,
           userId: walletWallet.userId,
           walletStatus: walletWallet.walletStatus,
           spendingBalanceSatang: walletWallet.spendingBalanceSatang,
@@ -73,6 +106,9 @@ export const listAdminWallets = async (
     rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
     invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Wallet'),
   });
+  const latestTransactionTimes = await latestTransactionTimesByWalletId(
+    page.rows.map((row) => row.id)
+  );
 
   const nextCursor = page.nextCursor ? encodeCursor(page.nextCursor) : null;
 
@@ -85,6 +121,7 @@ export const listAdminWallets = async (
 
     return {
       id: r.id,
+      displayId: formatWalletDisplayId(r.publicSequence),
       userId: r.userId,
       member: {
         firstName: r.firstName,
@@ -103,6 +140,7 @@ export const listAdminWallets = async (
       },
       createdAt: r.createdAt.toISOString(),
       updatedAt: r.updatedAt.toISOString(),
+      latestTransactionAt: latestTransactionTimes.get(r.id)?.toISOString() ?? null,
     };
   });
 
@@ -118,6 +156,7 @@ export const getAdminWalletDetail = async (
   const [row] = await db
     .select({
       id: walletWallet.id,
+      publicSequence: walletWallet.publicSequence,
       userId: walletWallet.userId,
       walletStatus: walletWallet.walletStatus,
       spendingBalanceSatang: walletWallet.spendingBalanceSatang,
@@ -154,9 +193,11 @@ export const getAdminWalletDetail = async (
     row.fundingReservedSatang +
     row.reservedForPayoutsSatang;
 
+  const latestTransactionTimes = await latestTransactionTimesByWalletId([walletId]);
   return {
     id: row.id,
     userId: row.userId,
+    displayId: formatWalletDisplayId(row.publicSequence),
     member: {
       firstName: row.firstName,
       lastName: row.lastName,
@@ -175,6 +216,7 @@ export const getAdminWalletDetail = async (
     projectionMatchesLedger: matches,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    latestTransactionAt: latestTransactionTimes.get(walletId)?.toISOString() ?? null,
   };
 };
 

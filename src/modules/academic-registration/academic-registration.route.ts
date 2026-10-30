@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -21,6 +21,7 @@ export const academicRegistrationRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/academic-registration`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('/options', getAcademicRegistrationOptionsController, {
     response: responses(academicRegistrationOptionsResponseSchema, 401),
     detail: {

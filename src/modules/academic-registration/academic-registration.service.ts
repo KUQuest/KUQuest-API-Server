@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 
 import type { Static } from 'elysia';
 import { and, asc, eq, ne } from 'drizzle-orm';
@@ -83,7 +84,10 @@ export const updateAcademicRegistration = async (
   }
 
   try {
-    await db.update(authUser).set(update).where(eq(authUser.id, userId));
+    await db.transaction(async (transaction) => {
+      await transaction.update(authUser).set(update).where(eq(authUser.id, userId));
+      await notifyAdminResourceUpdated(transaction, 'MEMBER', userId);
+    });
   } catch (error) {
     if (isStudentIdUniquenessViolation(error)) return 'student-id-already-exists';
 
@@ -175,3 +179,5 @@ export const getAcademicRegistrationOptions = async () => {
     faculties: [...faculties.values()],
   };
 };
+
+export { academicCatalog, seedAcademicOptions } from './academic-seed';

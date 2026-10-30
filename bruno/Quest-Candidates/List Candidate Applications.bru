@@ -1,0 +1,20 @@
+meta {
+  name: List Candidate Applications
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/applications
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  The Hirer lists all Candidate applications submitted for this Quest.
+  (A Candidate can only see their own application).
+}

@@ -1,8 +1,11 @@
 import { env } from '@/config/env';
 import { db } from '@/database/client';
 import * as schema from '@/database/schema/auth.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
+import { readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
 import { createWallet } from '@/modules/wallet/wallet.service';
 
+import { APIError } from 'better-auth/api';
 import { expo } from '@better-auth/expo';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
@@ -93,28 +96,43 @@ export const createStudentAuth = ({
       defaultCookieAttributes,
     },
     trustedOrigins: getTrustedOrigins(true),
-    databaseHooks: provisionWalletOnCreate
-      ? {
-          user: {
-            create: {
-              after: async (user) => {
-                if (user && 'id' in user && typeof user.id === 'string') {
-                  await createWallet(user.id);
-                }
-              },
-            },
+    databaseHooks: {
+      user: {
+        create: {
+          after: async (user) => {
+            if (user && 'id' in user && typeof user.id === 'string') {
+              if (provisionWalletOnCreate) await createWallet(user.id);
+              await db.transaction((transaction) =>
+                notifyAdminResourceUpdated(transaction, 'MEMBER', user.id)
+              );
+            }
           },
-          session: {
-            create: {
-              after: async (session) => {
-                if (session && 'userId' in session && typeof session.userId === 'string') {
-                  await createWallet(session.userId);
-                }
-              },
-            },
+        },
+      },
+      session: {
+        create: {
+          before: async (session) => {
+            if (!session.userId) return;
+            const restriction = await readMemberPenaltyRestriction(session.userId);
+            if (restriction.banned) {
+              throw new APIError('FORBIDDEN', {
+                code: 'MEMBER_BANNED',
+                message: 'This Member is banned.',
+              });
+            }
           },
-        }
-      : undefined,
+          ...(provisionWalletOnCreate
+            ? {
+                after: async (session) => {
+                  if (session && 'userId' in session && typeof session.userId === 'string') {
+                    await createWallet(session.userId);
+                  }
+                },
+              }
+            : {}),
+        },
+      },
+    },
   });
 
 export const auth = createStudentAuth();

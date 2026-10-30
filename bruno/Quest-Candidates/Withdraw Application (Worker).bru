@@ -1,0 +1,25 @@
+meta {
+  name: Withdraw Application (Worker)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/applications/{{applicationId}}/withdraw
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Candidate withdraws their pending application before the Hirer makes a selection.
+}

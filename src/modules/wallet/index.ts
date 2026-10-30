@@ -27,6 +27,7 @@ export {
   increaseFundingReservation,
   platformFeeForReservation,
   readFundingReservation,
+  readRecipientFundingSettlement,
   releaseFundingReservation,
   reserveSpending,
   settleDisputeCase,

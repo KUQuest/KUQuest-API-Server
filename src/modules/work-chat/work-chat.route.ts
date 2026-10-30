@@ -1,7 +1,8 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, closeSocketForActiveMemberBan, memberBanGuard } from '@/modules/auth';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
+import { logSocket } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
@@ -15,6 +16,16 @@ import {
   sendWorkConversationMessageController,
   uploadWorkConversationAttachmentController,
 } from './work-chat.controller';
+import {
+  extractChatSocketClientMessageId,
+  parseChatSocketSendMessage,
+  serializeChatSocketMessage,
+} from './chat-socket.schema';
+import {
+  isCurrentWorkConversationMember,
+  sendWorkConversationMessage,
+  WorkChatServiceError,
+} from './work-chat.service';
 import {
   workChatAttachmentLinkResponseSchema,
   workChatAttachmentDiscardResponseSchema,
@@ -33,18 +44,53 @@ import {
   workChatSendMessageSchema,
 } from './work-chat.schema';
 import { workChatDelivery } from './work-chat.delivery';
-import { isCurrentWorkConversationMember } from './work-chat.service';
 
 const webSocketUnsubscribers = new WeakMap<object, () => void>();
+const sendWorkChatSocketRejection = (
+  ws: { send: (message: string) => unknown },
+  clientMessageId: string | null,
+  code: string,
+  message: string
+) => {
+  ws.send(
+    JSON.stringify({
+      type: 'MESSAGE_REJECTED',
+      clientMessageId,
+      error: { code, message },
+    })
+  );
+};
 
 export const workChatRoute = new Elysia({
   name: 'work-chat-route',
   prefix: `${API_V1_PREFIX}/chat`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
+  .ws('/events', {
+    async open(ws) {
+      const memberId = ws.data.session.user.id;
+      const unsubscribe = workChatDelivery.subscribe(memberId, async () => {
+        if (await closeSocketForActiveMemberBan(ws, memberId)) return;
+        ws.send(JSON.stringify({ type: 'CHAT_INBOX_INVALIDATED', version: 1 }));
+      });
+      webSocketUnsubscribers.set(ws, unsubscribe);
+      logSocket(ws, 'subscribed', { type: 'CHAT_INBOX' });
+    },
+    message(ws) {
+      logSocket(ws, 'rejected', { type: 'READ_ONLY_COMMAND', code: 1008 });
+      ws.close(1008, 'Chat inbox stream is read-only');
+    },
+    close(ws, code) {
+      webSocketUnsubscribers.get(ws)?.();
+      webSocketUnsubscribers.delete(ws);
+      logSocket(ws, 'close', { code });
+    },
+  })
   .ws('/conversations/:conversationId/events', {
     params: workChatConversationParamsSchema,
     async open(ws) {
+      logSocket(ws, 'open');
       const memberId = ws.data.session.user.id;
       const allowed = await isCurrentWorkConversationMember(
         memberId,
@@ -57,24 +103,63 @@ export const workChatRoute = new Elysia({
       const unsubscribe = workChatDelivery.subscribe(
         memberId,
         async (event) => {
+          if (await closeSocketForActiveMemberBan(ws, memberId)) return;
           ws.send(JSON.stringify({ type: 'WORK_CONVERSATION_MESSAGE', message: event.message }));
+          logSocket(ws, 'send', { type: 'WORK_CONVERSATION_MESSAGE' });
         },
         ws.data.params.conversationId
       );
       webSocketUnsubscribers.set(ws, unsubscribe);
+      logSocket(ws, 'subscribed');
     },
-    message(ws) {
-      ws.close(1008, 'Work Conversation Events are read-only');
+    async message(ws, payload) {
+      const memberId = ws.data.session.user.id;
+      if (await closeSocketForActiveMemberBan(ws, memberId)) return;
+
+      const command = parseChatSocketSendMessage(payload);
+      logSocket(ws, 'received', { type: command ? 'SEND_MESSAGE' : 'INVALID_COMMAND' });
+      if (!command) {
+        sendWorkChatSocketRejection(
+          ws,
+          extractChatSocketClientMessageId(payload),
+          'INVALID_COMMAND',
+          'Only a valid SEND_MESSAGE command is supported'
+        );
+        logSocket(ws, 'rejected', { type: 'SEND_MESSAGE', code: 'INVALID_COMMAND' });
+        ws.close(1008, 'Invalid Work Conversation command');
+        return;
+      }
+
+      try {
+        const message = await sendWorkConversationMessage(
+          memberId,
+          ws.data.params.conversationId,
+          command
+        );
+        ws.send(
+          JSON.stringify({
+            type: 'MESSAGE_ACCEPTED',
+            clientMessageId: command.clientMessageId,
+            message: serializeChatSocketMessage(message),
+          })
+        );
+        logSocket(ws, 'send', { type: 'MESSAGE_ACCEPTED' });
+      } catch (error) {
+        if (!(error instanceof WorkChatServiceError)) throw error;
+        sendWorkChatSocketRejection(ws, command.clientMessageId, error.code, error.message);
+        logSocket(ws, 'rejected', { type: 'SEND_MESSAGE', code: error.code });
+      }
     },
-    close(ws) {
+    close(ws, code) {
       webSocketUnsubscribers.get(ws)?.();
       webSocketUnsubscribers.delete(ws);
+      logSocket(ws, 'close', { code });
     },
     detail: {
       tags: ['Work Chat'],
-      summary: 'Subscribe to committed Work Conversation Events',
+      summary: 'Subscribe to Work Conversation Events and send Messages',
       description:
-        'Subscribes a current Work Conversation Member to committed Message Events. REST remains authoritative and this channel is read-only.',
+        'Subscribes a current Work Conversation Member to committed Message Events and accepts optional SEND_MESSAGE commands. REST remains authoritative for persistence and recovery.',
       operationId: 'subscribeWorkConversationEvents',
       security: betterAuthSecurity,
     },
@@ -96,7 +181,8 @@ export const workChatRoute = new Elysia({
     detail: {
       tags: ['Work Chat'],
       summary: 'List Work Conversation Participants',
-      description: 'Lists the current Hirer and Worker participants with their roles.',
+      description:
+        'Lists the current Hirer and Worker participants with their roles and avatar when available.',
       operationId: 'listWorkConversationParticipants',
       security: betterAuthSecurity,
     },
@@ -105,12 +191,12 @@ export const workChatRoute = new Elysia({
     params: workChatConversationParamsSchema,
     body: workChatAttachmentUploadSchema,
     type: 'multipart/form-data',
-    response: responses(workChatAttachmentResponseSchema, 401, 404, 409, 413, 415, 429, 502),
+    response: responses(workChatAttachmentResponseSchema, 401, 404, 409, 413, 415, 422, 429, 502),
     detail: {
       tags: ['Work Chat'],
       summary: 'Upload a Work Conversation Attachment',
       description:
-        'Uploads an image, PDF, or video up to 10 MB for the authenticated current Member to attach to a Message.',
+        'Uploads an image, PDF, or video up to 10 MB. Images are limited to 25 megapixels; larger images return 422 ATTACHMENT_DIMENSIONS_TOO_LARGE.',
       operationId: 'uploadWorkConversationAttachment',
       security: betterAuthSecurity,
     },

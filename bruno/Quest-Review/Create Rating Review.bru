@@ -1,0 +1,43 @@
+meta {
+  name: Create Rating Review
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/reviews
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "revieweeId": "{{workerId}}",
+    "rating": 5,
+    "comment": "ทำงานดีมาก ตรงต่อเวลา ชิ้นงานเรียบร้อยตรงตามบรีฟครับ"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.id) {
+    bru.setEnvVar("reviewId", data.data.id);
+  }
+}
+
+docs {
+  Creates one Rating Review after the Quest reaches QUEST_COMPLETED, QUEST_FAILED, or QUEST_CANCELLED.
+  When the Hirer reviews, revieweeId is required to identify which Worker is being reviewed.
+  When a Worker reviews, revieweeId can be omitted (implicitly rates the Hirer).
+  Saves reviewId into active environment on success.
+}

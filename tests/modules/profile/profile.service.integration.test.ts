@@ -2,7 +2,7 @@ import { db, sql } from '@/database/client';
 import { department, faculty } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import { quest, questAssignment } from '@/database/schema/quest.schema';
+import { quest, questAssignment, review } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import {
   getPublicProfile,
@@ -166,11 +166,11 @@ beforeAll(async () => {
 beforeEach(async () => {
   await db
     .update(authUser)
-    .set({ ...startingState[studentA]!, imageFileId: null })
+    .set({ ...startingState[studentA]!, imageFileId: null, redFlagExpiresAt: null })
     .where(eq(authUser.id, studentA));
   await db
     .update(authUser)
-    .set({ ...startingState[studentB]!, imageFileId: null })
+    .set({ ...startingState[studentB]!, imageFileId: null, redFlagExpiresAt: null })
     .where(eq(authUser.id, studentB));
 });
 
@@ -306,6 +306,8 @@ describe('reading a public profile', () => {
       'firstName',
       'lastName',
       'occupation',
+      'redFlagged',
+      'reputation',
       'version',
     ]);
     expect(publicProfile).toEqual({
@@ -314,14 +316,73 @@ describe('reading a public profile', () => {
       lastName: 'One',
       bio: 'first bio',
       academicYear: 2025,
+      redFlagged: false,
       department: {
         id: departmentId,
         name: 'Test Department',
         faculty: { name: facultyName },
       },
       occupation: null,
+      reputation: { totalQuests: expect.any(Number), rating: { average: null } },
       avatar: null,
     });
+  });
+
+  it('returns the selected Member’s completed Quest count and received rating', async () => {
+    const workerId = randomUUID();
+    const questId = randomUUID();
+
+    try {
+      await db.insert(authUser).values({
+        id: workerId,
+        email: `${workerId}@ku.th`,
+        firstName: 'Reputation',
+        lastName: 'Worker',
+      });
+      await db.insert(quest).values({
+        id: questId,
+        hirerId: studentB,
+        title: 'Public Profile Reputation Quest',
+        condition: 'Complete the work',
+        mode: 'NO_CANDIDATE',
+        participation: 'SOLO',
+        questStatus: 'QUEST_COMPLETED',
+        rewardSatang: 10_000,
+        tagId: profileTagIds[0]!,
+        headcount: 1,
+        startTime: new Date('2025-01-01T00:00:00.000Z'),
+      });
+      await db.insert(questAssignment).values({
+        questId,
+        workerId,
+        assignmentStatus: 'ASSIGNMENT_COMPLETED',
+      });
+      await db.insert(review).values({
+        questId,
+        reviewerId: studentB,
+        revieweeId: workerId,
+        rating: 4,
+      });
+
+      expect((await getPublicProfile(workerId))?.reputation).toEqual({
+        totalQuests: 1,
+        rating: { average: 4 },
+      });
+    } finally {
+      await db.delete(review).where(eq(review.questId, questId));
+      await db.delete(questAssignment).where(eq(questAssignment.questId, questId));
+      await db.delete(quest).where(eq(quest.id, questId));
+      await db.delete(authUser).where(eq(authUser.id, workerId));
+    }
+  });
+
+  it('marks an active Red Flag on the public Member Profile', async () => {
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, studentA));
+
+    expect((await getPublicProfile(studentA))?.redFlagged).toBe(true);
   });
 
   it('returns a public avatar reference when one is stored', async () => {

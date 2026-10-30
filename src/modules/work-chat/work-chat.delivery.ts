@@ -3,7 +3,11 @@ export type WorkChatDeliveryMessage = {
   conversationId: string;
   sequence: number;
   kind: 'USER' | 'SYSTEM';
-  sender: { id: string | null; displayName: string };
+  sender: {
+    id: string | null;
+    displayName: string;
+    avatar: { fileId: string; url: string } | null;
+  };
   text: string | null;
   attachments: Array<{
     id: string;

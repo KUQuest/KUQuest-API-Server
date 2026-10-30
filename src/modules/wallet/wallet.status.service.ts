@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   type WalletStatus,
   walletStatusHistory,
@@ -32,13 +33,16 @@ const studentInitiatedOperations = new Set<WalletOperation>([
   'PAYOUT',
 ]);
 
+type WalletStatusActor =
+  | { actorUserId: string; actorAdminId?: never; actorSystem?: never }
+  | { actorAdminId: string; actorUserId?: never; actorSystem?: never }
+  | { actorSystem: true; actorUserId?: never; actorAdminId?: never };
+
 export type ChangeWalletStatusInput = {
   walletId: string;
   toStatus: WalletStatus;
   reason: string;
-  actorUserId?: string;
-  actorAdminId?: string;
-};
+} & WalletStatusActor;
 
 export const isWalletOperationAllowed = (
   walletStatus: WalletStatus,
@@ -69,10 +73,11 @@ const validateStatusChangeInput = (input: ChangeWalletStatusInput) => {
   }
 
   const actors = [input.actorUserId, input.actorAdminId].filter(Boolean);
-  if (actors.length !== 1) {
+  const hasValidActor = input.actorSystem ? actors.length === 0 : actors.length === 1;
+  if (!hasValidActor) {
     throw new MoneyDomainError(
       'INVALID_WALLET_STATUS_ACTOR',
-      'Exactly one Wallet status actor is required.'
+      'Exactly one Wallet status actor or the system origin is required.'
     );
   }
 };
@@ -133,9 +138,41 @@ export const changeWalletStatusInTransaction = async (
 export const changeWalletStatus = async (input: ChangeWalletStatusInput) =>
   db.transaction((transaction) => changeWalletStatusInTransaction(transaction, input));
 
-export const listWalletStatusHistory = async (walletId: string) =>
-  db
-    .select()
+export const listWalletStatusHistory = async (walletId: string) => {
+  const rows = await db
+    .select({
+      id: walletStatusHistory.id,
+      walletId: walletStatusHistory.walletId,
+      fromStatus: walletStatusHistory.fromStatus,
+      toStatus: walletStatusHistory.toStatus,
+      reason: walletStatusHistory.reason,
+      actorUserId: walletStatusHistory.actorUserId,
+      actorAdminId: walletStatusHistory.actorAdminId,
+      occurredAt: walletStatusHistory.occurredAt,
+      actorUserFirstName: authUser.firstName,
+      actorUserLastName: authUser.lastName,
+      actorAdminFirstName: authAdmin.firstName,
+      actorAdminLastName: authAdmin.lastName,
+    })
     .from(walletStatusHistory)
+    .leftJoin(authUser, eq(walletStatusHistory.actorUserId, authUser.id))
+    .leftJoin(authAdmin, eq(walletStatusHistory.actorAdminId, authAdmin.id))
     .where(eq(walletStatusHistory.walletId, walletId))
     .orderBy(asc(walletStatusHistory.occurredAt), asc(walletStatusHistory.id));
+
+  return rows.map((row) => ({
+    id: row.id,
+    walletId: row.walletId,
+    fromStatus: row.fromStatus,
+    toStatus: row.toStatus,
+    reason: row.reason,
+    actorUserId: row.actorUserId,
+    actorAdminId: row.actorAdminId,
+    occurredAt: row.occurredAt,
+    actorDisplayName: row.actorUserId
+      ? `${row.actorUserFirstName} ${row.actorUserLastName}`
+      : row.actorAdminId
+        ? `${row.actorAdminFirstName} ${row.actorAdminLastName}`
+        : null,
+  }));
+};

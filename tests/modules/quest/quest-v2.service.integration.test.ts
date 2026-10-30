@@ -9,8 +9,8 @@ import {
   questImage,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute, createStudentAuth } from '@/modules/auth';
-import { listOwnQuests } from '@/modules/quest/quest.service';
+import { createStudentAuth } from '@/modules/auth';
+import { listOwnQuests } from '@/modules/quest/v1';
 import {
   createQuestV2,
   getQuestV2Detail,
@@ -20,7 +20,7 @@ import {
   questV2EditOperationScope,
   type QuestV2CreateInput,
 } from '@/modules/quest';
-import { questStatus } from '@/modules/quest/quest.contract';
+import { questStatus } from '@/modules/quest/shared';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import {
   fundTestWallet,
@@ -35,6 +35,8 @@ import { randomUUID } from 'node:crypto';
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-${randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -345,6 +347,56 @@ describe('Quest API v2 persistence', () => {
       { position: 0, text: 'Use the KUQuest brand' },
       { position: 1, text: 'Return an editable file' },
     ]);
+  });
+  it('enforces maximum 10 active Draft Quests per Hirer and returns 409 when exceeded', async () => {
+    const testHirerId = randomUUID();
+    await db.insert(authUser).values({
+      id: testHirerId,
+      email: `${testHirerId}@ku.th`,
+      firstName: 'Draft',
+      lastName: 'Limiter',
+    });
+
+    try {
+      // Create up to max (10) drafts
+      const createdDraftIds: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const res = await createQuestV2(
+          testHirerId,
+          { ...baseInput, title: `Draft ${i + 1}` },
+          `draft-limit-${i}-${randomUUID()}`
+        );
+        if (!('quest' in res)) throw new Error(`Draft ${i + 1} creation failed: ${res.outcome}`);
+        createdDraftIds.push(res.quest.id);
+        questIds.push(res.quest.id);
+      }
+
+      // 11th draft must be rejected with limit-reached
+      const overflow = await createQuestV2(
+        testHirerId,
+        { ...baseInput, title: 'Draft 11' },
+        `draft-limit-11-${randomUUID()}`
+      );
+      expect(overflow).toEqual({ outcome: 'limit-reached' });
+
+      // Cancel one draft to free a slot
+      await db
+        .update(quest)
+        .set({ questStatus: 'QUEST_CANCELLED', cancelledAt: new Date() })
+        .where(eq(quest.id, createdDraftIds[0]!));
+      // Now creating another draft must succeed
+      const freed = await createQuestV2(
+        testHirerId,
+        { ...baseInput, title: 'Draft 11 After Cancel' },
+        `draft-limit-freed-${randomUUID()}`
+      );
+      if (!('quest' in freed)) throw new Error(`Freed draft creation failed: ${freed.outcome}`);
+      questIds.push(freed.quest.id);
+    } finally {
+      await db.delete(questCommand).where(eq(questCommand.principalUserId, testHirerId));
+      await db.delete(quest).where(eq(quest.hirerId, testHirerId));
+      await db.delete(authUser).where(eq(authUser.id, testHirerId));
+    }
   });
 
   it('rejects a v2 GROUP Quest with fewer than two Workers at persistence', async () => {
@@ -1134,7 +1186,7 @@ describe('Quest API v2 Draft editing', () => {
       success: false,
       error: {
         code: 'QUEST_EDIT_CONFLICT',
-        message: 'The Draft was changed by another request',
+        message: 'Quest was changed by another request',
       },
     });
 
@@ -1367,7 +1419,7 @@ describe('Quest API v2 Draft editing', () => {
     expect((await empty.json()).error.code).toBe('VALIDATION');
   });
 
-  it('allows only the owning Hirer to edit a Draft and rejects non-Draft State', async () => {
+  it('allows only the owning Hirer to edit and rejects assigned Quests', async () => {
     const created = await createQuestV2(hirerId, baseInput, `v2-edit-owner-create-${randomUUID()}`);
     if (!('quest' in created)) throw new Error(`Create failed: ${created.outcome}`);
     questIds.push(created.quest.id);
@@ -1394,7 +1446,7 @@ describe('Quest API v2 Draft editing', () => {
 
     await db
       .update(quest)
-      .set({ questStatus: questStatus.open, rewardSatang: 100 })
+      .set({ questStatus: 'QUEST_ASSIGNED', rewardSatang: 100 })
       .where(eq(quest.id, created.quest.id));
 
     const notDraft = await patchQuest(
@@ -1406,7 +1458,7 @@ describe('Quest API v2 Draft editing', () => {
     expect(notDraft.status).toBe(409);
     expect(await notDraft.json()).toEqual({
       success: false,
-      error: { code: 'QUEST_NOT_DRAFT', message: 'Only Draft Quests can be edited' },
+      error: { code: 'QUEST_NOT_EDITABLE', message: 'Quest cannot be edited in its current State' },
     });
   });
 });

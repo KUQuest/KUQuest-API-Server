@@ -1,14 +1,16 @@
+import { formatDisplayIdSql, formatPayoutDisplayId } from '@/modules/admin/admin-display-id';
 import { db } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
+import { adminAction } from '@/database/schema/admin.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   paymentPayoutStatusHistory,
   paymentPayoutQuotes,
   paymentPayouts,
+  payoutStatuses,
   type PayoutStatus,
 } from '@/database/schema/payment.schema';
 import {
   createAdminActionService,
-  type AdminActionReasonCatalog,
   type AdminActionResult,
   type AdminActionTransaction,
 } from '@/modules/admin';
@@ -16,21 +18,27 @@ import { MoneyDomainError } from '@/modules/wallet';
 import type { CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, or } from 'drizzle-orm';
 
+import {
+  payoutAdminActionCatalog,
+  payoutApprovalReasonCodes,
+  payoutApprovalReasonCodesV1,
+  payoutCancellationReasonCodes,
+  payoutCancellationReasonCodesV1,
+} from './payout.admin.policy';
 import { approvePayoutInTransaction, cancelPayoutInTransaction } from './payout.service';
 
-export const payoutAdminReasonCodes = [
-  'PAYOUT_POLICY_REVIEW',
-  'PAYOUT_RISK_REVIEW',
-  'PAYOUT_INVALID_DESTINATION',
-] as const;
+export { payoutAdminActionCatalog, payoutAdminReasonCodes } from './payout.admin.policy';
 
-const payoutApprovalReasonCodes = ['PAYOUT_POLICY_REVIEW', 'PAYOUT_RISK_REVIEW'] as const;
-
-const payoutCancellationReasonCodes = payoutAdminReasonCodes;
-const payoutApprovalReasonCodeSet = new Set<string>(payoutApprovalReasonCodes);
-const payoutCancellationReasonCodeSet = new Set<string>(payoutCancellationReasonCodes);
+const payoutApprovalReasonCodeSet = new Set<string>([
+  ...payoutApprovalReasonCodesV1,
+  ...payoutApprovalReasonCodes,
+]);
+const payoutCancellationReasonCodeSet = new Set<string>([
+  ...payoutCancellationReasonCodesV1,
+  ...payoutCancellationReasonCodes,
+]);
 
 const safePayoutReasonCode = (
   reason: string | null,
@@ -41,22 +49,6 @@ const safePayoutReasonCode = (
   return reason && allowedReasonCodes.has(reason) ? reason : null;
 };
 
-export const payoutAdminActionCatalog: AdminActionReasonCatalog = {
-  version: 1,
-  actions: {
-    PAYOUT_APPROVE: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: payoutApprovalReasonCodes,
-    },
-    PAYOUT_CANCEL: {
-      kind: 'COMMAND',
-      requiresReason: true,
-      allowedReasonCodes: payoutCancellationReasonCodes,
-    },
-  },
-};
-
 const adminActionService = createAdminActionService(payoutAdminActionCatalog);
 
 export type AdminPayoutDecisionInput = {
@@ -65,6 +57,7 @@ export type AdminPayoutDecisionInput = {
   idempotencyKey: string;
   expectedVersion: number;
   reasonCode: string;
+  decisionReasonText?: string;
 };
 
 export type AdminPayoutCommandResult = AdminActionResult<AdminPayoutCommandSummary>;
@@ -73,11 +66,14 @@ export type AdminPayoutSort = 'newest' | 'oldest';
 
 export type AdminPayout = {
   id: string;
+  displayId: string;
   student: {
     id: string;
+    displayId: string;
     email: string;
     firstName: string;
     lastName: string;
+    studentId: string | null;
   };
   quoteId: string;
   principalSatang: number;
@@ -114,8 +110,11 @@ export type AdminPayoutStatusHistory = {
   providerStatus: string | null;
   actorUserId: string | null;
   actorAdminId: string | null;
+  admin: { firstName: string; lastName: string } | null;
   source: string;
   reason: string | null;
+  reasonCode: string | null;
+  decisionReasonText: string | null;
   occurredAt: Date;
 };
 
@@ -141,6 +140,7 @@ const bankNames: Record<string, string> = {
 
 const safePayoutColumns = {
   id: paymentPayouts.id,
+  publicSequence: paymentPayouts.publicSequence,
   userId: paymentPayouts.userId,
   quoteId: paymentPayouts.quoteId,
   receiptSatang: paymentPayoutQuotes.receiptSatang,
@@ -165,6 +165,7 @@ const safePayoutColumns = {
 
 type SafePayoutRecord = {
   id: string;
+  publicSequence: number;
   userId: string;
   quoteId: string;
   receiptSatang: number;
@@ -193,6 +194,7 @@ const adminPayoutFromRecord = (
   cancellationReasonCode: string | null
 ): AdminPayout => ({
   id: record.id,
+  displayId: formatPayoutDisplayId(record.publicSequence),
   student,
   quoteId: record.quoteId,
   principalSatang: record.principalSatang,
@@ -244,9 +246,11 @@ const adminPayoutRows = (executor: typeof db | AdminActionTransaction) =>
       payout: safePayoutColumns,
       student: {
         id: authUser.id,
+        displayId: formatDisplayIdSql('member', authUser.publicSequence),
         email: authUser.email,
         firstName: authUser.firstName,
         lastName: authUser.lastName,
+        studentId: authUser.studentId,
       },
     })
     .from(paymentPayouts)
@@ -283,6 +287,7 @@ const executePayoutAdminCommand = async (
     resourceId: input.payoutId,
     requestKey: input.idempotencyKey,
     reasonCode: input.reasonCode,
+    decisionReasonText: input.decisionReasonText,
     request: {},
     metadata: {},
     expectedVersion: input.expectedVersion,
@@ -340,21 +345,62 @@ const adminPayoutHistory = async (payoutId: string): Promise<AdminPayoutStatusHi
       providerStatus: paymentPayoutStatusHistory.providerStatus,
       actorUserId: paymentPayoutStatusHistory.actorUserId,
       actorAdminId: paymentPayoutStatusHistory.actorAdminId,
+      adminFirstName: authAdmin.firstName,
+      adminLastName: authAdmin.lastName,
       source: paymentPayoutStatusHistory.source,
       reason: paymentPayoutStatusHistory.reason,
+      decisionReasonText: adminAction.decisionReasonText,
       occurredAt: paymentPayoutStatusHistory.occurredAt,
     })
     .from(paymentPayoutStatusHistory)
+    .leftJoin(
+      adminAction,
+      and(
+        eq(adminAction.resourceType, 'payout'),
+        eq(adminAction.resourceId, payoutId),
+        eq(adminAction.adminId, paymentPayoutStatusHistory.actorAdminId),
+        or(
+          and(
+            eq(paymentPayoutStatusHistory.source, 'ADMIN_APPROVAL'),
+            eq(adminAction.action, 'PAYOUT_APPROVE')
+          ),
+          and(
+            eq(paymentPayoutStatusHistory.source, 'ADMIN_CANCELLATION'),
+            eq(adminAction.action, 'PAYOUT_CANCEL')
+          )
+        )
+      )
+    )
+    .leftJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
     .where(eq(paymentPayoutStatusHistory.payoutId, payoutId))
     .orderBy(asc(paymentPayoutStatusHistory.occurredAt), asc(paymentPayoutStatusHistory.id));
   return rows.map((row) => {
+    const admin =
+      row.adminFirstName !== null && row.adminLastName !== null
+        ? { firstName: row.adminFirstName, lastName: row.adminLastName }
+        : null;
+    const historyRow = {
+      id: row.id,
+      fromStatus: row.fromStatus,
+      toStatus: row.toStatus,
+      providerStatus: row.providerStatus,
+      actorUserId: row.actorUserId,
+      actorAdminId: row.actorAdminId,
+      admin,
+      source: row.source,
+      reason: row.reason,
+      decisionReasonText: row.decisionReasonText,
+      occurredAt: row.occurredAt,
+    };
     if (row.source === 'ADMIN_APPROVAL') {
-      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE') };
+      const reasonCode = safePayoutReasonCode(row.reason, 'PAYOUT_APPROVE');
+      return { ...historyRow, reason: reasonCode, reasonCode };
     }
     if (row.source === 'ADMIN_CANCELLATION') {
-      return { ...row, reason: safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL') };
+      const reasonCode = safePayoutReasonCode(row.reason, 'PAYOUT_CANCEL');
+      return { ...historyRow, reason: reasonCode, reasonCode };
     }
-    return row;
+    return { ...historyRow, reasonCode: null, decisionReasonText: null };
   }) as AdminPayoutStatusHistory[];
 };
 
@@ -371,7 +417,8 @@ export const getAdminPayout = async (payoutId: string): Promise<AdminPayout> => 
 export const listAdminPayoutStatusHistory = adminPayoutHistory;
 
 export type ListAdminPayoutsInput = {
-  status?: PayoutStatus;
+  status?: PayoutStatus | 'ALL';
+  userId?: string;
   limit?: number;
   cursor?: CursorPayload;
   sort?: AdminPayoutSort;
@@ -379,6 +426,7 @@ export type ListAdminPayoutsInput = {
 
 export const listAdminPayouts = async ({
   status = 'PENDING_ADMIN_APPROVAL',
+  userId,
   limit = 20,
   cursor,
   sort = 'newest',
@@ -386,20 +434,28 @@ export const listAdminPayouts = async ({
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new MoneyDomainError('INVALID_LIMIT', 'Admin Payout limit must be between 1 and 50.');
   }
-  const page = await readKeysetPage({
-    anchor: { time: paymentPayouts.createdAt, id: paymentPayouts.id },
-    cursor,
-    limit,
-    sort,
-    where: eq(paymentPayouts.payoutStatus, status),
-    read: ({ where, orderBy, limit: probe }) =>
-      adminPayoutRows(db)
-        .where(where)
-        .orderBy(...orderBy)
-        .limit(probe),
-    rowCursor: (row) => ({ startTime: row.payout.createdAt, id: row.payout.id }),
-    invalidCursor: () => new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.'),
-  });
+  const statusFilter =
+    status === 'ALL'
+      ? inArray(paymentPayouts.payoutStatus, payoutStatuses)
+      : eq(paymentPayouts.payoutStatus, status);
+  const where = and(statusFilter, userId ? eq(paymentPayouts.userId, userId) : undefined);
+  const [[countResult], page] = await Promise.all([
+    db.select({ totalCount: count() }).from(paymentPayouts).where(where),
+    readKeysetPage({
+      anchor: { time: paymentPayouts.createdAt, id: paymentPayouts.id },
+      cursor,
+      limit,
+      sort,
+      where,
+      read: ({ where: pageWhere, orderBy, limit: probe }) =>
+        adminPayoutRows(db)
+          .where(pageWhere)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.payout.createdAt, id: row.payout.id }),
+      invalidCursor: () => new MoneyDomainError('INVALID_LIMIT', 'Admin Payout cursor is invalid.'),
+    }),
+  ]);
   const items = await Promise.all(
     page.rows.map(async (row: { payout: SafePayoutRecord; student: AdminPayout['student'] }) =>
       adminPayoutFromRecord(
@@ -409,5 +465,5 @@ export const listAdminPayouts = async ({
       )
     )
   );
-  return { items, nextCursor: page.nextCursor };
+  return { items, nextCursor: page.nextCursor, totalCount: countResult?.totalCount ?? 0 };
 };

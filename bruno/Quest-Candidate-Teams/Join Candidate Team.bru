@@ -1,0 +1,31 @@
+meta {
+  name: Join Candidate Team
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/teams/{{teamId}}/join
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "joinCode": "{{joinCode}}"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Teammate joins a forming Candidate Team using the 24-hour Join Code provided by the Team Leader.
+}

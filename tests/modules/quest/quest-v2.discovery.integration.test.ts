@@ -1,17 +1,19 @@
 import { app } from '@/app';
+import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment, questImage, questLocation } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
-import { questStatus } from '@/modules/quest/quest.contract';
+import { questStatus } from '@/modules/quest/shared';
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 
 import { Elysia } from 'elysia';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testEmail = `quest-v2-discovery-${crypto.randomUUID()}@ku.th`;
 const testPassword = 'TestStudent1!';
@@ -31,11 +33,15 @@ const getCookieHeader = (response: Response): string =>
 
 let memberId = '';
 let sessionCookie = '';
+let ownerAvatarFileId = '';
 const ownerId = crypto.randomUUID();
 const adminId = crypto.randomUUID();
 const workerIds = [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()];
 const tagId = crypto.randomUUID();
 const otherTagId = crypto.randomUUID();
+const facultyId = crypto.randomUUID();
+const departmentId = crypto.randomUUID();
+let occupationId = '';
 const questIds: string[] = [];
 const fileIds: string[] = [];
 const fixturePrefix = `Discovery ${crypto.randomUUID()}`;
@@ -114,6 +120,21 @@ beforeAll(async () => {
   memberId = ((await loginResponse.json()) as { user: { id: string } }).user.id;
   sessionCookie = getCookieHeader(loginResponse);
 
+  await db
+    .insert(faculty)
+    .values({ id: facultyId, name: `Discovery Faculty ${crypto.randomUUID()}` });
+  await db.insert(department).values({
+    id: departmentId,
+    facultyId,
+    name: `Discovery Department ${crypto.randomUUID()}`,
+  });
+  const [studentOccupation] = await db
+    .select({ id: occupation.id })
+    .from(occupation)
+    .where(eq(occupation.name, 'Student'))
+    .limit(1);
+  if (!studentOccupation) throw new Error('Student occupation fixture is missing');
+  occupationId = studentOccupation.id;
   await db.insert(authUser).values([
     ...workerIds.map((id, index) => ({
       id,
@@ -126,8 +147,26 @@ beforeAll(async () => {
       email: `${ownerId}@ku.th`,
       firstName: 'Quest',
       lastName: 'Owner',
+      bio: 'Quest owner profile',
+      academicYear: 2026,
+      departmentId,
+      occupationId,
     },
   ]);
+  const [ownerAvatar] = await db
+    .insert(file)
+    .values({
+      bucket: 'test-bucket',
+      objectKey: `avatars/${ownerId}/current.png`,
+      contentType: 'image/png',
+      sizeBytes: 3,
+      uploadedByUserId: ownerId,
+    })
+    .returning({ id: file.id });
+  if (!ownerAvatar) throw new Error('Hirer avatar file was not created');
+  ownerAvatarFileId = ownerAvatar.id;
+  fileIds.push(ownerAvatar.id);
+  await db.update(authUser).set({ imageFileId: ownerAvatar.id }).where(eq(authUser.id, ownerId));
   await db.insert(authAdmin).values({
     id: adminId,
     email: `${adminId}@admin.kuquest`,
@@ -143,20 +182,29 @@ beforeEach(async () => {
     await db.delete(quest).where(inArray(quest.id, questIds));
     questIds.splice(0, questIds.length);
   }
+  await db.update(authUser).set({ redFlagExpiresAt: null }).where(eq(authUser.id, ownerId));
 });
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
   await deleteTestIdempotencyKeys({ principalUserIds: [memberId, ownerId, ...workerIds] });
+  await db.update(authUser).set({ imageFileId: null }).where(eq(authUser.id, ownerId));
   if (fileIds.length > 0) await db.delete(file).where(inArray(file.id, fileIds));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(tag).where(eq(tag.id, otherTagId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
+  await db
+    .update(authUser)
+    .set({ departmentId: null, occupationId: null })
+    .where(eq(authUser.id, ownerId));
+  await db.delete(department).where(eq(department.id, departmentId));
+  await db.delete(faculty).where(eq(faculty.id, facultyId));
 });
 
 type OpenApiSchema = {
   properties?: Record<string, OpenApiSchema>;
   items?: OpenApiSchema;
+  anyOf?: OpenApiSchema[];
   required?: string[];
   format?: string;
   pattern?: string;
@@ -179,6 +227,20 @@ type OpenApiOperation = {
 };
 
 describe('Quest API v2 discovery contract', () => {
+  it('filters the inclusive Hirer price independently from net reward', async () => {
+    const id = await createOpenQuest(ownerId);
+    const response = await getBoard('?minQuestFundingTotal=20&maxQuestFundingTotal=20');
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(
+      body.data.items.some(
+        (item: { id: string; questFundingTotal: number }) =>
+          item.id === id && item.questFundingTotal === 20
+      )
+    ).toBe(true);
+    expect((await getBoard('?minQuestFundingTotal=20.001')).status).toBe(400);
+  });
+
   it.each([
     ['GET', '/api/v2/quests'],
     ['GET', '/api/v2/quests/018f47a7-1c7d-7c98-9a11-690d7e83430c/public'],
@@ -228,6 +290,7 @@ describe('Quest API v2 discovery contract', () => {
         id: expect.any(Object),
         questReward: expect.any(Object),
         activeWorkerCount: expect.any(Object),
+        hirerProfile: expect.any(Object),
       })
     );
     expect(boardData?.required).toEqual(['items', 'nextCursor']);
@@ -236,6 +299,14 @@ describe('Quest API v2 discovery contract', () => {
       publicDetail?.responses?.['200']?.content?.['application/json']?.schema?.properties?.data;
     expect(publicData?.properties?.images?.properties).toBeUndefined();
     expect(publicData?.properties?.condition?.properties).toBeDefined();
+    const hirerAvatar = publicData?.properties?.hirerAvatar;
+    expect(hirerAvatar?.nullable).toBe(true);
+    expect(hirerAvatar?.anyOf?.[0]?.properties).toEqual(
+      expect.objectContaining({
+        fileId: expect.any(Object),
+        url: expect.any(Object),
+      })
+    );
   });
 
   it('lists only eligible v2 Quests across the mode and participation matrix', async () => {
@@ -296,6 +367,10 @@ describe('Quest API v2 discovery contract', () => {
     const ownQuest = await createOpenQuest(memberId, {
       title: `${fixturePrefix} Own Quest`,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const response = await getBoard(`?q=${encodeURIComponent(fixturePrefix)}`);
     expect(response.status).toBe(200);
@@ -310,6 +385,18 @@ describe('Quest API v2 discovery contract', () => {
           startTime: string;
           dueAt: string;
           tag: { id: string; name: string };
+          hirerProfile: {
+            id: string;
+            version: number;
+            firstName: string;
+            lastName: string;
+            bio: string | null;
+            academicYear: number | null;
+            department: unknown;
+            avatar: unknown;
+            occupation: unknown;
+            redFlagged: boolean;
+          };
         }>;
         nextCursor: string | null;
       };
@@ -334,6 +421,25 @@ describe('Quest API v2 discovery contract', () => {
       startTime: '2030-08-26T10:00:00.000+07:00',
       dueAt: '2030-08-26T12:00:00.000+07:00',
       tag: { id: tagId, name: tagName },
+      hirerProfile: {
+        id: ownerId,
+        version: 1,
+        firstName: 'Quest',
+        lastName: 'Owner',
+        bio: 'Quest owner profile',
+        academicYear: 2026,
+        department: {
+          id: departmentId,
+          name: expect.any(String),
+          faculty: { name: expect.any(String) },
+        },
+        avatar: {
+          fileId: ownerAvatarFileId,
+          url: expect.stringMatching(/^https?:\/\//),
+        },
+        occupation: { id: occupationId, name: 'Student' },
+        redFlagged: true,
+      },
     });
     expect(body.data.items.some((item) => item.id === ownQuest)).toBe(false);
     expect(body.data.nextCursor).toBeNull();
@@ -404,6 +510,10 @@ describe('Quest API v2 discovery contract', () => {
       fileId: publicFile.id,
       position: 0,
     });
+    await db
+      .update(authUser)
+      .set({ redFlagExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) })
+      .where(eq(authUser.id, ownerId));
 
     const linkCreatedAt = Date.now();
     const response = await getPublicDetail(publicQuestId);
@@ -428,6 +538,11 @@ describe('Quest API v2 discovery contract', () => {
       activeWorkerCount: 0,
       proofRequired: true,
       hirerName: 'Quest Owner',
+      hirerRedFlagged: true,
+      hirerAvatar: {
+        fileId: ownerAvatarFileId,
+        url: expect.stringMatching(/^https?:\/\//),
+      },
       images: [
         {
           imageId: expect.any(String),
@@ -449,7 +564,7 @@ describe('Quest API v2 discovery contract', () => {
     expect(body.data.locations).toEqual(expectedLocations);
     expect(body.data.images[0]).not.toHaveProperty('fileId');
     expect(body.data).not.toHaveProperty('hirerId');
-    expect(body.data).not.toHaveProperty('questFundingTotal');
+    expect(body.data.questFundingTotal).toBe(20);
     expect(body.data).not.toHaveProperty('platformFee');
     expect(body.data).not.toHaveProperty('wallet');
     expect(body.data).not.toHaveProperty('fundingReservation');

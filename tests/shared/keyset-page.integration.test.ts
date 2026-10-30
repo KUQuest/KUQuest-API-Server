@@ -3,7 +3,7 @@ import { file } from '@/database/schema/file.schema';
 import { CursorInputError, decodeCursor, encodeCursor } from '@/shared/cursor';
 import { readKeysetPage, type KeysetSort } from '@/shared/keyset-page';
 
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { afterAll, describe, expect, it } from 'bun:test';
 
 /**
@@ -46,6 +46,31 @@ const readPage = (cursor?: string, page: { limit?: number; sort?: KeysetSort } =
         .orderBy(...orderBy)
         .limit(limit),
     rowCursor: (row) => ({ startTime: row.createdAt, id: row.id }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a File'),
+  });
+
+const readScopedPage = (cursor: string | undefined, scope: string, bucketFilter: string) =>
+  readKeysetPage({
+    anchor: { time: file.createdAt, id: file.id },
+    cursor: decodeCursor(cursor),
+    limit: 1,
+    cursorAnchorRead: async (pageCursor) => {
+      const [row] = await db
+        .select({ startTime: file.createdAt, id: file.id })
+        .from(file)
+        .where(and(eq(file.id, pageCursor.id), eq(file.bucket, bucketFilter)))
+        .limit(1);
+      return row ? { ...row, scope } : undefined;
+    },
+    where: eq(file.bucket, bucketFilter),
+    read: ({ where, orderBy, limit }) =>
+      db
+        .select({ id: file.id, createdAt: file.createdAt })
+        .from(file)
+        .where(where)
+        .orderBy(...orderBy)
+        .limit(limit),
+    rowCursor: (row) => ({ startTime: row.createdAt, id: row.id, scope }),
     invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a File'),
   });
 
@@ -99,5 +124,19 @@ describe('readKeysetPage', () => {
     const cursor = encodeCursor({ startTime: '2030-08-05T00:00:00.999Z', id: first });
 
     expect(readPage(cursor)).rejects.toThrow('cursor does not match a File');
+  });
+  it('validates scoped table anchors against the current filter and scope', async () => {
+    const firstPage = await readScopedPage(undefined, 'KEYSET_PAGE', bucket);
+    expect(firstPage.nextCursor).not.toBeNull();
+
+    const cursor = encodeCursor(firstPage.nextCursor!);
+    const nextPage = await readScopedPage(cursor, 'KEYSET_PAGE', bucket);
+    expect(nextPage.rows).toHaveLength(1);
+    expect(readScopedPage(cursor, 'OTHER_SCOPE', bucket)).rejects.toThrow(
+      'cursor does not match a File'
+    );
+    expect(readScopedPage(cursor, 'KEYSET_PAGE', `${bucket}-other`)).rejects.toThrow(
+      'cursor does not match a File'
+    );
   });
 });

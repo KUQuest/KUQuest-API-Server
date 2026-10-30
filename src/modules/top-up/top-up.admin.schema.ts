@@ -59,8 +59,10 @@ export type AdminTopUpEventParams = typeof adminTopUpEventParamsSchema.static;
 
 export const adminTopUpListItemSchema = t.Object({
   id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
   userId: t.String({ format: 'uuid' }),
   member: t.Object({
+    displayId: t.String(),
     firstName: t.String(),
     lastName: t.String(),
     studentId: t.Union([t.String(), t.Null()]),
@@ -75,6 +77,33 @@ export const adminTopUpListItemSchema = t.Object({
   expiresAt: dateTime,
   paidAt: t.Union([dateTime, t.Null()]),
   createdAt: dateTime,
+});
+
+const adminTopUpStatusSchema = t.Union([
+  t.Literal('PENDING'),
+  t.Literal('PAID'),
+  t.Literal('EXPIRED'),
+  t.Literal('FAILED'),
+]);
+
+export const adminTopUpStatusHistoryEntrySchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  fromStatus: t.Nullable(adminTopUpStatusSchema),
+  toStatus: adminTopUpStatusSchema,
+  providerStatus: t.Nullable(t.String()),
+  source: t.String(),
+  reason: t.Nullable(t.String()),
+  occurredAt: dateTime,
+});
+
+export const adminTopUpStatusHistoryResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: t.Array(adminTopUpStatusHistoryEntrySchema),
+});
+
+export const adminTopUpDetailResponseSchema = t.Object({
+  success: t.Literal(true),
+  data: adminTopUpListItemSchema,
 });
 
 export const adminTopUpListQuerySchema = t.Object({

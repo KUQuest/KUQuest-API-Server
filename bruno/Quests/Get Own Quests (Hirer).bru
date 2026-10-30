@@ -1,0 +1,19 @@
+meta {
+  name: Get Own Quests (Hirer)
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/mine
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns all Quests owned by the authenticated Member in reverse chronological order across all states (DRAFT, OPEN, ASSIGNED, IN_PROGRESS, etc.).
+}

@@ -1,0 +1,34 @@
+meta {
+  name: Open Candidate Inquiry
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v1/chat/candidate-inquiries
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "questId": "{{questId}}"
+  }
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.inquiry) {
+    bru.setEnvVar("conversationId", data.data.inquiry.id);
+  }
+}
+
+docs {
+  Prospective Worker opens a private 1-on-1 Candidate Inquiry Conversation with the Hirer while the Quest is QUEST_OPEN.
+  Saves the conversationId into the active environment on success.
+}

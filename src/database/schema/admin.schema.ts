@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import {
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -8,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   varchar,
 } from 'drizzle-orm/pg-core';
@@ -19,11 +22,16 @@ import {
   questCandidateTeamV2,
   questV2ProofSubmission,
 } from './quest.schema';
+import { chatAttachment, chatConversation, chatMessage } from './work-chat.schema';
 
 export const adminAction = pgTable(
   'admin_action',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_action_public_sequence' })
+      .notNull()
+      .unique(),
     adminId: uuid('admin_id')
       .notNull()
       .references(() => authAdmin.id, { onDelete: 'restrict' }),
@@ -34,6 +42,7 @@ export const adminAction = pgTable(
     requestHash: varchar('request_hash', { length: 64 }).notNull(),
     reasonCatalogVersion: integer('reason_catalog_version').notNull(),
     reasonCode: text('reason_code'),
+    decisionReasonText: varchar('decision_reason_text', { length: 200 }),
     expectedVersion: integer('expected_version'),
     expectedTimestamp: timestamp('expected_timestamp', { withTimezone: true }),
     resultVersion: integer('result_version'),
@@ -62,6 +71,10 @@ export const adminAction = pgTable(
       sql`${table.reasonCode} IS NULL OR ${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
     ),
     check(
+      'admin_action_decision_reason_text_check',
+      sql`${table.decisionReasonText} IS NULL OR btrim(${table.decisionReasonText}) <> ''`
+    ),
+    check(
       'admin_action_resource_version_check',
       sql`(${table.expectedVersion} IS NULL OR ${table.expectedVersion} >= 1) AND (${table.resultVersion} IS NULL OR ${table.resultVersion} >= 1)`
     ),
@@ -74,6 +87,172 @@ export const adminAction = pgTable(
       'admin_action_result_data_object_check',
       sql`jsonb_typeof(${table.resultData}) = 'object'`
     ),
+  ]
+);
+
+export const memberPenaltyLadders = ['MISCONDUCT', 'REVIEW'] as const;
+export type MemberPenaltyLadder = (typeof memberPenaltyLadders)[number];
+
+export const memberPenaltySources = [
+  'REPORT_CASE',
+  'CONDUCT_REPORT',
+  'REVIEW_AVERAGE',
+  'ADMIN',
+] as const;
+export type MemberPenaltySource = (typeof memberPenaltySources)[number];
+
+export const memberPenaltyCommandKinds = ['ADD', 'REMOVE'] as const;
+export type MemberPenaltyCommandKind = (typeof memberPenaltyCommandKinds)[number];
+
+export const memberPenaltyResults = [
+  'PENALTY_EXEMPT',
+  'PENALTY_RED_FLAG',
+  'PENALTY_TEMPORARY_BAN_7_DAYS',
+  'PENALTY_TEMPORARY_BAN_1_MONTH',
+  'PENALTY_PERMANENT_BAN',
+  'PENALTY_REVERSAL',
+] as const;
+export type MemberPenaltyResult = (typeof memberPenaltyResults)[number];
+
+/** Immutable source-of-truth history for Member penalty ladders and reversals. */
+export const memberPenaltyRecord = pgTable(
+  'member_penalty_records',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    ladder: text('ladder').$type<MemberPenaltyLadder>().notNull(),
+    source: text('source').$type<MemberPenaltySource>().notNull(),
+    sourceId: uuid('source_id').notNull(),
+    sequenceNumber: integer('sequence_number').notNull(),
+    result: text('result').$type<MemberPenaltyResult>().notNull(),
+    actorType: text('actor_type').$type<'ADMIN' | 'SYSTEM'>().notNull(),
+    actorAdminId: uuid('actor_admin_id').references(() => authAdmin.id, {
+      onDelete: 'restrict',
+    }),
+    reasonCode: varchar('reason_code', { length: 100 }).notNull(),
+    adminNote: varchar('admin_note', { length: 200 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    reversalOfRecordId: uuid('reversal_of_record_id').references(
+      (): AnyPgColumn => memberPenaltyRecord.id,
+      { onDelete: 'restrict' }
+    ),
+    recalculationOfRecordId: uuid('recalculation_of_record_id').references(
+      (): AnyPgColumn => memberPenaltyRecord.id,
+      { onDelete: 'restrict' }
+    ),
+    commandKind: text('command_kind').$type<MemberPenaltyCommandKind>(),
+    commandRequestKey: text('command_request_key'),
+    commandRequestHash: varchar('command_request_hash', { length: 64 }),
+    commandExpectedVersionToken: integer('command_expected_version_token'),
+    commandResultVersionToken: integer('command_result_version_token'),
+  },
+  (table) => [
+    check('member_penalty_records_ladder_check', sql`${table.ladder} IN ('MISCONDUCT', 'REVIEW')`),
+    check(
+      'member_penalty_records_source_check',
+      sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE', 'ADMIN')`
+    ),
+    check(
+      'member_penalty_records_source_ladder_check',
+      sql`(
+        (${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.ladder} = 'MISCONDUCT') OR
+        (${table.source} = 'REVIEW_AVERAGE' AND ${table.ladder} = 'REVIEW') OR
+        (${table.source} = 'ADMIN' AND ${table.ladder} = 'MISCONDUCT')
+      )`
+    ),
+    check(
+      'member_penalty_records_result_check',
+      sql`${table.result} IN ('PENALTY_EXEMPT', 'PENALTY_RED_FLAG', 'PENALTY_TEMPORARY_BAN_7_DAYS', 'PENALTY_TEMPORARY_BAN_1_MONTH', 'PENALTY_PERMANENT_BAN', 'PENALTY_REVERSAL')`
+    ),
+    check('member_penalty_records_sequence_check', sql`${table.sequenceNumber} > 0`),
+    check(
+      'member_penalty_records_actor_check',
+      sql`(
+        (${table.actorType} = 'ADMIN' AND ${table.actorAdminId} IS NOT NULL) OR
+        (${table.actorType} = 'SYSTEM' AND ${table.actorAdminId} IS NULL)
+      )`
+    ),
+    check(
+      'member_penalty_records_reason_code_check',
+      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
+    ),
+    check(
+      'member_penalty_records_reversal_check',
+      sql`(${table.result} = 'PENALTY_REVERSAL') = (${table.reversalOfRecordId} IS NOT NULL)`
+    ),
+    check(
+      'member_penalty_records_not_self_reversal_check',
+      sql`${table.reversalOfRecordId} IS NULL OR ${table.reversalOfRecordId} <> ${table.id}`
+    ),
+    check(
+      'member_penalty_records_not_self_recalculation_check',
+      sql`${table.recalculationOfRecordId} IS NULL OR ${table.recalculationOfRecordId} <> ${table.id}`
+    ),
+    check(
+      'member_penalty_records_admin_note_check',
+      sql`${table.adminNote} IS NULL OR btrim(${table.adminNote}) <> ''`
+    ),
+    check(
+      'member_penalty_records_command_check',
+      sql`(
+        num_nonnulls(
+          ${table.commandKind},
+          ${table.commandRequestKey},
+          ${table.commandRequestHash},
+          ${table.commandExpectedVersionToken},
+          ${table.commandResultVersionToken}
+        ) = 0 OR (
+          num_nonnulls(
+            ${table.commandKind},
+            ${table.commandRequestKey},
+            ${table.commandRequestHash},
+            ${table.commandExpectedVersionToken},
+            ${table.commandResultVersionToken}
+          ) = 5 AND
+          ${table.commandKind} IN ('ADD', 'REMOVE') AND
+          btrim(${table.commandRequestKey}) <> '' AND
+          ${table.commandRequestHash} ~ '^[0-9a-f]{64}$' AND
+          ${table.commandExpectedVersionToken} >= 0 AND
+          ${table.commandResultVersionToken} >= 1 AND
+          ${table.actorType} = 'ADMIN' AND
+          ((${table.commandKind} = 'ADD' AND ${table.source} = 'ADMIN' AND ${table.result} <> 'PENALTY_REVERSAL') OR
+           (${table.commandKind} = 'REMOVE' AND ${table.result} = 'PENALTY_REVERSAL'))
+        )
+      )`
+    ),
+    uniqueIndex('member_penalty_records_reversal_uidx')
+      .on(table.reversalOfRecordId)
+      .where(sql`${table.reversalOfRecordId} IS NOT NULL`),
+    uniqueIndex('member_penalty_records_recalculation_uidx')
+      .on(table.recalculationOfRecordId)
+      .where(sql`${table.recalculationOfRecordId} IS NOT NULL`),
+    uniqueIndex('member_penalty_records_review_source_uidx')
+      .on(table.memberId, table.sourceId)
+      .where(
+        sql`${table.source} = 'REVIEW_AVERAGE' AND ${table.result} <> 'PENALTY_REVERSAL' AND ${table.recalculationOfRecordId} IS NULL`
+      ),
+    uniqueIndex('member_penalty_records_violation_source_uidx')
+      .on(table.memberId, table.source, table.sourceId)
+      .where(
+        sql`${table.source} IN ('REPORT_CASE', 'CONDUCT_REPORT') AND ${table.result} <> 'PENALTY_REVERSAL' AND ${table.recalculationOfRecordId} IS NULL`
+      ),
+    uniqueIndex('member_penalty_records_command_request_uidx')
+      .on(table.actorAdminId, table.commandKind, table.commandRequestKey)
+      .where(sql`${table.commandRequestKey} IS NOT NULL`),
+    index('member_penalty_records_member_created_idx').on(
+      table.memberId,
+      table.createdAt,
+      table.id
+    ),
+    index('member_penalty_records_member_ladder_idx').on(
+      table.memberId,
+      table.ladder,
+      table.sequenceNumber
+    ),
+    index('member_penalty_records_member_result_idx').on(table.memberId, table.result),
+    index('member_penalty_records_source_idx').on(table.source, table.sourceId),
   ]
 );
 
@@ -115,6 +294,197 @@ export const adminReviewItem = pgTable(
   ]
 );
 
+export const reportCaseStatus = {
+  pending: 'REPORT_CASE_PENDING',
+  dismissed: 'REPORT_CASE_DISMISSED',
+  hidden: 'REPORT_CASE_HIDDEN',
+  restored: 'REPORT_CASE_RESTORED',
+} as const;
+export const reportCaseStatuses = [
+  reportCaseStatus.pending,
+  reportCaseStatus.dismissed,
+  reportCaseStatus.hidden,
+  reportCaseStatus.restored,
+] as const;
+export type ReportCaseStatus = (typeof reportCaseStatuses)[number];
+
+export const reporterEntryReason = {
+  abusiveOrHarassment: 'REPORT_ABUSIVE_OR_HARASSMENT',
+  spam: 'REPORT_SPAM',
+  inappropriateContent: 'REPORT_INAPPROPRIATE_CONTENT',
+  dangerOrThreat: 'REPORT_DANGER_OR_THREAT',
+  other: 'REPORT_OTHER',
+} as const;
+export const reporterEntryReasons = [
+  reporterEntryReason.abusiveOrHarassment,
+  reporterEntryReason.spam,
+  reporterEntryReason.inappropriateContent,
+  reporterEntryReason.dangerOrThreat,
+  reporterEntryReason.other,
+] as const;
+export type ReporterEntryReason = (typeof reporterEntryReasons)[number];
+
+/** A Trust & Safety case that groups Reporter Entries for one Message. */
+export const adminReportCase = pgTable(
+  'admin_report_cases',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_report_case_public_sequence' })
+      .unique(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => chatMessage.id, { onDelete: 'restrict' }),
+    status: text('status').$type<ReportCaseStatus>().default(reportCaseStatus.pending).notNull(),
+    caseClosedAt: timestamp('case_closed_at', { withTimezone: true }),
+    version: integer('version').default(1).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_report_cases_id_message_key').on(table.id, table.messageId),
+    uniqueIndex('admin_report_cases_one_open_message_uidx')
+      .on(table.messageId)
+      .where(sql`${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN')`),
+    index('admin_report_cases_status_created_idx').on(table.status, table.createdAt, table.id),
+    index('admin_report_cases_message_created_idx').on(table.messageId, table.createdAt, table.id),
+    check(
+      'admin_report_cases_status_check',
+      sql`${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED')`
+    ),
+    check('admin_report_cases_version_check', sql`${table.version} >= 1`),
+    check(
+      'admin_report_cases_closed_time_check',
+      sql`(
+        (${table.status} IN ('REPORT_CASE_PENDING', 'REPORT_CASE_HIDDEN') AND ${table.caseClosedAt} IS NULL)
+        OR (${table.status} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_RESTORED') AND ${table.caseClosedAt} IS NOT NULL)
+      )`
+    ),
+    check(
+      'admin_report_cases_closed_after_created_check',
+      sql`${table.caseClosedAt} IS NULL OR ${table.caseClosedAt} >= ${table.createdAt}`
+    ),
+  ]
+);
+
+/** A Member's reason and optional detail for one Message. */
+export const adminReporterEntry = pgTable(
+  'admin_reporter_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reportCaseId: uuid('report_case_id').notNull(),
+    messageId: uuid('message_id').notNull(),
+    reporterMemberId: uuid('reporter_member_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    reason: varchar('reason', { length: 64 }).$type<ReporterEntryReason>().notNull(),
+    detail: text('detail'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_reporter_entries_message_reporter_key').on(
+      table.messageId,
+      table.reporterMemberId
+    ),
+    foreignKey({
+      name: 'admin_reporter_entries_case_message_fk',
+      columns: [table.reportCaseId, table.messageId],
+      foreignColumns: [adminReportCase.id, adminReportCase.messageId],
+    }).onDelete('restrict'),
+    check(
+      'admin_reporter_entries_reason_check',
+      sql`${table.reason} IN ('REPORT_ABUSIVE_OR_HARASSMENT', 'REPORT_SPAM', 'REPORT_INAPPROPRIATE_CONTENT', 'REPORT_DANGER_OR_THREAT', 'REPORT_OTHER')`
+    ),
+    check(
+      'admin_reporter_entries_detail_check',
+      sql`${table.detail} IS NULL OR btrim(${table.detail}) <> ''`
+    ),
+    index('admin_reporter_entries_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_reporter_entries_reporter_idx').on(table.reporterMemberId, table.createdAt),
+  ]
+);
+
+/** A case-scoped reference to retained Message or Attachment evidence. */
+export const adminEvidenceReference = pgTable(
+  'admin_evidence_references',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reportCaseId: uuid('report_case_id')
+      .notNull()
+      .references(() => adminReportCase.id, { onDelete: 'restrict' }),
+    messageId: uuid('message_id').references(() => chatMessage.id, {
+      onDelete: 'restrict',
+    }),
+    attachmentId: uuid('attachment_id').references(() => chatAttachment.id, {
+      onDelete: 'restrict',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('admin_evidence_references_case_message_uidx')
+      .on(table.reportCaseId, table.messageId)
+      .where(sql`${table.messageId} IS NOT NULL`),
+    uniqueIndex('admin_evidence_references_case_attachment_uidx')
+      .on(table.reportCaseId, table.attachmentId)
+      .where(sql`${table.attachmentId} IS NOT NULL`),
+    check(
+      'admin_evidence_references_target_check',
+      sql`num_nonnulls(${table.messageId}, ${table.attachmentId}) = 1`
+    ),
+    index('admin_evidence_references_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
+  ]
+);
+
+/** Immutable record of an Admin Report Case state decision. */
+export const adminModerationDecision = pgTable(
+  'admin_moderation_decisions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    reportCaseId: uuid('report_case_id')
+      .notNull()
+      .references(() => adminReportCase.id, { onDelete: 'restrict' }),
+    adminId: uuid('admin_id')
+      .notNull()
+      .references(() => authAdmin.id, { onDelete: 'restrict' }),
+    previousStatus: text('previous_status').$type<ReportCaseStatus>().notNull(),
+    newStatus: text('new_status').$type<ReportCaseStatus>().notNull(),
+    reasonCatalogVersion: integer('reason_catalog_version').notNull(),
+    reasonCode: varchar('reason_code', { length: 100 }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    check(
+      'admin_moderation_decisions_transition_check',
+      sql`(
+        (${table.previousStatus} = 'REPORT_CASE_PENDING' AND ${table.newStatus} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN'))
+        OR (${table.previousStatus} = 'REPORT_CASE_HIDDEN' AND ${table.newStatus} IN ('REPORT_CASE_DISMISSED', 'REPORT_CASE_HIDDEN', 'REPORT_CASE_RESTORED'))
+      )`
+    ),
+    check(
+      'admin_moderation_decisions_reason_catalog_version_check',
+      sql`${table.reasonCatalogVersion} >= 1`
+    ),
+    check(
+      'admin_moderation_decisions_reason_code_check',
+      sql`${table.reasonCode} ~ '^[A-Z][A-Z0-9_.-]{0,99}$'`
+    ),
+    index('admin_moderation_decisions_case_created_idx').on(
+      table.reportCaseId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_moderation_decisions_admin_created_idx').on(table.adminId, table.createdAt),
+  ]
+);
+
 export const disputeCaseStatus = {
   pending: 'DISPUTE_CASE_PENDING',
   dismissed: 'DISPUTE_CASE_DISMISSED',
@@ -127,11 +497,22 @@ export const disputeCaseStatuses = [
 ] as const;
 export type DisputeCaseStatus = (typeof disputeCaseStatuses)[number];
 
+export const disputeCaseCategories = [
+  'PROOF_REVIEW',
+  'QUEST_CONDITION',
+  'PARTIAL_WORK',
+  'OTHER',
+] as const;
+export type DisputeCaseCategory = (typeof disputeCaseCategories)[number];
+
 /** An Admin queue record for a payment dispute on a failed Quest. */
 export const adminDisputeCase = pgTable(
   'admin_dispute_cases',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_dispute_case_public_sequence' })
+      .unique(),
     questId: uuid('quest_id')
       .notNull()
       .references(() => quest.id, { onDelete: 'cascade' }),
@@ -139,6 +520,11 @@ export const adminDisputeCase = pgTable(
       .notNull()
       .references(() => authUser.id),
     openedByAdminId: uuid('opened_by_admin_id').references(() => authAdmin.id),
+    category: text('category').$type<DisputeCaseCategory>(),
+    submittedDetail: text('submitted_detail'),
+    filerStatement: text('filer_statement'),
+    respondentStatement: text('respondent_statement'),
+    respondentUserId: uuid('respondent_user_id').references(() => authUser.id),
     status: text('status').$type<DisputeCaseStatus>().default('DISPUTE_CASE_PENDING').notNull(),
     version: integer('version').default(1).notNull(),
     resolvedWorkerId: uuid('resolved_worker_id').references(() => authUser.id),
@@ -153,6 +539,22 @@ export const adminDisputeCase = pgTable(
     index('admin_dispute_cases_status_created_idx').on(table.status, table.createdAt, table.id),
     index('admin_dispute_cases_quest_idx').on(table.questId, table.createdAt),
     index('admin_dispute_cases_filer_idx').on(table.filerUserId),
+    check(
+      'admin_dispute_cases_category_check',
+      sql`${table.category} IS NULL OR ${table.category} IN ('PROOF_REVIEW', 'QUEST_CONDITION', 'PARTIAL_WORK', 'OTHER')`
+    ),
+    check(
+      'admin_dispute_cases_filing_content_check',
+      sql`(${table.category} IS NULL AND ${table.submittedDetail} IS NULL) OR (${table.category} IS NOT NULL AND ${table.submittedDetail} IS NOT NULL AND btrim(${table.submittedDetail}) <> '')`
+    ),
+    check(
+      'admin_dispute_cases_filer_statement_check',
+      sql`${table.filerStatement} IS NULL OR btrim(${table.filerStatement}) <> ''`
+    ),
+    check(
+      'admin_dispute_cases_respondent_statement_check',
+      sql`(${table.respondentStatement} IS NULL AND ${table.respondentUserId} IS NULL) OR (${table.respondentStatement} IS NOT NULL AND btrim(${table.respondentStatement}) <> '' AND ${table.respondentUserId} IS NOT NULL)`
+    ),
     check(
       'admin_dispute_cases_status_check',
       sql`${table.status} IN ('DISPUTE_CASE_PENDING', 'DISPUTE_CASE_DISMISSED', 'DISPUTE_CASE_RESOLVED')`
@@ -169,6 +571,148 @@ export const adminDisputeCase = pgTable(
         OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND num_nonnulls(${table.resolvedByAdminId}, ${table.resolvedAt}) = 2)
         OR (${table.status} = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 4)
       )`
+    ),
+  ]
+);
+
+export const conductReportReason = {
+  abandoned: 'CONDUCT_ABANDONED',
+  outOfScope: 'CONDUCT_OUT_OF_SCOPE',
+  noShow: 'CONDUCT_NO_SHOW',
+} as const;
+export const conductReportReasons = [
+  conductReportReason.abandoned,
+  conductReportReason.outOfScope,
+  conductReportReason.noShow,
+] as const;
+export type ConductReportReason = (typeof conductReportReasons)[number];
+
+export const conductReportStatus = {
+  pending: 'CONDUCT_REPORT_PENDING',
+  upheld: 'CONDUCT_REPORT_UPHELD',
+  dismissed: 'CONDUCT_REPORT_DISMISSED',
+} as const;
+export const conductReportStatuses = [
+  conductReportStatus.pending,
+  conductReportStatus.upheld,
+  conductReportStatus.dismissed,
+] as const;
+export type ConductReportStatus = (typeof conductReportStatuses)[number];
+
+/** A retained Admin review record for one Member's conduct on one Quest. */
+export const adminConductReport = pgTable(
+  'admin_conduct_reports',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'admin_conduct_report_public_sequence' })
+      .unique(),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'restrict' }),
+    filerUserId: uuid('filer_user_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    reportedMemberId: uuid('reported_member_id')
+      .notNull()
+      .references(() => authUser.id, { onDelete: 'restrict' }),
+    /** The Assignment used as the Quest record evidence for this report. */
+    assignmentId: uuid('assignment_id').notNull(),
+    reason: varchar('reason', { length: 64 }).$type<ConductReportReason>().notNull(),
+    detail: text('detail'),
+    status: text('status')
+      .$type<ConductReportStatus>()
+      .default(conductReportStatus.pending)
+      .notNull(),
+    version: integer('version').default(1).notNull(),
+    decisionReason: varchar('decision_reason', { length: 1000 }),
+    resolvedByAdminId: uuid('resolved_by_admin_id').references(() => authAdmin.id, {
+      onDelete: 'restrict',
+    }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_conduct_reports_quest_reported_member_key').on(
+      table.questId,
+      table.reportedMemberId
+    ),
+    index('admin_conduct_reports_status_created_idx').on(table.status, table.createdAt, table.id),
+    index('admin_conduct_reports_quest_created_idx').on(table.questId, table.createdAt, table.id),
+    index('admin_conduct_reports_filer_created_idx').on(
+      table.filerUserId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_conduct_reports_reported_member_created_idx').on(
+      table.reportedMemberId,
+      table.createdAt,
+      table.id
+    ),
+    index('admin_conduct_reports_assignment_idx').on(table.assignmentId),
+    foreignKey({
+      name: 'admin_conduct_reports_assignment_context_fk',
+      columns: [table.questId, table.assignmentId],
+      foreignColumns: [questAssignment.questId, questAssignment.id],
+    }).onDelete('restrict'),
+    check(
+      'admin_conduct_reports_reason_check',
+      sql`${table.reason} IN ('CONDUCT_ABANDONED', 'CONDUCT_OUT_OF_SCOPE', 'CONDUCT_NO_SHOW')`
+    ),
+    check(
+      'admin_conduct_reports_status_check',
+      sql`${table.status} IN ('CONDUCT_REPORT_PENDING', 'CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED')`
+    ),
+    check('admin_conduct_reports_version_check', sql`${table.version} >= 1`),
+    check(
+      'admin_conduct_reports_members_check',
+      sql`${table.filerUserId} <> ${table.reportedMemberId}`
+    ),
+    check(
+      'admin_conduct_reports_detail_check',
+      sql`${table.detail} IS NULL OR btrim(${table.detail}) <> ''`
+    ),
+    check(
+      'admin_conduct_reports_decision_reason_check',
+      sql`${table.decisionReason} IS NULL OR btrim(${table.decisionReason}) <> ''`
+    ),
+    check(
+      'admin_conduct_reports_resolution_check',
+      sql`(
+        (${table.status} = 'CONDUCT_REPORT_PENDING' AND num_nonnulls(${table.decisionReason}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 0)
+        OR (${table.status} IN ('CONDUCT_REPORT_UPHELD', 'CONDUCT_REPORT_DISMISSED') AND num_nonnulls(${table.decisionReason}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 3)
+      )`
+    ),
+    check(
+      'admin_conduct_reports_resolved_after_created_check',
+      sql`${table.resolvedAt} IS NULL OR ${table.resolvedAt} >= ${table.createdAt}`
+    ),
+  ]
+);
+
+/** An opaque capability for one Conduct Report's permitted Chat Conversation. */
+export const adminConductReportEvidenceHandle = pgTable(
+  'admin_conduct_report_evidence_handles',
+  {
+    id: varchar('id', { length: 47 }).primaryKey(),
+    reportId: uuid('report_id')
+      .notNull()
+      .references(() => adminConductReport.id, { onDelete: 'restrict' }),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => chatConversation.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_conduct_report_evidence_handles_report_conversation_key').on(
+      table.reportId,
+      table.conversationId
+    ),
+    index('admin_conduct_report_evidence_handles_conversation_idx').on(table.conversationId),
+    check(
+      'admin_conduct_report_evidence_handles_id_check',
+      sql`${table.id} ~ '^CRH_[A-Za-z0-9_-]{43}$'`
     ),
   ]
 );

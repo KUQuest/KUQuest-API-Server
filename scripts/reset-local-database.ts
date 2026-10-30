@@ -48,9 +48,7 @@ const main = async (): Promise<void> => {
   await runCommand('db:migrate');
   await runCommand('db:verify-migration-journal');
   console.log('Local database reset and migration completed.');
-  console.log(
-    'Load demo and finance data with STAGING_FINANCE_SEED_ENABLED=true bun run db:seed-staging.'
-  );
+  console.log('Load 10 demo Members and their funded Quests with bun run db:seed-staging.');
 };
 
 try {

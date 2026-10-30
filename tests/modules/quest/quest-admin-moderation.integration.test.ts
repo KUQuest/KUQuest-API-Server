@@ -20,7 +20,7 @@ import {
 import { auth } from '@/modules/auth';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { editQuestV2 } from '@/modules/quest';
-import type { QuestStatus } from '@/modules/quest/quest.contract';
+import type { QuestStatus } from '@/modules/quest/shared';
 import { workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
@@ -109,6 +109,7 @@ const createQuest = async (
   const questId = randomUUID();
   const group = options.group ?? false;
   questIds.push(questId);
+  const failedAt = status === 'QUEST_FAILED' ? new Date() : null;
   await db.insert(quest).values({
     id: questId,
     hirerId,
@@ -121,7 +122,8 @@ const createQuest = async (
     v2Participation: group ? 'GROUP' : 'SINGLE',
     rewardSatang: status === 'QUEST_DRAFT' ? null : 1_000,
     questStatus: status,
-    failedAt: status === 'QUEST_FAILED' ? new Date() : null,
+    failedAt,
+    moneyHoldStartedAt: failedAt,
     questFundingTotalSatang: group ? 2_040 : 1_020,
     platformFeePerWorkerSatang: 20,
     questEscrowSatang: group ? 2_040 : 1_020,

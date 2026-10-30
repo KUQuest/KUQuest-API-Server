@@ -278,7 +278,7 @@ const runPayoutTest = async (userId: string, adminId: string, runId: string) => 
     payoutId: payout.id,
     idempotencyKey: `local-xendit-payout-approval:${runId}`,
     expectedVersion: payout.version,
-    reasonCode: 'PAYOUT_POLICY_REVIEW',
+    reasonCode: 'PAYOUT_DESTINATION_VERIFIED',
   });
   assert(
     approved.resourceVersion === payout.version + 1,

@@ -1,0 +1,27 @@
+meta {
+  name: Join Quest (Worker)
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/join
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Worker direct join action for FIRST_COME_FIRST_SERVED Quests.
+  Creates an active Assignment for the calling Worker and assigns them into the Quest.
+  Note: The calling Member must not be the Hirer of the Quest.
+}

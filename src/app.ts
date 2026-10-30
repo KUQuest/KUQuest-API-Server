@@ -1,34 +1,48 @@
-import { questRoute } from '@/modules/quest/quest.route';
-import { adminQuestRoute } from '@/modules/quest/quest-admin.route';
+import {
+  adminQuestRoute,
+  questAssignmentRoute,
+  questCandidateRoute,
+  questProofRoute,
+  questReviewRoute,
+  questRoute,
+} from '@/modules/quest';
 import { tagRoute } from '@/modules/tag';
 import { adminPayoutRoute, payoutRoute, payoutWebhookRoute } from '@/modules/payout';
 import { adminTopUpRoute, topUpRoute, topUpWebhookRoute } from '@/modules/top-up';
-import { questAssignmentRoute } from '@/modules/quest/quest-assignment.route';
-import { questCandidateRoute } from '@/modules/quest/quest-candidate.route';
-import { questProofRoute } from '@/modules/quest/quest-proof.route';
-import { questReviewRoute } from '@/modules/quest/quest-review.route';
-import { questDisputeRoute } from '@/modules/quest/quest-dispute.route';
-import { adminDisputeRoute } from '@/modules/quest/quest-dispute-admin.route';
-import { questSettlementRoute } from '@/modules/quest/quest-settlement.route';
+import {
+  adminDisputeRoute,
+  disputeCaseResponseRoute,
+  questDisputeRoute,
+} from '@/modules/quest/admin';
+import { questSettlementRoute } from '@/modules/quest';
 import {
   adminActivityLogRoute,
   adminFinanceRoute,
   adminMemberRoute,
   adminOverviewRoute,
+  adminReportRoute,
+  adminSearchRoute,
+  adminUpdateRoute,
 } from '@/modules/admin';
 import {
   questAssignmentV2Route,
   questCandidateV2Route,
+  questConductReportV2Route,
   questCandidateTeamV2Route,
+  questV2RewardAllocationRoute,
   questProofV2Route,
   questReviewV2Route,
+  questV2RealtimeRoute,
   questV2Route,
 } from '@/modules/quest';
-import { candidateInquiryRoute, workChatRoute } from '@/modules/work-chat';
+import { candidateInquiryRoute, messageReportRoute, workChatRoute } from '@/modules/work-chat';
+import { pushRoute } from '@/modules/push';
+import { finishRequestLog, startRequestLog } from '@/shared/request-log';
 
 import { Elysia } from 'elysia';
 
 import { academicRegistrationRoute } from './modules/academic-registration';
+import { asyncApiRoute } from './modules/asyncapi/asyncapi.route';
 import { authPlugin, authTestRoute, stagingTestAuthRoute } from './modules/auth';
 import { certificateRoute } from './modules/certificate';
 import { healthRoute } from './modules/health';
@@ -36,6 +50,7 @@ import { onboardingRoute } from './modules/onboarding';
 import { portfolioRoute } from './modules/portfolio';
 import { profileRoute } from './modules/profile';
 import { workExperienceRoute } from './modules/work-experience';
+import { teamInviteRoute } from './modules/team-invite/team-invite.route';
 import { localFinanceTestRoute } from './modules/local-finance-test';
 import { adminWalletRoute, walletRoute } from './modules/wallet';
 import { payoutDestinationRoute } from './modules/payout-destination';
@@ -47,6 +62,8 @@ export const createApp = () => {
   return new Elysia({
     name: 'kuquest-api',
   })
+    .onRequest(startRequestLog)
+    .onAfterResponse(finishRequestLog)
     .use(errorHandlerPlugin)
     .use(corsPlugin)
     .use(authPlugin)
@@ -63,22 +80,29 @@ export const createApp = () => {
       },
     })
     .use(authTestRoute)
+    .use(teamInviteRoute)
+    .use(asyncApiRoute)
     .use(healthRoute)
     .use(onboardingRoute)
     .use(academicRegistrationRoute)
     .use(profileRoute)
+    .use(pushRoute)
     .use(questAssignmentRoute)
     .use(questCandidateRoute)
     .use(questProofRoute)
     .use(questReviewRoute)
     .use(questDisputeRoute)
+    .use(disputeCaseResponseRoute)
     .use(questSettlementRoute)
     .use(adminDisputeRoute)
     .use(questAssignmentV2Route)
     .use(questCandidateV2Route)
     .use(questCandidateTeamV2Route)
+    .use(questV2RewardAllocationRoute)
     .use(questProofV2Route)
     .use(questReviewV2Route)
+    .use(questConductReportV2Route)
+    .use(questV2RealtimeRoute)
     .use(questV2Route)
     .use(questRoute)
     .use(adminQuestRoute)
@@ -86,11 +110,15 @@ export const createApp = () => {
     .use(adminActivityLogRoute)
     .use(adminFinanceRoute)
     .use(adminMemberRoute)
+    .use(adminReportRoute)
+    .use(adminSearchRoute)
+    .use(adminUpdateRoute)
     .use(certificateRoute)
     .use(portfolioRoute)
     .use(workExperienceRoute)
     .use(tagRoute)
     .use(candidateInquiryRoute)
+    .use(messageReportRoute)
     .use(workChatRoute)
     .use(payoutRoute)
     .use(payoutDestinationRoute)

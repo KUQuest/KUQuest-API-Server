@@ -1,0 +1,789 @@
+import { db } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
+import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { file } from '@/database/schema/file.schema';
+import { formatDisplayIdSql, formatQuestDisplayId } from '@/modules/admin';
+import { questV2Storage } from '@/modules/quest/v2';
+import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { readKeysetPage } from '@/shared/keyset-page';
+import {
+  buildStatusCounts,
+  containsLikeQueryPattern,
+  ilikeContains as adminListSearchValue,
+  isoDateSearchText as adminListSearchDate,
+} from '@/shared/list-search';
+import {
+  proofSubmission,
+  proofSubmissionImage,
+  quest,
+  questApiVersion,
+  questApplication,
+  questAssignment,
+  questConditionItem,
+  questEditHistory,
+  questEditRequest,
+  questEditRequestResponse,
+  questImage,
+  questLocation,
+  questTeam,
+  questTeamMember,
+  questV2EditRequest,
+  questV2EditRequestResponse,
+  type QuestApiVersion,
+} from '@/database/schema/quest.schema';
+
+import { and, asc, count, eq, isNotNull, isNull, or, sql } from 'drizzle-orm';
+
+import {
+  questMode,
+  questParticipation,
+  questStatuses,
+  type QuestStatus,
+} from '../shared/contracts/quest.contract';
+import {
+  questV2ModeFromStorage,
+  questV2ModeSearchSql,
+  questV2ParticipationFromStorage,
+  questV2ParticipationSearchSql,
+} from '../shared/contracts/quest-legacy-columns';
+import type { QuestTransaction } from '../shared/work-chat/quest-work-chat.port';
+import {
+  questV2Mode,
+  questV2Participation,
+  type QuestV2Mode,
+  type QuestV2Participation,
+} from '../v2/core/quest-v2.contract';
+import { summaryFromRecord } from './quest-dispute-admin.service';
+import type { AdminDisputeCaseSummary } from './quest-dispute-admin.service';
+
+export type AdminQuestSort = 'newest' | 'oldest';
+
+export type AdminQuestMember = {
+  id: string;
+  studentId: string | null;
+  firstName: string;
+  lastName: string;
+  email: string;
+};
+
+type QuestRow = typeof quest.$inferSelect;
+
+export type AdminQuestSummary = {
+  id: string;
+  publicSequence: number;
+  apiVersion: QuestApiVersion;
+  version: number;
+  title: string;
+  questStatus: QuestStatus;
+  mode: QuestV2Mode;
+  participation: QuestV2Participation;
+  headcount: number;
+  rewardSatang: number | null;
+  questFundingTotalSatang: number | null;
+  startTime: Date;
+  dueAt: Date | null;
+  hiddenAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  hirer: AdminQuestMember;
+};
+
+export type AdminQuestSummaryResponse = Omit<
+  AdminQuestSummary,
+  'publicSequence' | 'startTime' | 'dueAt' | 'hiddenAt' | 'createdAt' | 'updatedAt'
+> & {
+  displayId: string;
+  startTime: string;
+  dueAt: string | null;
+  hiddenAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+const adminQuestSummaryFromRow = (row: {
+  quest: QuestRow;
+  hirer: AdminQuestMember;
+}): AdminQuestSummary => ({
+  id: row.quest.id,
+  publicSequence: row.quest.publicSequence,
+  apiVersion: row.quest.apiVersion,
+  version: row.quest.version,
+  title: row.quest.title,
+  questStatus: row.quest.questStatus as QuestStatus,
+  mode: questV2ModeFromStorage(row.quest),
+  participation: questV2ParticipationFromStorage(row.quest),
+  headcount: row.quest.headcount,
+  rewardSatang: row.quest.rewardSatang,
+  questFundingTotalSatang: row.quest.questFundingTotalSatang,
+  startTime: row.quest.startTime,
+  dueAt: row.quest.dueAt,
+  hiddenAt: row.quest.hiddenAt,
+  createdAt: row.quest.createdAt,
+  updatedAt: row.quest.updatedAt,
+  hirer: row.hirer,
+});
+
+export const serializeAdminQuestSummary = (value: AdminQuestSummary): AdminQuestSummaryResponse => {
+  const { publicSequence, ...summary } = value;
+
+  return {
+    ...summary,
+    displayId: formatQuestDisplayId(publicSequence),
+    startTime: value.startTime.toISOString(),
+    dueAt: value.dueAt ? value.dueAt.toISOString() : null,
+    hiddenAt: value.hiddenAt ? value.hiddenAt.toISOString() : null,
+    createdAt: value.createdAt.toISOString(),
+    updatedAt: value.updatedAt.toISOString(),
+  };
+};
+
+type AdminQuestExecutor = typeof db | QuestTransaction;
+
+type AdminQuestLocation = {
+  label: string | null;
+};
+
+const adminQuestRows = (executor: AdminQuestExecutor) =>
+  executor
+    .select({
+      quest,
+      hirer: {
+        id: authUser.id,
+        studentId: authUser.studentId,
+        firstName: authUser.firstName,
+        lastName: authUser.lastName,
+        email: authUser.email,
+      },
+    })
+    .from(quest)
+    .innerJoin(authUser, eq(authUser.id, quest.hirerId));
+
+export const getAdminQuestSummaryInTransaction = async (
+  executor: QuestTransaction,
+  questId: string
+): Promise<AdminQuestSummary | undefined> => {
+  const [row] = await adminQuestRows(executor).where(eq(quest.id, questId)).limit(1);
+  return row ? adminQuestSummaryFromRow(row) : undefined;
+};
+
+export type ListAdminQuestsInput = {
+  q?: string;
+  status?: QuestStatus;
+  mode?: QuestV2Mode;
+  participation?: QuestV2Participation;
+  hidden?: boolean;
+  limit?: number;
+  cursor?: CursorPayload;
+  sort?: AdminQuestSort;
+};
+
+export const listAdminQuests = async ({
+  q,
+  status,
+  mode,
+  participation,
+  hidden,
+  limit = 20,
+  cursor,
+  sort = 'newest',
+}: ListAdminQuestsInput = {}) => {
+  const searchPattern = containsLikeQueryPattern(q);
+  const modeSearchValue = questV2ModeSearchSql({
+    apiVersion: quest.apiVersion,
+    mode: quest.mode,
+    v2Mode: quest.v2Mode,
+  });
+  const participationSearchValue = questV2ParticipationSearchSql({
+    apiVersion: quest.apiVersion,
+    participation: quest.participation,
+    v2Participation: quest.v2Participation,
+  });
+  const filters = and(
+    searchPattern
+      ? or(
+          adminListSearchValue(sql`${quest.id}::text`, searchPattern),
+          adminListSearchValue(formatDisplayIdSql('quest', quest.publicSequence), searchPattern),
+          adminListSearchValue(quest.apiVersion, searchPattern),
+          adminListSearchValue(sql`${quest.version}::text`, searchPattern),
+          adminListSearchValue(quest.title, searchPattern),
+          adminListSearchValue(sql`${quest.questStatus}::text`, searchPattern),
+          adminListSearchValue(modeSearchValue, searchPattern),
+          adminListSearchValue(participationSearchValue, searchPattern),
+          adminListSearchValue(sql`${quest.headcount}::text`, searchPattern),
+          adminListSearchValue(sql`${quest.rewardSatang}::text`, searchPattern),
+          adminListSearchValue(sql`${quest.questFundingTotalSatang}::text`, searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.startTime), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.dueAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.hiddenAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.createdAt), searchPattern),
+          adminListSearchValue(adminListSearchDate(quest.updatedAt), searchPattern),
+          adminListSearchValue(sql`${authUser.id}::text`, searchPattern),
+          adminListSearchValue(sql`${authUser.studentId}::text`, searchPattern),
+          adminListSearchValue(authUser.firstName, searchPattern),
+          adminListSearchValue(authUser.lastName, searchPattern),
+          adminListSearchValue(authUser.email, searchPattern)
+        )
+      : undefined,
+    mode
+      ? eq(
+          quest.mode,
+          mode === questV2Mode.firstComeFirstServed ? questMode.noCandidate : questMode.candidate
+        )
+      : undefined,
+    participation
+      ? eq(
+          quest.participation,
+          participation === questV2Participation.single
+            ? questParticipation.solo
+            : questParticipation.group
+        )
+      : undefined,
+    hidden === undefined ? undefined : hidden ? isNotNull(quest.hiddenAt) : isNull(quest.hiddenAt)
+  );
+  const [page, statusRows] = await Promise.all([
+    readKeysetPage({
+      anchor: { time: quest.createdAt, id: quest.id },
+      cursor,
+      limit,
+      sort,
+      where: and(filters, status ? eq(quest.questStatus, status) : undefined),
+      read: ({ where, orderBy, limit: probe }) =>
+        adminQuestRows(db)
+          .where(where)
+          .orderBy(...orderBy)
+          .limit(probe),
+      rowCursor: (row) => ({ startTime: row.quest.createdAt, id: row.quest.id }),
+      invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'cursor does not match a Quest'),
+    }),
+    db
+      .select({ status: quest.questStatus, count: count() })
+      .from(quest)
+      .innerJoin(authUser, eq(authUser.id, quest.hirerId))
+      .where(filters)
+      .groupBy(quest.questStatus),
+  ]);
+
+  const countsByStatus = buildStatusCounts(questStatuses, statusRows);
+  const totalCount = status
+    ? countsByStatus[status]
+    : questStatuses.reduce((total, questStatus) => total + countsByStatus[questStatus], 0);
+
+  return {
+    items: page.rows.map(adminQuestSummaryFromRow),
+    nextCursor: page.nextCursor,
+    totalCount,
+    countsByStatus,
+  };
+};
+
+export type AdminQuestApplication = {
+  id: string;
+  worker: AdminQuestMember;
+  applicationStatus: string;
+  reworkLimit: number;
+  appliedAt: Date;
+};
+
+export type AdminQuestTeam = {
+  id: string;
+  name: string;
+  teamStatus: string;
+  reworkLimit: number;
+  leaderId: string;
+  createdAt: Date;
+  members: Array<{ member: AdminQuestMember; joinedAt: Date }>;
+};
+
+export type AdminQuestAssignment = {
+  id: string;
+  worker: AdminQuestMember;
+  assignmentStatus: string;
+  startedAt: Date | null;
+  createdAt: Date;
+};
+
+export type AdminQuestProofFile = {
+  fileId: string;
+  contentType: string;
+  sizeBytes: number;
+  position: number;
+};
+
+export type AdminQuestProof = {
+  id: string;
+  worker: AdminQuestMember | null;
+  team: { id: string; name: string } | null;
+  submittedBy: AdminQuestMember;
+  content: string;
+  submissionStatus: string;
+  reviewNote: string | null;
+  submittedAt: Date;
+  reviewedAt: Date | null;
+  files: AdminQuestProofFile[];
+};
+
+export type AdminQuestFieldEditEntry = {
+  kind: 'FIELD_EDIT';
+  id: string;
+  fieldName: string;
+  oldValue: unknown;
+  newValue: unknown;
+  editedAt: Date;
+  editedByUserId: string | null;
+  editedByAdminId: string | null;
+  v2EditRequestId: string | null;
+};
+
+export type AdminQuestEditRequestEntry = {
+  kind: 'EDIT_REQUEST';
+  id: string;
+  apiVersion: QuestApiVersion;
+  requestStatus: string;
+  failureCode: string | null;
+  requestedByUserId: string | null;
+  proposedChanges: unknown;
+  createdAt: Date;
+  expiresAt: Date | null;
+  resolvedAt: Date | null;
+  responses: Array<{
+    workerId: string;
+    decision: string | null;
+    reason: string | null;
+    respondedAt: Date | null;
+  }>;
+};
+
+export type AdminQuestEditHistoryEntry = AdminQuestFieldEditEntry | AdminQuestEditRequestEntry;
+
+export type AdminQuestAdminAction = {
+  id: string;
+  admin: { id: string; firstName: string; lastName: string };
+  action: string;
+  reasonCode: string | null;
+  createdAt: Date;
+};
+
+export type AdminQuestImage = {
+  imageId: string;
+  fileId: string;
+  position: number;
+  url: string;
+  urlExpiresAt: Date;
+};
+
+export type AdminQuestTimelineEntry = {
+  id: string;
+  fromState: string;
+  toState: string;
+  changedAt: Date;
+  actor:
+    { type: 'MEMBER'; id: string } | { type: 'ADMIN'; id: string } | { type: 'SYSTEM'; id: null };
+  reasonCode: string | null;
+};
+export type AdminQuestDetail = AdminQuestSummary & {
+  description: string | null;
+  condition: { text: string; items: Array<{ position: number; text: string }> };
+  locations: AdminQuestLocation[];
+  images: AdminQuestImage[];
+  timeline: AdminQuestTimelineEntry[];
+  disputeCases: AdminDisputeCaseSummary[];
+  proofRequired: boolean;
+  tagId: string | null;
+  fundingReservationId: string | null;
+  policyRevisionId: string | null;
+  platformFeeBps: number | null;
+  platformFeePerWorkerSatang: number | null;
+  questEscrowSatang: number | null;
+  cancelledAt: Date | null;
+  cancelledByUserId: string | null;
+  cancelledByAdminId: string | null;
+  hiddenByAdminId: string | null;
+  candidates: {
+    applications: AdminQuestApplication[];
+    teams: AdminQuestTeam[];
+  };
+  assignments: AdminQuestAssignment[];
+  proofSubmissions: AdminQuestProof[];
+  editHistory: AdminQuestEditHistoryEntry[];
+  adminActions: AdminQuestAdminAction[];
+};
+
+const memberColumns = {
+  id: authUser.id,
+  studentId: authUser.studentId,
+  firstName: authUser.firstName,
+  lastName: authUser.lastName,
+  email: authUser.email,
+};
+
+const applicationsFor = async (questId: string): Promise<AdminQuestApplication[]> => {
+  const rows = await db
+    .select({ application: questApplication, worker: memberColumns })
+    .from(questApplication)
+    .innerJoin(authUser, eq(authUser.id, questApplication.workerId))
+    .where(eq(questApplication.questId, questId))
+    .orderBy(asc(questApplication.appliedAt));
+  return rows.map((row) => ({
+    id: row.application.id,
+    worker: row.worker,
+    applicationStatus: row.application.applicationStatus,
+    reworkLimit: row.application.reworkLimit,
+    appliedAt: row.application.appliedAt,
+  }));
+};
+
+const locationsFor = async (questId: string): Promise<AdminQuestLocation[]> =>
+  db
+    .select({ label: questLocation.label })
+    .from(questLocation)
+    .where(eq(questLocation.questId, questId))
+    .orderBy(asc(questLocation.id));
+
+const teamsFor = async (questId: string): Promise<AdminQuestTeam[]> => {
+  const teams = await db
+    .select()
+    .from(questTeam)
+    .where(eq(questTeam.questId, questId))
+    .orderBy(asc(questTeam.createdAt));
+  return Promise.all(
+    teams.map(async (team) => {
+      const members = await db
+        .select({ member: memberColumns, joinedAt: questTeamMember.joinedAt })
+        .from(questTeamMember)
+        .innerJoin(authUser, eq(authUser.id, questTeamMember.userId))
+        .where(eq(questTeamMember.teamId, team.id))
+        .orderBy(asc(questTeamMember.joinedAt));
+      return {
+        id: team.id,
+        name: team.name,
+        teamStatus: team.teamStatus,
+        reworkLimit: team.reworkLimit,
+        leaderId: team.leaderId,
+        createdAt: team.createdAt,
+        members,
+      };
+    })
+  );
+};
+
+const assignmentsFor = async (questId: string): Promise<AdminQuestAssignment[]> => {
+  const rows = await db
+    .select({ assignment: questAssignment, worker: memberColumns })
+    .from(questAssignment)
+    .innerJoin(authUser, eq(authUser.id, questAssignment.workerId))
+    .where(eq(questAssignment.questId, questId))
+    .orderBy(asc(questAssignment.createdAt));
+  return rows.map((row) => ({
+    id: row.assignment.id,
+    worker: row.worker,
+    assignmentStatus: row.assignment.assignmentStatus,
+    startedAt: row.assignment.startedAt,
+    createdAt: row.assignment.createdAt,
+  }));
+};
+
+const proofSubmissionsFor = async (questId: string): Promise<AdminQuestProof[]> => {
+  const rows = await db
+    .select({
+      proof: proofSubmission,
+      submittedBy: memberColumns,
+    })
+    .from(proofSubmission)
+    .innerJoin(authUser, eq(authUser.id, proofSubmission.submittedByUserId))
+    .where(eq(proofSubmission.questId, questId))
+    .orderBy(asc(proofSubmission.submittedAt));
+
+  const workerIds = [
+    ...new Set(rows.map((row) => row.proof.workerId).filter((id): id is string => id !== null)),
+  ];
+  const teamIds = [
+    ...new Set(rows.map((row) => row.proof.teamId).filter((id): id is string => id !== null)),
+  ];
+  const [workers, teams] = await Promise.all([
+    workerIds.length
+      ? db
+          .select(memberColumns)
+          .from(authUser)
+          .where(or(...workerIds.map((id) => eq(authUser.id, id))))
+      : Promise.resolve([]),
+    teamIds.length
+      ? db
+          .select({ id: questTeam.id, name: questTeam.name })
+          .from(questTeam)
+          .where(or(...teamIds.map((id) => eq(questTeam.id, id))))
+      : Promise.resolve([]),
+  ]);
+  const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const files = await db
+        .select({
+          fileId: file.id,
+          contentType: file.contentType,
+          sizeBytes: file.sizeBytes,
+          position: proofSubmissionImage.position,
+        })
+        .from(proofSubmissionImage)
+        .innerJoin(file, eq(file.id, proofSubmissionImage.fileId))
+        .where(eq(proofSubmissionImage.proofSubmissionId, row.proof.id))
+        .orderBy(asc(proofSubmissionImage.position));
+      return {
+        id: row.proof.id,
+        worker: row.proof.workerId ? (workerById.get(row.proof.workerId) ?? null) : null,
+        team: row.proof.teamId ? (teamById.get(row.proof.teamId) ?? null) : null,
+        submittedBy: row.submittedBy,
+        content: row.proof.content,
+        submissionStatus: row.proof.submissionStatus,
+        reviewNote: row.proof.reviewNote,
+        submittedAt: row.proof.submittedAt,
+        reviewedAt: row.proof.reviewedAt,
+        files,
+      };
+    })
+  );
+};
+
+const editHistoryFor = async (questId: string): Promise<AdminQuestEditHistoryEntry[]> => {
+  const fieldEdits = await db
+    .select()
+    .from(questEditHistory)
+    .where(eq(questEditHistory.questId, questId));
+  const fieldEditEntries: AdminQuestFieldEditEntry[] = fieldEdits.map((row) => ({
+    kind: 'FIELD_EDIT',
+    id: row.id,
+    fieldName: row.fieldName,
+    oldValue: row.oldValue,
+    newValue: row.newValue,
+    editedAt: row.editedAt,
+    editedByUserId: row.editedByUserId,
+    editedByAdminId: row.editedByAdminId,
+    v2EditRequestId: row.v2EditRequestId,
+  }));
+
+  const v1Requests = await db
+    .select()
+    .from(questEditRequest)
+    .where(eq(questEditRequest.questId, questId));
+  const v1Entries: AdminQuestEditRequestEntry[] = await Promise.all(
+    v1Requests.map(async (request) => {
+      const responses = await db
+        .select()
+        .from(questEditRequestResponse)
+        .where(eq(questEditRequestResponse.requestId, request.id));
+      return {
+        kind: 'EDIT_REQUEST' as const,
+        id: request.id,
+        apiVersion: questApiVersion.v1,
+        requestStatus: request.requestStatus,
+        failureCode: null,
+        requestedByUserId: request.requestedByUserId,
+        proposedChanges: request.proposedChanges,
+        createdAt: request.createdAt,
+        expiresAt: null,
+        resolvedAt: request.resolvedAt,
+        responses: responses.map((response) => ({
+          workerId: response.userId,
+          decision: response.decision,
+          reason: null,
+          respondedAt: response.respondedAt,
+        })),
+      };
+    })
+  );
+
+  const v2Requests = await db
+    .select()
+    .from(questV2EditRequest)
+    .where(eq(questV2EditRequest.questId, questId));
+  const v2Entries: AdminQuestEditRequestEntry[] = await Promise.all(
+    v2Requests.map(async (request) => {
+      const responses = await db
+        .select()
+        .from(questV2EditRequestResponse)
+        .where(eq(questV2EditRequestResponse.requestId, request.id));
+      return {
+        kind: 'EDIT_REQUEST' as const,
+        id: request.id,
+        apiVersion: questApiVersion.v2,
+        requestStatus: request.requestStatus,
+        failureCode: request.failureCode,
+        requestedByUserId: null,
+        proposedChanges: {
+          previousCondition: request.previousCondition,
+          proposedCondition: request.proposedCondition,
+        },
+        createdAt: request.createdAt,
+        expiresAt: request.expiresAt,
+        resolvedAt: request.appliedAt ?? request.failedAt,
+        responses: responses.map((response) => ({
+          workerId: response.workerId,
+          decision: response.decision,
+          reason: response.reason,
+          respondedAt: response.respondedAt,
+        })),
+      };
+    })
+  );
+
+  return [...fieldEditEntries, ...v1Entries, ...v2Entries].sort(
+    (a, b) =>
+      (a.kind === 'FIELD_EDIT' ? a.editedAt : a.createdAt).getTime() -
+      (b.kind === 'FIELD_EDIT' ? b.editedAt : b.createdAt).getTime()
+  );
+};
+
+const adminActionsFor = async (questId: string): Promise<AdminQuestAdminAction[]> => {
+  const rows = await db
+    .select({
+      action: adminAction,
+      admin: { id: authAdmin.id, firstName: authAdmin.firstName, lastName: authAdmin.lastName },
+    })
+    .from(adminAction)
+    .innerJoin(authAdmin, eq(authAdmin.id, adminAction.adminId))
+    .where(and(eq(adminAction.resourceType, 'quest'), eq(adminAction.resourceId, questId)))
+    .orderBy(asc(adminAction.createdAt));
+  return rows.map((row) => ({
+    id: row.action.id,
+    admin: row.admin,
+    action: row.action.action,
+    reasonCode: row.action.reasonCode,
+    createdAt: row.action.createdAt,
+  }));
+};
+
+const imagesFor = async (questId: string): Promise<AdminQuestImage[]> => {
+  const rows = await db
+    .select({
+      imageId: questImage.id,
+      fileId: questImage.fileId,
+      position: questImage.position,
+      bucket: file.bucket,
+      objectKey: file.objectKey,
+    })
+    .from(questImage)
+    .innerJoin(file, and(eq(file.id, questImage.fileId), isNull(file.deletedAt)))
+    .where(eq(questImage.questId, questId))
+    .orderBy(asc(questImage.position), asc(questImage.id));
+
+  return rows.map(({ bucket, objectKey, ...image }) => {
+    const link = questV2Storage.linkForWithExpiry({ bucket, objectKey });
+    return { ...image, url: link.url, urlExpiresAt: link.expiresAt };
+  });
+};
+
+const timelineFor = async (questId: string): Promise<AdminQuestTimelineEntry[]> => {
+  const rows = await db
+    .select()
+    .from(auditRecord)
+    .where(
+      and(
+        eq(auditRecord.action, 'QUEST_STATE_CHANGED'),
+        eq(auditRecord.resourceType, 'QUEST'),
+        eq(auditRecord.resourceId, questId)
+      )
+    )
+    .orderBy(asc(auditRecord.createdAt), asc(auditRecord.id));
+
+  return rows.flatMap((row) => {
+    const fromState = row.oldValue?.state;
+    const toState = row.newValue?.state;
+    if (typeof fromState !== 'string' || typeof toState !== 'string' || fromState === toState)
+      return [];
+
+    const actor =
+      row.actorType === 'SYSTEM'
+        ? { type: 'SYSTEM' as const, id: null }
+        : row.actorType === 'ADMIN' && row.actorAdminId
+          ? { type: 'ADMIN' as const, id: row.actorAdminId }
+          : row.actorType === 'MEMBER' && row.actorUserId
+            ? { type: 'MEMBER' as const, id: row.actorUserId }
+            : undefined;
+    if (!actor) return [];
+
+    return [
+      {
+        id: row.id,
+        fromState,
+        toState,
+        changedAt: row.createdAt,
+        actor,
+        reasonCode: typeof row.newValue?.reasonCode === 'string' ? row.newValue.reasonCode : null,
+      },
+    ];
+  });
+};
+
+const disputeCasesFor = async (questId: string): Promise<AdminDisputeCaseSummary[]> => {
+  const rows = await db
+    .select()
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.questId, questId))
+    .orderBy(asc(adminDisputeCase.createdAt), asc(adminDisputeCase.id));
+  return rows.map(summaryFromRecord);
+};
+
+export const getAdminQuestDetail = async (
+  questId: string
+): Promise<AdminQuestDetail | undefined> => {
+  const [row] = await adminQuestRows(db).where(eq(quest.id, questId));
+  if (!row) return undefined;
+
+  const [
+    conditionItems,
+    locations,
+    images,
+    timeline,
+    disputeCases,
+    candidateApplications,
+    candidateTeams,
+    assignments,
+    proofSubmissions,
+    editHistory,
+    adminActions,
+  ] = await Promise.all([
+    db
+      .select({ position: questConditionItem.position, text: questConditionItem.text })
+      .from(questConditionItem)
+      .where(eq(questConditionItem.questId, questId))
+      .orderBy(asc(questConditionItem.position)),
+    locationsFor(questId),
+    imagesFor(questId),
+    timelineFor(questId),
+    disputeCasesFor(questId),
+    applicationsFor(questId),
+    teamsFor(questId),
+    assignmentsFor(questId),
+    proofSubmissionsFor(questId),
+    editHistoryFor(questId),
+    adminActionsFor(questId),
+  ]);
+
+  return {
+    ...adminQuestSummaryFromRow(row),
+    description: row.quest.description,
+    condition: { text: row.quest.condition, items: conditionItems },
+    locations,
+    images,
+    timeline,
+    disputeCases,
+    proofRequired: row.quest.proofRequired,
+    tagId: row.quest.tagId,
+    fundingReservationId: row.quest.fundingReservationId,
+    policyRevisionId: row.quest.policyRevisionId,
+    platformFeeBps: row.quest.platformFeeBps,
+    platformFeePerWorkerSatang: row.quest.platformFeePerWorkerSatang,
+    questEscrowSatang: row.quest.questEscrowSatang,
+    cancelledAt: row.quest.cancelledAt,
+    cancelledByUserId: row.quest.cancelledByUserId,
+    cancelledByAdminId: row.quest.cancelledByAdminId,
+    hiddenByAdminId: row.quest.hiddenByAdminId,
+    candidates: { applications: candidateApplications, teams: candidateTeams },
+    assignments,
+    proofSubmissions,
+    editHistory,
+    adminActions,
+  };
+};

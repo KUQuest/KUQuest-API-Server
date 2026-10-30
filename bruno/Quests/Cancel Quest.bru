@@ -1,0 +1,28 @@
+meta {
+  name: Cancel Quest
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/cancel
+  body: none
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Cancels a Quest under 3-tier refund policy.
+  - QUEST_DRAFT: 0 satang moved
+  - QUEST_OPEN: 100% refund of Funding Reservation to Hirer's spendingBalanceSatang
+  - QUEST_ASSIGNED: 80% refund to Hirer, 20% compensation split to active Workers
+}

@@ -1,0 +1,33 @@
+meta {
+  name: Hirer Reject Proof
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/proof-submissions/{{proofSubmissionId}}/review
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "decision": "PROOF_NOT_APPROVED",
+    "reason": "ชิ้นงานยังไม่ตรงกับข้อกำหนดในบรีฟ กรุณาตรวจสอบสีเขียว KU"
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+docs {
+  Hirer rejects the submitted Proof with a mandatory reason.
+  Moves Quest to QUEST_FAILED (or rework when permitted) and sets Proof status to PROOF_NOT_APPROVED.
+}

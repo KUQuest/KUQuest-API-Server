@@ -1,5 +1,6 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import {
   quest,
@@ -8,20 +9,21 @@ import {
   questCommand,
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import { createQuestV2, type QuestV2CreateInput } from '@/modules/quest';
 import {
   assignmentStatus,
   questStatus,
   type AssignmentStatus,
   type QuestStatus,
-} from '@/modules/quest/quest.contract';
+} from '@/modules/quest/shared';
 
 import { deleteTestIdempotencyKeys } from '../wallet/wallet-test-fixtures';
 
 import { Elysia } from 'elysia';
 import { and, eq, inArray } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const workerEmail = `quest-v2-participation-worker-${crypto.randomUUID()}@ku.th`;
 const outsiderEmail = `quest-v2-participation-outsider-${crypto.randomUUID()}@ku.th`;
@@ -68,6 +70,16 @@ let workerId = '';
 let workerCookie = '';
 let outsiderCookie = '';
 const ownerId = crypto.randomUUID();
+const earlyFinisherId = crypto.randomUUID();
+const lateFinisherId = crypto.randomUUID();
+const incompleteWorkerId = crypto.randomUUID();
+const cancelledWorkerId = crypto.randomUUID();
+const teammates = [
+  { id: earlyFinisherId, firstName: 'Early', lastName: 'Finisher' },
+  { id: lateFinisherId, firstName: 'Late', lastName: 'Finisher' },
+  { id: incompleteWorkerId, firstName: 'Incomplete', lastName: 'Worker' },
+  { id: cancelledWorkerId, firstName: 'Cancelled', lastName: 'Worker' },
+];
 const adminId = crypto.randomUUID();
 const tagId = crypto.randomUUID();
 const questIds: string[] = [];
@@ -108,6 +120,7 @@ const assign = async (questId: string, status: AssignmentStatus = assignmentStat
 };
 
 const setQuestState = async (questId: string, status: QuestStatus) => {
+  const now = new Date();
   await db
     .update(quest)
     .set({
@@ -115,7 +128,7 @@ const setQuestState = async (questId: string, status: QuestStatus) => {
       // The quest_cancelled_at_check and quest_failed_at_check constraints pair each
       // terminal state with its timestamp.
       ...(status === questStatus.cancelled ? { cancelledAt: new Date() } : {}),
-      ...(status === questStatus.failed ? { failedAt: new Date() } : {}),
+      ...(status === questStatus.failed ? { failedAt: now, moneyHoldStartedAt: now } : {}),
     })
     .where(eq(quest.id, questId));
 };
@@ -140,6 +153,9 @@ beforeAll(async () => {
     firstName: 'Quest',
     lastName: 'Owner',
   });
+  await db
+    .insert(authUser)
+    .values(teammates.map((member) => ({ ...member, email: `${member.id}@ku.th` })));
   await db.insert(authAdmin).values({
     id: adminId,
     email: `${adminId}@admin.kuquest`,
@@ -161,8 +177,12 @@ afterAll(async () => {
   await db.delete(questCommand).where(inArray(questCommand.principalUserId, [workerId, ownerId]));
   await deleteTestIdempotencyKeys({ principalUserIds: [workerId, ownerId] });
   await db.delete(tag).where(eq(tag.id, tagId));
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, [workerId, ownerId]));
+  await db.delete(auditRecord).where(eq(auditRecord.actorAdminId, adminId));
   await db.delete(authAdmin).where(eq(authAdmin.id, adminId));
-  await db.delete(authUser).where(eq(authUser.id, ownerId));
+  await db
+    .delete(authUser)
+    .where(inArray(authUser.id, [ownerId, ...teammates.map(({ id }) => id)]));
 });
 
 type ParticipationBody = {
@@ -171,6 +191,7 @@ type ParticipationBody = {
     state: string;
     assignment: { status: string; startedAt: string | null };
     capabilities: { canViewOnly: boolean };
+    workers: Array<{ id: string; displayName: string }> | null;
   };
 };
 
@@ -191,6 +212,8 @@ describe('Quest v2 Participation Detail', () => {
       id: assignedQuest,
       state: 'QUEST_ASSIGNED',
       assignment: { status: 'ASSIGNMENT_ACTIVE', startedAt: null },
+      workerSettlement: null,
+      questFundingTotal: 20,
       capabilities: { canViewOnly: false },
     });
 
@@ -239,6 +262,11 @@ describe('Quest v2 Participation Detail', () => {
       id: terminalQuest,
       state,
       assignment: { status: assignment },
+      workerSettlement: {
+        status: assignment === assignmentStatus.completed ? 'PENDING' : 'NO_PAYMENT',
+        amountSatang: assignment === assignmentStatus.completed ? null : 0,
+        settledAt: null,
+      },
       capabilities: { canViewOnly: true },
     });
   });
@@ -256,6 +284,97 @@ describe('Quest v2 Participation Detail', () => {
 
     const body = (await (await getParticipation(startedQuest)).json()) as ParticipationBody;
     expect(body.data.assignment.startedAt).toBe('2030-08-26T03:30:00.000Z');
+    expect(body.data).toMatchObject({ activeWorkerCount: 1, startedWorkerCount: 1 });
+  });
+
+  it('counts started Active Workers without naming them', async () => {
+    const groupQuest = await createPublishedQuest();
+    await assign(groupQuest);
+    await db.insert(questAssignment).values({
+      questId: groupQuest,
+      workerId: ownerId,
+      assignmentStatus: assignmentStatus.active,
+      startedAt: new Date('2030-08-26T03:30:00.000Z'),
+    });
+    await setQuestState(groupQuest, questStatus.inProgress);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data).toMatchObject({ activeWorkerCount: 2, startedWorkerCount: 1 });
+    expect(body.data.assignment.startedAt).toBeNull();
+    expect(body.data.workers).toBeNull();
+  });
+
+  // Mobile #287: a GROUP + FIRST_COME_FIRST_SERVED Worker sees who worked the Quest with
+  // them. Settlement closes each early finisher's Work Chat membership, so the chat roster
+  // cannot answer this once the Quest ends; the Assignment rows can.
+  it('names every Worker who worked a GROUP + FIRST_COME_FIRST_SERVED Quest', async () => {
+    const groupQuest = await createPublishedQuest({
+      participation: 'GROUP',
+      headcount: 4,
+      questFundingTotal: 80,
+    });
+    const at = (minute: number) => new Date(Date.UTC(2030, 7, 1, 0, minute));
+    await db.insert(questAssignment).values([
+      {
+        questId: groupQuest,
+        workerId: earlyFinisherId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(1),
+      },
+      {
+        questId: groupQuest,
+        workerId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(2),
+      },
+      {
+        questId: groupQuest,
+        workerId: cancelledWorkerId,
+        assignmentStatus: assignmentStatus.cancelled,
+        createdAt: at(3),
+      },
+      {
+        questId: groupQuest,
+        workerId: incompleteWorkerId,
+        assignmentStatus: assignmentStatus.incomplete,
+        createdAt: at(4),
+      },
+      {
+        questId: groupQuest,
+        workerId: lateFinisherId,
+        assignmentStatus: assignmentStatus.completed,
+        createdAt: at(5),
+      },
+    ]);
+    await setQuestState(groupQuest, questStatus.completed);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data.workers).toEqual([
+      { id: earlyFinisherId, displayName: 'Early Finisher' },
+      { id: workerId, displayName: 'Participation Worker' },
+      { id: incompleteWorkerId, displayName: 'Incomplete Worker' },
+      { id: lateFinisherId, displayName: 'Late Finisher' },
+    ]);
+  });
+
+  it('names the current Active Workers while a GROUP + FIRST_COME_FIRST_SERVED Quest runs', async () => {
+    const groupQuest = await createPublishedQuest({
+      participation: 'GROUP',
+      headcount: 2,
+      questFundingTotal: 40,
+    });
+    await assign(groupQuest);
+    await db.insert(questAssignment).values({
+      questId: groupQuest,
+      workerId: lateFinisherId,
+      assignmentStatus: assignmentStatus.active,
+    });
+    await setQuestState(groupQuest, questStatus.inProgress);
+
+    const body = (await (await getParticipation(groupQuest)).json()) as ParticipationBody;
+    expect(body.data.workers?.map(({ id }) => id).sort()).toEqual(
+      [workerId, lateFinisherId].sort()
+    );
   });
 
   it('refuses every caller without an Assignment on the Quest', async () => {
@@ -336,21 +455,30 @@ describe('Quest v2 Participation Detail', () => {
       'capabilities',
       'condition',
       'description',
+      'dispute',
       'dueAt',
       'hasJoined',
       'headcount',
+      'hirerAvatar',
       'hirerName',
+      'hirerRedFlagged',
       'id',
       'images',
       'locations',
       'mode',
+      'moneyHold',
       'participation',
+      'pendingEditRequest',
       'proofRequired',
+      'questFundingTotal',
       'questReward',
       'startTime',
+      'startedWorkerCount',
       'state',
       'tag',
       'title',
+      'workerSettlement',
+      'workers',
     ]);
     expect(Object.keys(body.data.capabilities as object)).toEqual(['canViewOnly']);
   });

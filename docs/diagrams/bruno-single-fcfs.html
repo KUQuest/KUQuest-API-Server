@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Quadrant 1: Single + FCFS Sequence (Bruno Case Guide)</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #f5f5f5;
+        --color-paper-card: #ffffff;
+        --color-ink: #2d3142;
+        --color-muted: #4f5d75;
+        --color-soft: #7a8399;
+        --color-accent: #eb6c36;
+        --color-accent-tint: rgba(235, 108, 54, 0.08);
+        --color-rule: rgba(45, 49, 66, 0.12);
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', Georgia, serif;
+        --font-mono: 'Geist Mono', monospace;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        padding: 3rem 1.5rem;
+      }
+
+      .frame {
+        max-width: 1120px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 2.5rem;
+      }
+
+      header {
+        border-bottom: 1px solid var(--color-rule);
+        padding-bottom: 1.5rem;
+      }
+
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(2rem, 3.2vw + 1rem, 2.75rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 0.5rem;
+      }
+
+      .lead {
+        font-size: 1rem;
+        color: var(--color-muted);
+        line-height: 1.5;
+        max-width: 850px;
+      }
+
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+        padding: 0.5rem 0;
+      }
+
+      svg {
+        display: block;
+        margin: 0 auto;
+        max-width: 100%;
+        height: auto;
+      }
+
+      .cards-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 1.5rem;
+      }
+
+      @media (max-width: 860px) {
+        .cards-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .card {
+        background: var(--color-paper-card);
+        border: 1px solid var(--color-rule);
+        border-radius: 6px;
+        padding: 1.25rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .card-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+
+      .card-dot.coral {
+        background: var(--color-accent);
+      }
+      .card-dot.ink {
+        background: var(--color-ink);
+      }
+      .card-dot.muted {
+        background: var(--color-muted);
+      }
+
+      .card h3 {
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: var(--color-ink);
+      }
+
+      .card ul {
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+      }
+
+      .card li {
+        font-size: 0.8125rem;
+        color: var(--color-muted);
+        line-height: 1.45;
+      }
+
+      .card li strong {
+        color: var(--color-ink);
+      }
+
+      footer {
+        border-top: 1px solid var(--color-rule);
+        padding-top: 1rem;
+        display: flex;
+        justify-content: space-between;
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        color: var(--color-soft);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <header>
+        <p class="eyebrow">Bruno Test Case Guide · Quadrant 1</p>
+        <h1>SINGLE + FIRST_COME_FIRST_SERVED Lifecycle Sequence</h1>
+        <p class="lead">
+          Visualizing the direct join pathway: a single Worker joins directly on an open Quest, enters active assignment immediately without candidate review, completes work, and triggers automatic ledger release upon approval.
+        </p>
+      </header>
+
+      <div class="diagram-container">
+        <svg
+          role="img"
+          aria-labelledby="bruno-q1-title bruno-q1-desc"
+          viewBox="0 0 960 620"
+          width="960"
+          height="620"
+        >
+          <title id="bruno-q1-title">Quadrant 1 Single FCFS Sequence Diagram</title>
+          <desc id="bruno-q1-desc">
+            Sequence of API requests in Bruno from Quest draft creation and escrow lock to direct join, work chat, proof submission, and earnings settlement.
+          </desc>
+
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#4f5d75" />
+            </marker>
+            <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#eb6c36" />
+            </marker>
+            <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+
+          <!-- Background Paper -->
+          <rect width="100%" height="100%" fill="#f5f5f5" />
+
+          <!-- 4 Actor Lifelines -->
+          <!-- Actor 1: Hirer (x=120) -->
+          <line x1="120" y1="80" x2="120" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 2: KUQuest API (x=380) -->
+          <line x1="380" y1="80" x2="380" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 3: Worker (x=640) -->
+          <line x1="640" y1="80" x2="640" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+          <!-- Actor 4: Wallet Ledger (x=860) -->
+          <line x1="860" y1="80" x2="860" y2="540" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" />
+
+          <!-- Messages (Time flows top to bottom) -->
+          <!-- 1. Create Draft: Hirer -> API (y=112) -->
+          <line x1="120" y1="112" x2="372" y2="112" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="156" y="92" width="180" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="102" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /api/v2/quests (DRAFT)</text>
+
+          <!-- 2. Publish Quest: Hirer -> API (y=160) -->
+          <line x1="120" y1="160" x2="372" y2="160" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <rect x="160" y="140" width="172" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="150" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../publish (OPEN)</text>
+
+          <!-- 3. Lock Escrow: API -> Ledger (y=180) -->
+          <line x1="380" y1="180" x2="852" y2="180" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <rect x="548" y="160" width="136" height="14" rx="2" fill="#f5f5f5" />
+          <text x="616" y="170" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">HOLD_QUEST_ESCROW</text>
+
+          <!-- 4. Direct Join: Worker -> API (y=232) -->
+          <line x1="640" y1="232" x2="388" y2="232" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="444" y="212" width="132" height="14" rx="2" fill="#f5f5f5" />
+          <text x="510" y="222" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../join (FCFS)</text>
+
+          <!-- 5. Self-Transition & Open Chat: API internal (y=272) -->
+          <path d="M 380 260 L 416 260 A 8 8 0 0 1 424 268 L 424 276 A 8 8 0 0 1 416 284 L 388 284" stroke="#4f5d75" stroke-width="1" fill="none" marker-end="url(#arrow)" />
+          <rect x="432" y="264" width="168" height="14" rx="2" fill="#f5f5f5" />
+          <text x="516" y="274" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="start" letter-spacing="0.06em">QUEST_ASSIGNED + WORK CHAT</text>
+
+          <!-- 6. Work Chat: Worker -> Hirer (y=320) -->
+          <line x1="640" y1="320" x2="128" y2="320" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <rect x="296" y="300" width="168" height="14" rx="2" fill="#f5f5f5" />
+          <text x="380" y="310" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">CHAT MESSAGE (WEBSOCKET)</text>
+
+          <!-- 7. Submit Proof Draft: Worker -> API (y=368) -->
+          <line x1="640" y1="368" x2="388" y2="368" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="444" y="348" width="132" height="14" rx="2" fill="#f5f5f5" />
+          <text x="510" y="358" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../submit (PROOF)</text>
+
+          <!-- 8. Hirer Approve: Hirer -> API (y=416) -->
+          <line x1="120" y1="416" x2="372" y2="416" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <rect x="176" y="396" width="140" height="14" rx="2" fill="#f5f5f5" />
+          <text x="246" y="406" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../review (APPROVE)</text>
+
+          <!-- 9. Settle Escrow to Earnings: API -> Ledger (y=440) -->
+          <line x1="380" y1="440" x2="852" y2="440" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <rect x="548" y="420" width="136" height="14" rx="2" fill="#f5f5f5" />
+          <text x="616" y="430" fill="#eb6c36" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">SETTLE_REWARD_EARNINGS</text>
+
+          <!-- 10. Rating Review: Worker -> API (y=488) -->
+          <line x1="640" y1="488" x2="388" y2="488" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <rect x="448" y="468" width="124" height="14" rx="2" fill="#f5f5f5" />
+          <text x="510" y="478" fill="#7a8399" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">POST /.../reviews (5*)</text>
+
+          <!-- Actor Boxes (Top Row) -->
+          <!-- Hirer Box -->
+          <rect x="48" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="48" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="56" y="32" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="76" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
+          <text x="120" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Hirer (Student 1)</text>
+
+          <!-- KUQuest API Box -->
+          <rect x="308" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="308" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="316" y="32" width="28" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="330" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">API</text>
+          <text x="380" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">KUQuest Server</text>
+
+          <!-- Worker Box -->
+          <rect x="568" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="568" y="24" width="144" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1" />
+          <rect x="576" y="32" width="40" height="12" rx="2" fill="transparent" stroke="rgba(45,49,66,0.4)" stroke-width="0.8" />
+          <text x="596" y="41" fill="rgba(45,49,66,0.8)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CLIENT</text>
+          <text x="640" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Worker (Student 2)</text>
+
+          <!-- Ledger Box -->
+          <rect x="788" y="24" width="144" height="56" rx="6" fill="#f5f5f5" />
+          <rect x="788" y="24" width="144" height="56" rx="6" fill="rgba(235, 108, 54, 0.08)" stroke="#eb6c36" stroke-width="1.2" />
+          <rect x="796" y="32" width="44" height="12" rx="2" fill="transparent" stroke="rgba(235,108,54,0.4)" stroke-width="0.8" />
+          <text x="818" y="41" fill="#eb6c36" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">LEDGER</text>
+          <text x="860" y="58" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Wallet Subledger</text>
+
+          <!-- Legend Strip at Bottom -->
+          <line x1="32" y1="568" x2="928" y2="568" stroke="rgba(45,49,66,0.12)" stroke-width="0.8" />
+          <text x="32" y="588" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+
+          <line x1="100" y1="586" x2="132" y2="586" stroke="#4f5d75" stroke-width="1" marker-end="url(#arrow)" />
+          <text x="140" y="590" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Synchronous HTTP Command</text>
+
+          <line x1="340" y1="586" x2="372" y2="586" stroke="#eb6c36" stroke-width="1.2" marker-end="url(#arrow-accent)" />
+          <text x="380" y="590" fill="#eb6c36" font-size="9" font-family="'Geist', sans-serif">Escrow Hold / Settlement (Double-Entry)</text>
+
+          <line x1="660" y1="586" x2="692" y2="586" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#arrow)" />
+          <text x="700" y="590" fill="#4f5d75" font-size="9" font-family="'Geist', sans-serif">Asynchronous / WebSocket / Terminal</text>
+        </svg>
+      </div>
+
+      <div class="cards-grid">
+        <div class="card">
+          <p class="eyebrow">BRUNO FOLDERS</p>
+          <div class="card-header">
+            <span class="card-dot ink"></span>
+            <h3>1. Quests &amp; Join</h3>
+          </div>
+          <ul>
+            <li><code>Quests / Create Quest Draft</code>: Mode = <code>FIRST_COME_FIRST_SERVED</code>, Participation = <code>SINGLE</code>.</li>
+            <li><code>Quests / Publish Quest</code>: Locks Escrow immediately.</li>
+            <li><code>Quests / Join Quest (Worker)</code>: 1st eligible click wins.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <p class="eyebrow">BRUNO FOLDERS</p>
+          <div class="card-header">
+            <span class="card-dot ink"></span>
+            <h3>2. Chat &amp; Proof</h3>
+          </div>
+          <ul>
+            <li><code>Work-Chat / Send Message</code>: Real-time coordination.</li>
+            <li><code>Quest-Proof / Create Proof Submission Draft</code>: Prepares work description.</li>
+            <li><code>Quest-Proof / Submit Proof to Hirer</code>: Moves Quest to <code>QUEST_SUBMITTED</code>.</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <p class="eyebrow">BRUNO FOLDERS</p>
+          <div class="card-header">
+            <span class="card-dot coral"></span>
+            <h3>3. Review &amp; Payout</h3>
+          </div>
+          <ul>
+            <li><code>Quest-Proof / Hirer Approve Proof</code>: Moves to <code>QUEST_COMPLETED</code>.</li>
+            <li><strong>Settlement:</strong> Reward satang transferred from Escrow into Worker's <code>earningsBalanceSatang</code>.</li>
+            <li><code>Quest-Review / Create Rating Review</code>: Post-completion 5-star rating.</li>
+          </ul>
+        </div>
+      </div>
+
+      <footer>
+        <span>KUQuest API · Quadrant 1 Single FCFS Sequence</span>
+        <span>docs/rulebook/quest/quest-mode-matrix-contract.md</span>
+      </footer>
+    </div>
+  </body>
+</html>

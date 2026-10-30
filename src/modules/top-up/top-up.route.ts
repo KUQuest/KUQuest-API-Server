@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
@@ -29,6 +29,7 @@ export const topUpRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/top-ups`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .post('/quotes', createTopUpQuoteController, {
     body: topUpQuoteCreateSchema,
     response: responses(topUpQuoteResponseSchema, 400, 401, 409),

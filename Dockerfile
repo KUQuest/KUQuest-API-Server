@@ -55,6 +55,7 @@ COPY --chown=bun:bun tsconfig.json ./
 COPY --chown=bun:bun drizzle ./drizzle
 COPY --chown=bun:bun scripts ./scripts
 COPY --chown=bun:bun public ./public
+COPY --chown=bun:bun asyncapi.yaml ./asyncapi.yaml
 
 USER bun
 

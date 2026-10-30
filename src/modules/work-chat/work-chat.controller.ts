@@ -75,6 +75,8 @@ const mapWorkChatError = (set: AuthedContext['set'], error: unknown) => {
     error.code === 'ATTACHMENT_NOT_FOUND'
   ) {
     set.status = 404;
+  } else if (error.code === 'ATTACHMENT_DIMENSIONS_TOO_LARGE') {
+    set.status = 422;
   } else if (error.code === 'ATTACHMENT_TOO_LARGE') {
     set.status = 413;
   } else if (error.code === 'ATTACHMENT_UNSUPPORTED') {

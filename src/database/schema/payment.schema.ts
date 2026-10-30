@@ -94,6 +94,9 @@ export const paymentTopUp = pgTable(
   'payment_top_ups',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'payment_top_up_public_sequence' })
+      .unique(),
     internalReference: text('internal_reference').notNull().unique(),
     userId: uuid('user_id')
       .notNull()
@@ -367,6 +370,9 @@ export const paymentPayouts = pgTable(
   'payment_payouts',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    publicSequence: integer('public_sequence')
+      .generatedByDefaultAsIdentity({ name: 'payment_payout_public_sequence' })
+      .unique(),
     internalReference: text('internal_reference').notNull().unique(),
     userId: uuid('user_id')
       .notNull()

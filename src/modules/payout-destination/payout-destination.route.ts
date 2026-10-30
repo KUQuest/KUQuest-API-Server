@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { betterAuthSecurity, responses } from '@/shared/api-response.schema';
 
@@ -20,6 +20,7 @@ export const payoutDestinationRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/payout-destinations`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', getPayoutDestinationController, {
     response: responses(payoutDestinationResponseSchema, 401),
     detail: {

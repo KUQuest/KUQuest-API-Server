@@ -1,0 +1,20 @@
+meta {
+  name: List Conversation Messages
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/api/v1/chat/conversations/{{conversationId}}/messages?limit=20
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  Returns reverse-chronological messages for the specified Work Conversation.
+  Includes both USER messages and automated SYSTEM event logs (such as roster changes, proof submissions, and status transitions).
+}

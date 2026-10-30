@@ -1,7 +1,12 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
-import { walletLedgerAccount, walletWallet } from '@/database/schema/wallet.schema';
+import {
+  walletLedgerAccount,
+  walletLedgerPosting,
+  walletLedgerTransaction,
+  walletWallet,
+} from '@/database/schema/wallet.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import {
   createSealedLedgerTransaction,
@@ -12,7 +17,7 @@ import {
 import { encodeCursor } from '@/shared/cursor';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 const adminEmail = `admin-wallet-list-${crypto.randomUUID()}@example.com`;
 const adminPassword = 'AdminWalletPass1!';
@@ -23,6 +28,7 @@ let adminCookie = '';
 const testUserId = crypto.randomUUID();
 const testStudentId = String(Math.floor(1000000000 + Math.random() * 9000000000));
 let testWalletId = '';
+let latestLedgerTransactionAt = '';
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -31,7 +37,7 @@ const creditBalances = async (
   userId: string,
   spendingSatang: number,
   earningsSatang: number
-): Promise<void> => {
+): Promise<Date> => {
   const accounts = await db
     .select({ id: walletLedgerAccount.id, type: walletLedgerAccount.type })
     .from(walletLedgerAccount)
@@ -55,7 +61,7 @@ const creditBalances = async (
     ],
   });
 
-  await createSealedLedgerTransaction({
+  const latestTransaction = await createSealedLedgerTransaction({
     businessReference: `wallet-list-earnings:${crypto.randomUUID()}`,
     eventType: 'ADJUSTMENT',
     postings: [
@@ -63,6 +69,7 @@ const creditBalances = async (
       { accountId: suspense.id, amountSatang: signedSatang(-earningsSatang) },
     ],
   });
+  return latestTransaction.createdAt;
 };
 
 type AdminWalletListResponse = {
@@ -119,7 +126,7 @@ beforeAll(async () => {
 
   const wallet = await ensureWallet(testUserId);
   testWalletId = wallet.id;
-  await creditBalances(testUserId, 15_000, 25_000);
+  latestLedgerTransactionAt = (await creditBalances(testUserId, 15_000, 25_000)).toISOString();
 
   const adminAuth = createAdminAuth({
     allowSignUp: true,
@@ -184,6 +191,98 @@ describe('Admin Wallet Directory Integration Tests', () => {
       expect(item.balances.spendingBalanceSatang).toBe(15_000);
       expect(item.balances.earningsBalanceSatang).toBe(25_000);
       expect(item.balances.totalBalanceSatang).toBe(40_000);
+    });
+    it('returns a stable display ID and newest Ledger Transaction time', async () => {
+      const listResponse = await listWallets(new URLSearchParams({ userId: testUserId }));
+      expect(listResponse.status).toBe(200);
+      const listBody = await listResponse.json();
+      const listedWallet = listBody.data.items[0];
+
+      expect(listedWallet.id).toBe(testWalletId);
+      expect(listedWallet.displayId).toMatch(/^WLT-\d{6}$/);
+      expect(listedWallet.displayId).not.toBe(listedWallet.id);
+      expect(listedWallet.latestTransactionAt).toBe(latestLedgerTransactionAt);
+
+      const detailResponse = await app.handle(
+        new Request(`http://localhost/api/v1/admin/wallets/${testWalletId}`, {
+          headers: { cookie: adminCookie },
+        })
+      );
+      expect(detailResponse.status).toBe(200);
+      const detailBody = await detailResponse.json();
+      expect(detailBody.data.wallet.id).toBe(testWalletId);
+      expect(detailBody.data.wallet.displayId).toBe(listedWallet.displayId);
+      expect(detailBody.data.wallet.latestTransactionAt).toBe(latestLedgerTransactionAt);
+    });
+    it('uses the newest Ledger Transaction even when it is not sealed', async () => {
+      const [spending] = await db
+        .select({ id: walletLedgerAccount.id })
+        .from(walletLedgerAccount)
+        .where(
+          and(
+            eq(walletLedgerAccount.walletId, testWalletId),
+            eq(walletLedgerAccount.type, 'SPENDING')
+          )
+        );
+      const [suspense] = await db
+        .select({ id: walletLedgerAccount.id })
+        .from(walletLedgerAccount)
+        .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
+      if (!spending || !suspense) throw new Error('Ledger accounts missing');
+
+      const unsealedTransaction = await db.transaction(async (transaction) => {
+        const [created] = await transaction
+          .insert(walletLedgerTransaction)
+          .values({
+            businessReference: `wallet-list-unsealed:${crypto.randomUUID()}`,
+            eventType: 'ADJUSTMENT',
+          })
+          .returning({
+            id: walletLedgerTransaction.id,
+            createdAt: walletLedgerTransaction.createdAt,
+          });
+        if (!created) throw new Error('Ledger Transaction fixture was not created.');
+
+        await transaction.insert(walletLedgerPosting).values([
+          {
+            transactionId: created.id,
+            accountId: spending.id,
+            amountSatang: signedSatang(100),
+          },
+          {
+            transactionId: created.id,
+            accountId: suspense.id,
+            amountSatang: signedSatang(-100),
+          },
+        ]);
+        return created;
+      });
+
+      const response = await listWallets(new URLSearchParams({ userId: testUserId }));
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.items[0].latestTransactionAt).toBe(
+        unsealedTransaction.createdAt.toISOString()
+      );
+    });
+
+    it('returns null latestTransactionAt for a Wallet with no Ledger Transaction', async () => {
+      const userId = crypto.randomUUID();
+      await db.insert(authUser).values({
+        id: userId,
+        email: `${userId}@ku.th`,
+        firstName: 'EmptyWallet',
+        lastName: 'Tester',
+      });
+      const wallet = await ensureWallet(userId);
+
+      const response = await listWallets(new URLSearchParams({ userId }));
+      expect(response.status).toBe(200);
+      const body = await response.json();
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0].id).toBe(wallet.id);
+      expect(body.data.items[0].displayId).toMatch(/^WLT-\d{6}$/);
+      expect(body.data.items[0].latestTransactionAt).toBeNull();
     });
 
     it('searches user wallets by studentId', async () => {

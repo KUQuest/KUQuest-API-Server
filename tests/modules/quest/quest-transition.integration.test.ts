@@ -1,12 +1,10 @@
+import { auditRecord } from '@/database/schema/audit.schema';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
-import type { QuestWorkChatMembershipTransition } from '@/modules/quest/quest-work-chat.contract';
-import {
-  applyQuestStateTransition,
-  QuestTransitionNotAllowedError,
-} from '@/modules/quest/quest-transition.service';
+import type { QuestWorkChatMembershipTransition } from '@/modules/quest/shared';
+import { applyQuestStateTransition, QuestTransitionNotAllowedError } from '@/modules/quest/shared';
 
 import { randomUUID } from 'node:crypto';
 
@@ -44,6 +42,7 @@ const readQuest = async (questId: string) =>
         questStatus: quest.questStatus,
         version: quest.version,
         failedAt: quest.failedAt,
+        moneyHoldStartedAt: quest.moneyHoldStartedAt,
       })
       .from(quest)
       .where(eq(quest.id, questId))
@@ -102,6 +101,7 @@ describe('Quest State transition module', () => {
     await expect(
       db.transaction((transaction) =>
         applyQuestStateTransition(transaction, {
+          actor: { actorType: 'SYSTEM' },
           questId,
           from: 'QUEST_DRAFT',
           to: 'QUEST_COMPLETED',
@@ -113,12 +113,45 @@ describe('Quest State transition module', () => {
     expect(await readQuest(questId)).toMatchObject({ questStatus: 'QUEST_DRAFT', version: 1 });
   });
 
+  it('records each committed State change with its actor and reason code', async () => {
+    if (!postgresAvailable) return;
+    const questId = await createQuest('QUEST_DRAFT');
+    const now = new Date('2030-03-03T10:00:00.000Z');
+    const applied = await db.transaction((transaction) =>
+      applyQuestStateTransition(transaction, {
+        questId,
+        from: 'QUEST_DRAFT',
+        to: 'QUEST_OPEN',
+        actor: { actorType: 'SYSTEM' },
+        reasonCode: 'POLICY_REVIEW',
+
+        now,
+        workChat: [],
+      })
+    );
+    const [event] = await db.select().from(auditRecord).where(eq(auditRecord.resourceId, questId));
+
+    expect(applied).toBe(true);
+    expect(event).toMatchObject({
+      actorType: 'SYSTEM',
+      actorUserId: null,
+      actorAdminId: null,
+      action: 'QUEST_STATE_CHANGED',
+      resourceType: 'QUEST',
+      resourceId: questId,
+      oldValue: { state: 'QUEST_DRAFT' },
+      newValue: { state: 'QUEST_OPEN', reasonCode: 'POLICY_REVIEW' },
+      createdAt: now,
+    });
+  });
+
   it('closes memberships before the State write and records read-only access after it', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_IN_PROGRESS');
     const seen: { type: string; questStatus: string }[] = [];
     const applied = await db.transaction((transaction) =>
       applyQuestStateTransition(transaction, {
+        actor: { actorType: 'SYSTEM' },
         questId,
         from: 'QUEST_IN_PROGRESS',
         to: 'QUEST_FAILED',
@@ -145,7 +178,39 @@ describe('Quest State transition module', () => {
     const row = await readQuest(questId);
     expect(row.questStatus).toBe('QUEST_FAILED');
     expect(row.version).toBe(2);
-    expect(row.failedAt).not.toBeNull();
+    expect(row.failedAt).toEqual(new Date('2030-02-02T10:00:00.000Z'));
+    expect(row.moneyHoldStartedAt).toEqual(row.failedAt);
+  });
+
+  it('starts the money hold on completion only when the caller holds the remainder', async () => {
+    if (!postgresAvailable) return;
+    const now = new Date('2030-02-03T10:00:00.000Z');
+    const complete = (questId: string, holdRemainder?: boolean) =>
+      db.transaction((transaction) =>
+        applyQuestStateTransition(transaction, {
+          actor: { actorType: 'SYSTEM' },
+          questId,
+          from: 'QUEST_IN_PROGRESS',
+          to: 'QUEST_COMPLETED',
+          now,
+          holdRemainder,
+          workChat: [],
+        })
+      );
+    const heldId = await createQuest('QUEST_IN_PROGRESS');
+    const paidId = await createQuest('QUEST_IN_PROGRESS');
+
+    expect(await complete(heldId, true)).toBe(true);
+    expect(await complete(paidId)).toBe(true);
+    expect(await readQuest(heldId)).toMatchObject({
+      questStatus: 'QUEST_COMPLETED',
+      failedAt: null,
+      moneyHoldStartedAt: now,
+    });
+    expect(await readQuest(paidId)).toMatchObject({
+      questStatus: 'QUEST_COMPLETED',
+      moneyHoldStartedAt: null,
+    });
   });
 
   it('answers false and writes nothing when another transaction moved the Quest first', async () => {
@@ -153,6 +218,7 @@ describe('Quest State transition module', () => {
     const questId = await createQuest('QUEST_IN_PROGRESS');
     const applied = await db.transaction((transaction) =>
       applyQuestStateTransition(transaction, {
+        actor: { actorType: 'SYSTEM' },
         questId,
         from: 'QUEST_IN_PROGRESS',
         to: 'QUEST_FAILED',
@@ -167,6 +233,13 @@ describe('Quest State transition module', () => {
       questStatus: 'QUEST_IN_PROGRESS',
       version: 1,
       failedAt: null,
+      moneyHoldStartedAt: null,
     });
+    expect(
+      await db
+        .select({ id: auditRecord.id })
+        .from(auditRecord)
+        .where(eq(auditRecord.resourceId, questId))
+    ).toEqual([]);
   });
 });

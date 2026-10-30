@@ -2,7 +2,6 @@ import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { file } from '@/database/schema/file.schema';
 import { quest, questCommand, questImage } from '@/database/schema/quest.schema';
-import { createStagingTestAuthRoute } from '@/modules/auth';
 import {
   checkQuestV2ImageUpload,
   cleanupQuestV2ImageObjects,
@@ -14,10 +13,11 @@ import {
   retryQuestV2ImageCleanupManifests,
   type QuestV2CreateInput,
 } from '@/modules/quest';
-import { createQuest } from '@/modules/quest/quest.service';
-import type { QuestCreateInput } from '@/modules/quest/quest.schema';
-import * as questV2Service from '@/modules/quest/quest-v2.service';
-import { questStorage, questV2Storage } from '@/modules/quest/quest.storage';
+import { createQuest } from '@/modules/quest/v1';
+import type { QuestCreateInput } from '@/modules/quest/v1';
+import * as questV2Service from '@/modules/quest/v2';
+import { questStorage } from '@/modules/quest/v1';
+import { questV2Storage } from '@/modules/quest/v2';
 import {
   ImageTooLargeError,
   ImageLinkUnavailableError,
@@ -40,6 +40,8 @@ import {
   mock,
   spyOn,
 } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const hirerEmail = `quest-v2-images-${crypto.randomUUID()}@ku.th`;
 const otherMemberEmail = `quest-v2-images-other-${crypto.randomUUID()}@ku.th`;

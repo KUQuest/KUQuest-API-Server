@@ -1,303 +1,190 @@
-import { defaultLocalDatabaseUrl } from '@/config/default-database-url';
-import { db, sql } from '@/database/client';
-import { adminDisputeCase } from '@/database/schema/admin.schema';
-import { authAdmin } from '@/database/schema/auth.schema';
+/* eslint-disable no-await-in-loop -- Run seed steps and session assertions in order. */
+import { db } from '@/database/client';
+import { authAdmin, authUser } from '@/database/schema/auth.schema';
+import { quest, questImage } from '@/database/schema/quest.schema';
+import { walletLedgerTransaction } from '@/database/schema/wallet.schema';
+import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
+import { getAcademicRegistrationStatus } from '@/modules/academic-registration/academic-registration.service';
+import { getWallet, verifyWalletProjection } from '@/modules/wallet';
+import { demoMembers } from '@/shared/demo-members';
 
-import { randomUUID } from 'node:crypto';
+import { describe, expect, test } from 'bun:test';
+import { and, eq, like } from 'drizzle-orm';
 
-import { expect, test } from 'bun:test';
-import { eq } from 'drizzle-orm';
+import { demoQuests } from '../../scripts/demo-quests';
 
-import {
-  financeSeedDisputeAmountSatang,
-  financeSeedDisputeQuestTitle,
-} from '../../scripts/seed-finance-test';
-
-const financeSeedScript = `${import.meta.dir}/../../scripts/seed-finance-test.ts`;
-const stagingSeedScript = `${import.meta.dir}/../../scripts/seed-staging.ts`;
-
-test('finance seed refuses to run without the explicit safety flag', () => {
-  const result = Bun.spawnSync(['bun', financeSeedScript], {
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      DEPLOYMENT_ENV: 'development',
-      XENDIT_SECRET_KEY: 'xnd_development_test-only',
-    },
-    stderr: 'pipe',
+const runSeed = async (script: string, overrides: Record<string, string>) => {
+  const child = Bun.spawn(['bun', script], {
+    env: { ...process.env, ...overrides },
     stdout: 'pipe',
-  });
-  const output = `${result.stdout.toString()}${result.stderr.toString()}`;
-
-  expect(result.exitCode).toBe(1);
-  expect(output).toContain('Set STAGING_FINANCE_SEED_ENABLED=true');
-});
-
-test('finance seed refuses a production Xendit key', () => {
-  const result = Bun.spawnSync(['bun', financeSeedScript], {
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      DEPLOYMENT_ENV: 'development',
-      STAGING_FINANCE_SEED_ENABLED: 'true',
-      XENDIT_SECRET_KEY: 'xnd_production_test-only',
-    },
     stderr: 'pipe',
-    stdout: 'pipe',
   });
-  const output = `${result.stdout.toString()}${result.stderr.toString()}`;
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  return { exitCode, output: stdout + stderr };
+};
 
-  expect(result.exitCode).toBe(1);
-  expect(output).toContain('requires an Xendit Development API key');
-});
-
-test('finance seed refuses a development node in a production deployment', () => {
-  const result = Bun.spawnSync(['bun', financeSeedScript], {
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      DEPLOYMENT_ENV: 'production',
-      STAGING_FINANCE_SEED_ENABLED: 'true',
-      XENDIT_SECRET_KEY: 'xnd_development_test-only',
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  });
-  const output = `${result.stdout.toString()}${result.stderr.toString()}`;
-
-  expect(result.exitCode).toBe(1);
-  expect(output).toContain('allowed only in development/development or production/staging');
-});
-
-test('staging seed refuses a production deployment before running child seeds', () => {
-  const result = Bun.spawnSync(['bun', stagingSeedScript], {
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      DEPLOYMENT_ENV: 'production',
-      STAGING_FINANCE_SEED_ENABLED: 'true',
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  });
-  const output = `${result.stdout.toString()}${result.stderr.toString()}`;
-
-  expect(result.exitCode).toBe(1);
-  expect(output).toContain('allowed only in development/development or production/staging');
-});
-
-test('staging seed refuses a development node in a production deployment', () => {
-  const result = Bun.spawnSync(['bun', stagingSeedScript], {
-    env: {
-      ...process.env,
-      NODE_ENV: 'development',
-      DEPLOYMENT_ENV: 'production',
-      STAGING_FINANCE_SEED_ENABLED: 'true',
-    },
-    stderr: 'pipe',
-    stdout: 'pipe',
-  });
-  const output = `${result.stdout.toString()}${result.stderr.toString()}`;
-
-  expect(result.exitCode).toBe(1);
-  expect(output).toContain('allowed only in development/development or production/staging');
-});
-
-const ensurePostgres = async () => {
-  try {
-    await sql`select 1`;
-  } catch (cause) {
-    throw new Error(
-      'This test needs PostgreSQL. Start it with `docker compose up -d postgres`, then apply the schema with `bun run db:migrate`.',
-      { cause }
-    );
+describe('unified demo seed safety', () => {
+  for (const script of [
+    'scripts/seed-demo-users.ts',
+    'scripts/seed-demo-quests.ts',
+    'scripts/seed-staging.ts',
+  ]) {
+    test(`${script} refuses a production deployment`, async () => {
+      const result = await runSeed(script, {
+        NODE_ENV: 'production',
+        DEPLOYMENT_ENV: 'production',
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain(
+        'allowed only in development/development or production/staging'
+      );
+    });
+    test(`${script} refuses a configured production provider key`, async () => {
+      const result = await runSeed(script, {
+        NODE_ENV: 'development',
+        DEPLOYMENT_ENV: 'development',
+        XENDIT_SECRET_KEY: 'xnd_production_test-only',
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain('Xendit Development API key');
+    });
   }
-};
+});
 
-// Financial records (wallets, funding reservations, ledger entries, payouts, etc.)
-// are immutable by database retention triggers and cannot be hard-deleted.
-// Each test run uses fresh random UUID-based user emails and admin IDs, so retaining
-// these seed fixtures does not leak state across runs and avoids trigger violations.
-const cleanupFinanceTestData = async (_emails: string[] = [], _adminIds: string[] = []) => {
-  // Explicit no-op: immutable financial records must be retained per database policy.
-};
-
-// Note on test architecture and verify-staging-seed limitation:
-// scripts/verify-staging-seed.ts validates the complete staging bootstrap (including
-// all 10 demo students, demo open/completed quests, and reviews), so running
-// verify-staging-seed.ts standalone fails on missing demo fixtures in an isolated test database.
-// To keep the test fully deterministic and safe, we run the supported financeSeedScript directly
-// and assert against the exact database query contract that verify-staging-seed.ts evaluates
-// to verify the Admin Dispute case seed:
-//   - Failed Quest titled "[Finance Test] Failed Dispute Quest" with status QUEST_FAILED
-//   - Active Funding Reservation for 50,000 satang
-//   - Incomplete Assignment (ASSIGNMENT_INCOMPLETE) for the finance recipient
-//   - Admin Dispute Case with status DISPUTE_CASE_PENDING filed by the worker
-//   - Idempotent re-execution with no duplicate records
-//   - Preservation of terminal decisions (e.g., DISPUTE_CASE_DISMISSED) across re-seed runs
-//   - Zero provider network calls made
-test('finance seed prepares, idempotently reuses, and preserves terminal decisions for the Admin Dispute seed', async () => {
-  await ensurePostgres();
-
-  const runId = randomUUID();
-  const financeEmail = `finance-test-${runId}@ku.th`;
-  const createdAdminIds: string[] = [];
-  const recipientEmail = `recipient-test-${runId}@ku.th`;
-  const studentSuffix = (BigInt(`0x${runId.replace(/-/g, '').slice(0, 12)}`) % 90_000_000n)
-    .toString()
-    .padStart(8, '0');
-  const studentId = `65${studentSuffix}`;
-  const testEnv: Record<string, string> = {
-    ...process.env,
+test('one flow creates ten login-ready Members and funded v2 Quests without repeated credit', async () => {
+  const objects = new Map<string, Uint8Array>();
+  // Exercise actual signed S3 uploads over HTTP without writing demo files to a shared bucket.
+  const storage = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      if (request.method === 'PUT') {
+        objects.set(new URL(request.url).pathname, new Uint8Array(await request.arrayBuffer()));
+        return new Response(null, { status: 200, headers: { etag: '"demo-test"' } });
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  const password = process.env.STAGING_TEST_AUTH_PASSWORD ?? 'DemoPassword1!';
+  const [admin] = await db.select({ email: authAdmin.email }).from(authAdmin).limit(1);
+  const settings = {
     NODE_ENV: 'development',
     DEPLOYMENT_ENV: 'development',
-    STAGING_FINANCE_SEED_ENABLED: 'true',
     XENDIT_SECRET_KEY: 'xnd_development_test-only',
-    PAYOUT_DESTINATION_ENCRYPTION_KEY:
-      '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-    STAGING_TEST_AUTH_EMAIL: financeEmail,
-    STAGING_TEST_AUTH_PASSWORD: 'FinancePassword1!',
-    STAGING_TEST_AUTH_FIRST_NAME: 'Finance',
-    STAGING_TEST_AUTH_LAST_NAME: 'Student',
-    STAGING_TEST_AUTH_STUDENT_ID: studentId,
-    LOCAL_FINANCE_TEST_RECIPIENT_EMAIL: recipientEmail,
-    LOCAL_FINANCE_TEST_RECIPIENT_FIRST_NAME: 'Recipient',
-    LOCAL_FINANCE_TEST_RECIPIENT_LAST_NAME: 'Student',
-    BETTER_AUTH_SECRET: 'finance-seed-test-secret-at-least-32-chars-long',
-    DATABASE_URL: process.env.DATABASE_URL ?? defaultLocalDatabaseUrl,
+    STAGING_TEST_AUTH_PASSWORD: password,
+    S3_ENDPOINT: `http://127.0.0.1:${storage.port}`,
+    S3_BUCKET: 'demo-seed-test',
+    S3_ACCESS_KEY_ID: 'demo-only',
+    S3_SECRET_ACCESS_KEY: 'demo-only',
+    S3_REGION: 'us-east-1',
+    ADMIN_EMAIL: admin?.email ?? 'demo-bootstrap@ku.th',
+    ADMIN_PASSWORD: 'DemoAdminPassword1!',
+    ADMIN_FIRST_NAME: 'Demo',
+    ADMIN_LAST_NAME: 'Operator',
+    ADMIN_BETTER_AUTH_SECRET: 'demo-admin-secret-at-least-32-characters',
   };
-
-  const queryDisputeSeedContract = async () => {
-    return sql<
-      {
-        disputeCaseId: string;
-        disputeStatus: string;
-        filerUserId: string;
-        questId: string;
-        questTitle: string;
-        questStatus: string;
-        reservationId: string;
-        reservationStatus: string;
-        reservationAmountSatang: number;
-        assignmentId: string;
-        assignmentStatus: string;
-        workerId: string;
-        hirerId: string;
-      }[]
-    >`
-      SELECT
-        dispute.id AS "disputeCaseId",
-        dispute.status AS "disputeStatus",
-        dispute.filer_user_id AS "filerUserId",
-        failed_quest.id AS "questId",
-        failed_quest.title AS "questTitle",
-        failed_quest.quest_status AS "questStatus",
-        reservation.id AS "reservationId",
-        reservation.status AS "reservationStatus",
-        reservation.total_reserved_satang AS "reservationAmountSatang",
-        assignment.id AS "assignmentId",
-        assignment.assignment_status AS "assignmentStatus",
-        worker.id AS "workerId",
-        hirer.id AS "hirerId"
-      FROM admin_dispute_cases dispute
-      INNER JOIN quest failed_quest ON failed_quest.id = dispute.quest_id
-      INNER JOIN wallet_funding_reservations reservation
-        ON reservation.id = failed_quest.funding_reservation_id
-      INNER JOIN quest_assignment assignment
-        ON assignment.quest_id = failed_quest.id
-      INNER JOIN auth_user hirer ON hirer.id = failed_quest.hirer_id
-      INNER JOIN auth_user worker ON worker.id = assignment.worker_id
-      WHERE lower(hirer.email) = ${financeEmail.toLowerCase()}
-        AND lower(worker.email) = ${recipientEmail.toLowerCase()}
-        AND failed_quest.title = ${financeSeedDisputeQuestTitle}
-    `;
-  };
-
   try {
-    // 1. Initial run: seed creates failed quest, active reservation, incomplete assignment, and pending dispute case
-    const firstRun = Bun.spawnSync(['bun', financeSeedScript], {
-      env: testEnv,
-      stderr: 'pipe',
-      stdout: 'pipe',
+    const flow = await runSeed('scripts/seed-staging.ts', settings);
+    expect(flow.exitCode, flow.output).toBe(0);
+    expect(flow.output).toContain('4/4: 10 funded Published Quests');
+    const verification = await runSeed('scripts/verify-staging-seed.ts', settings);
+    expect(verification.exitCode, verification.output).toBe(0);
+    const loginApp = createStagingTestAuthRoute({
+      enabled: true,
+      deploymentEnv: 'staging',
+      password,
     });
-    const firstOutput = `${firstRun.stdout.toString()}${firstRun.stderr.toString()}`;
-
-    expect(firstRun.exitCode).toBe(0);
-    expect(firstOutput).toContain('Prepared pending Dispute Case');
-    expect(firstOutput).toContain('No provider call was made by the finance seed.');
-
-    const firstRecords = await queryDisputeSeedContract();
-    expect(firstRecords).toHaveLength(1);
-
-    const [disputeRecord] = firstRecords;
-    expect(disputeRecord.questTitle).toBe(financeSeedDisputeQuestTitle);
-    expect(disputeRecord.questStatus).toBe('QUEST_FAILED');
-    expect(disputeRecord.reservationStatus).toBe('ACTIVE');
-    expect(disputeRecord.reservationAmountSatang).toBe(financeSeedDisputeAmountSatang);
-    expect(disputeRecord.assignmentStatus).toBe('ASSIGNMENT_INCOMPLETE');
-    expect(disputeRecord.disputeStatus).toBe('DISPUTE_CASE_PENDING');
-    expect(disputeRecord.filerUserId).toBe(disputeRecord.workerId);
-
-    // 2. Idempotency run: re-running the seed reuses existing records without duplication or errors
-    const secondRun = Bun.spawnSync(['bun', financeSeedScript], {
-      env: testEnv,
-      stderr: 'pipe',
-      stdout: 'pipe',
-    });
-    const secondOutput = `${secondRun.stdout.toString()}${secondRun.stderr.toString()}`;
-
-    expect(secondRun.exitCode).toBe(0);
-    expect(secondOutput).toContain('Prepared pending Dispute Case');
-
-    const secondRecords = await queryDisputeSeedContract();
-    expect(secondRecords).toHaveLength(1);
-    expect(secondRecords[0].disputeCaseId).toBe(disputeRecord.disputeCaseId);
-    expect(secondRecords[0].questId).toBe(disputeRecord.questId);
-    expect(secondRecords[0].reservationId).toBe(disputeRecord.reservationId);
-    expect(secondRecords[0].assignmentId).toBe(disputeRecord.assignmentId);
-
-    // 3. Terminal decision preservation: re-running the seed does not overwrite resolved/dismissed dispute cases
-    const adminId = randomUUID();
-    createdAdminIds.push(adminId);
-    await db.insert(authAdmin).values({
-      id: adminId,
-      email: `admin-${runId}@ku.th`,
-      firstName: 'Finance',
-      lastName: 'Admin',
-    });
-
-    await db
-      .update(adminDisputeCase)
-      .set({
-        status: 'DISPUTE_CASE_DISMISSED',
-        resolvedByAdminId: adminId,
-        resolvedAt: new Date(),
-      })
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
-
-    const thirdRun = Bun.spawnSync(['bun', financeSeedScript], {
-      env: testEnv,
-      stderr: 'pipe',
-      stdout: 'pipe',
-    });
-    const thirdOutput = `${thirdRun.stdout.toString()}${thirdRun.stderr.toString()}`;
-
-    expect(thirdRun.exitCode).toBe(0);
-    expect(thirdOutput).toContain('Prepared pending Dispute Case');
-
-    const [persistedDispute] = await db
-      .select({
-        status: adminDisputeCase.status,
-        resolvedByAdminId: adminDisputeCase.resolvedByAdminId,
-        resolvedAt: adminDisputeCase.resolvedAt,
-      })
-      .from(adminDisputeCase)
-      .where(eq(adminDisputeCase.id, disputeRecord.disputeCaseId));
-
-    expect(persistedDispute?.status).toBe('DISPUTE_CASE_DISMISSED');
-    expect(persistedDispute?.resolvedByAdminId).toBe(adminId);
-    expect(persistedDispute?.resolvedAt).toBeInstanceOf(Date);
+    const ids: string[] = [];
+    const questIds: string[] = [];
+    const dates: number[] = [];
+    for (const [index, member] of demoMembers.entries()) {
+      const [user] = await db.select().from(authUser).where(eq(authUser.email, member.email));
+      expect(user).toBeDefined();
+      expect(user!.telephone).toBe(member.telephone);
+      expect(user!.imageFileId).toBeTruthy();
+      expect((await getAcademicRegistrationStatus(user!.id))?.completed).toBe(true);
+      const response = await loginApp.handle(
+        new Request(`http://localhost/api/staging/test-auth/sign-in/${member.key}`, {
+          method: 'POST',
+        })
+      );
+      expect(response.status).toBe(200);
+      const login = (await response.json()) as { user: { id: string; email: string } };
+      expect(login.user.id).toBe(user!.id);
+      expect(login.user.email).toBe(member.email);
+      const rows = await db
+        .select()
+        .from(quest)
+        .where(and(eq(quest.hirerId, user!.id), eq(quest.title, demoQuests[index]!.title)));
+      expect(rows).toHaveLength(1);
+      const seeded = rows[0]!;
+      expect(seeded.apiVersion).toBe('v2');
+      expect(seeded.questStatus).toBe('QUEST_OPEN');
+      expect(seeded.fundingReservationId).toBeTruthy();
+      expect(seeded.questEscrowSatang).toBe(demoQuests[index]!.fundingBaht * 100);
+      expect(seeded.startTime.getTime()).toBeGreaterThan(
+        seeded.createdAt.getTime() + 29 * 86_400_000
+      );
+      expect(seeded.dueAt!.getTime()).toBeGreaterThan(seeded.startTime.getTime());
+      const images = await db.select().from(questImage).where(eq(questImage.questId, seeded.id));
+      expect(images).toHaveLength(1);
+      const wallet = await getWallet(user!.id);
+      expect(Number(wallet.spendingBalanceSatang)).toBe(100_000);
+      expect(Number(wallet.fundingReservedSatang)).toBe(seeded.questEscrowSatang!);
+      expect((await verifyWalletProjection(wallet.id)).matches).toBe(true);
+      ids.push(user!.id);
+      questIds.push(seeded.id);
+      dates.push(seeded.dueAt!.getTime());
+    }
+    expect(new Set(ids).size).toBe(10);
+    expect(new Set(dates).size).toBe(10);
+    const before = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .where(like(walletLedgerTransaction.businessReference, 'seed:demo:%:starter:v2'));
+    const flowRetry = await runSeed('scripts/seed-staging.ts', settings);
+    expect(flowRetry.exitCode, flowRetry.output).toBe(0);
+    const memberRetry = await runSeed('scripts/seed-demo-users.ts', settings);
+    expect(memberRetry.exitCode, memberRetry.output).toBe(0);
+    const questRetry = await runSeed('scripts/seed-demo-quests.ts', settings);
+    expect(questRetry.exitCode, questRetry.output).toBe(0);
+    const after = await db
+      .select({ id: walletLedgerTransaction.id })
+      .from(walletLedgerTransaction)
+      .where(like(walletLedgerTransaction.businessReference, 'seed:demo:%:starter:v2'));
+    expect(after.map((row) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
+    for (const [index, userId] of ids.entries()) {
+      const [seeded] = await db.select().from(quest).where(eq(quest.id, questIds[index]!));
+      expect(seeded!.dueAt!.getTime()).toBe(dates[index]!);
+      expect(Number((await getWallet(userId)).spendingBalanceSatang)).toBe(100_000);
+    }
   } finally {
-    await cleanupFinanceTestData([financeEmail, recipientEmail], createdAdminIds);
+    storage.stop(true);
   }
+}, 120_000);
+
+test('debug login never creates an unseeded Member', async () => {
+  const email = `unseeded-${crypto.randomUUID()}@ku.th`;
+  const route = createStagingTestAuthRoute({
+    enabled: true,
+    deploymentEnv: 'staging',
+    email,
+    password: 'DemoPassword1!',
+    firstName: 'Missing',
+    lastName: 'Member',
+  });
+  const response = await route.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-in/account-1', { method: 'POST' })
+  );
+  expect(response.status).toBe(401);
+  expect(
+    await db.select({ id: authUser.id }).from(authUser).where(eq(authUser.email, email))
+  ).toHaveLength(0);
+  const signUp = await route.handle(
+    new Request('http://localhost/api/staging/test-auth/sign-up/email', { method: 'POST' })
+  );
+  expect(signUp.status).toBe(404);
 });

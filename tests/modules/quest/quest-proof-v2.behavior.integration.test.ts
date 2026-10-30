@@ -1,7 +1,7 @@
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { authUser } from '@/database/schema/auth.schema';
-import { adminReviewItem } from '@/database/schema/admin.schema';
+import { adminDisputeCase, adminReviewItem } from '@/database/schema/admin.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
 import { file } from '@/database/schema/file.schema';
 import { chatConversation, chatMembership } from '@/database/schema/work-chat.schema';
@@ -28,8 +28,8 @@ import {
   submitQuestV2ProofSubmission,
   type QuestTransaction,
 } from '@/modules/quest';
-import { questV2ProofStorage } from '@/modules/quest/quest-proof-v2.storage';
-import type { QuestWorkChatWriter } from '@/modules/quest/quest-work-chat.port';
+import { questV2ProofStorage } from '@/modules/quest/v2';
+import type { QuestWorkChatWriter } from '@/modules/quest/shared';
 import { createWorkChatMembershipWriter, workChatMembershipWriter } from '@/modules/work-chat';
 import {
   ensureInitialMoneyPolicy,
@@ -37,7 +37,11 @@ import {
   positiveSatang,
   reserveSpending,
 } from '@/modules/wallet';
-import { FileTooLargeError, UnsupportedFileTypeError } from '@/shared/object-storage';
+import {
+  FileDimensionsTooLargeError,
+  FileTooLargeError,
+  UnsupportedFileTypeError,
+} from '@/shared/object-storage';
 import {
   fundTestWallet,
   listTestLedgerPostings,
@@ -341,13 +345,14 @@ describe('Quest Proof Submission v2 behavior', () => {
       'POST',
       `/api/v2/quests/${questId}/proof-submissions`,
       worker.id,
-      { description: 'draft', fileIds: [firstFileId] },
+      { description: 'draft', workerMessage: 'Worker note', fileIds: [firstFileId] },
       { 'idempotency-key': 'proof-v2-behavior-create' }
     );
     expect(created.status).toBe(201);
     const createdData = (await created.json()).data as Record<string, unknown>;
     expect(createdData).toMatchObject({
       description: 'draft',
+      workerMessage: 'Worker note',
       status: null,
       visibility: 'FULL',
       fileIds: [firstFileId],
@@ -413,7 +418,12 @@ describe('Quest Proof Submission v2 behavior', () => {
       { 'idempotency-key': 'proof-v2-behavior-submit' }
     );
     expect(sent.status).toBe(200);
-    expect((await sent.json()).data.status).toBe('PROOF_PENDING');
+    const sentData = (await sent.json()).data;
+    expect(sentData.status).toBe('PROOF_PENDING');
+    expect(new Date(sentData.reviewDeadlineAt).getTime()).toBe(
+      new Date(sentData.submittedAt).getTime() + 24 * 60 * 60 * 1000
+    );
+    expect(sentData.reviewReason).toBeNull();
 
     const hirerSent = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, hirer.id);
     expect((await hirerSent.json()).data.items).toEqual([
@@ -438,6 +448,10 @@ describe('Quest Proof Submission v2 behavior', () => {
         fileIds: [],
         files: [],
         status: 'PROOF_PENDING',
+        reviewDeadlineAt: expect.any(String),
+        reviewReason: null,
+        reviewedAt: null,
+        reviewedBy: null,
       }),
     ]);
 
@@ -469,6 +483,20 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(reusedAgain.status).toBe(409);
     expect((await reusedAgain.json()).error.code).toBe('IDEMPOTENCY_KEY_REUSED');
+  });
+  it('rejects a Worker message longer than 200 characters', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest();
+    const proofFileId = await createFile(worker.id);
+
+    const result = await createQuestV2ProofSubmission(
+      worker.id,
+      questId,
+      { workerMessage: 'x'.repeat(201), fileIds: [proofFileId] },
+      `proof-v2-behavior-worker-message-too-long-${questId}`
+    );
+
+    expect(result).toEqual({ outcome: 'invalid-draft' });
   });
 
   it('lets two Workers send the same Idempotency-Key for their own proof commands', async () => {
@@ -608,6 +636,18 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(replay.status).toBe(200);
     expect(await replay.json()).toEqual(firstBody);
+    expect(firstBody.data.proof).toMatchObject({
+      reviewDeadlineAt: null,
+      reviewReason: 'The submitted work is incomplete',
+      reviewedBy: 'HIRER',
+      reviewedAt: expect.any(String),
+    });
+    for (const viewer of [worker.id, hirer.id]) {
+      const listed = await request('GET', `/api/v2/quests/${questId}/proof-submissions`, viewer);
+      expect((await listed.json()).data.items[0]).toMatchObject({
+        reviewReason: 'The submitted work is incomplete',
+      });
+    }
 
     const reused = await jsonRequest(
       'POST',
@@ -656,10 +696,58 @@ describe('Quest Proof Submission v2 behavior', () => {
         evidenceReferences: [proofFileId],
       },
     ]);
+    expect(
+      await db
+        .select({ filerUserId: adminDisputeCase.filerUserId, status: adminDisputeCase.status })
+        .from(adminDisputeCase)
+        .where(
+          and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.filerUserId, worker.id))
+        )
+    ).toEqual([]);
     expect(await readTestQuestEscrow({ ownerUserId: hirer.id, questId })).toMatchObject({
       status: 'ACTIVE',
       remainingSatang: 1_020,
     });
+  });
+  it('returns a temporary Proof file URL to an authorized Hirer', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId, proofSubmissionId, proofFileId } = await createHttpSentProof();
+    const expiresAt = new Date('2030-01-01T00:15:00.000Z');
+    const link = spyOn(questV2ProofStorage, 'linkForWithExpiry').mockReturnValue({
+      url: 'https://storage.example/proof-file',
+      expiresAt,
+    });
+
+    const response = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofFileId}`,
+      hirer.id
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      success: true,
+      data: {
+        fileId: proofFileId,
+        contentType: 'application/pdf',
+        sizeBytes: 100,
+        position: 0,
+        url: 'https://storage.example/proof-file',
+        urlExpiresAt: expiresAt.toISOString(),
+      },
+    });
+    expect(link).toHaveBeenCalledWith({
+      bucket: 'proof-v2-behavior-test',
+      objectKey: `${proofFileId}.pdf`,
+    });
+
+    const unauthorized = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions/${proofSubmissionId}/files/${proofFileId}`,
+      unrelated.id
+    );
+    expect(unauthorized.status).toBe(404);
   });
 
   it('requires a reason for a not-approved decision without changing the pending Proof', async () => {
@@ -710,6 +798,18 @@ describe('Quest Proof Submission v2 behavior', () => {
           .where(eq(questV2ProofSubmission.id, proofSubmissionId))
       )[0]?.status
     ).toBe('PROOF_APPROVED');
+    const autoApproved = await request(
+      'GET',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id
+    );
+    expect((await autoApproved.json()).data.items[0]).toMatchObject({
+      status: 'PROOF_APPROVED',
+      reviewDeadlineAt: null,
+      reviewReason: null,
+      reviewedBy: 'AUTO_APPROVE',
+      reviewedAt: expect.any(String),
+    });
     expect(
       (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
         ?.status
@@ -747,6 +847,34 @@ describe('Quest Proof Submission v2 behavior', () => {
           inArray(questAssignment.questId, [missingProof.questId, missingConfirmation.questId])
         )
     ).toEqual([{ status: 'ASSIGNMENT_INCOMPLETE' }, { status: 'ASSIGNMENT_INCOMPLETE' }]);
+  });
+
+  it('emits QUEST_FAILED and DISPUTE_WINDOW_OPENED once when dueAt fails the Quest', async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const dueAt = new Date(Date.now() - 1_000);
+    const { questId } = await createQuest({
+      startTime: new Date(dueAt.getTime() - 60 * 60 * 1000),
+      dueAt,
+    });
+    await reserveQuest(questId, 1_020);
+    const changeTypes: string[] = [];
+    let wake!: () => void;
+    let waiting = new Promise<void>((resolve) => (wake = resolve));
+    const listener = await sql.listen('kuquest_quest_updates', (payload) => {
+      const event = JSON.parse(payload) as { questId: string; changeType: string };
+      if (event.questId !== questId) return;
+      changeTypes.push(event.changeType);
+      wake();
+      waiting = new Promise<void>((resolve) => (wake = resolve));
+    });
+    try {
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(true);
+      expect(await failQuestV2AtDueAt(questId, new Date())).toBe(false);
+      while (changeTypes.length < 2) await waiting;
+      expect([...changeTypes].sort()).toEqual(['DISPUTE_WINDOW_OPENED', 'QUEST_FAILED']);
+    } finally {
+      await listener.unlisten();
+    }
   });
 
   it('reviews a valid pending Proof after another GROUP FCFS Assignment fails', async () => {
@@ -861,9 +989,9 @@ describe('Quest Proof Submission v2 behavior', () => {
     const { questId } = await createQuest();
     const upload = spyOn(questV2ProofStorage, 'upload').mockImplementation(
       async (memberId, input) => {
-        if (input.name === 'bad-one.pdf' || input.name === 'bad-three.pdf') {
-          throw new UnsupportedFileTypeError('bad file');
-        }
+        if (input.name === 'bad-one.jpg')
+          throw new FileDimensionsTooLargeError('Image dimensions must not exceed 25 megapixels');
+        if (input.name === 'bad-three.pdf') throw new UnsupportedFileTypeError('bad file');
         return {
           bucket: 'proof-v2-behavior-test',
           objectKey: `proof-submissions/${memberId}/${input.name}`,
@@ -882,7 +1010,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     form.append(
       'files',
-      new File([new Uint8Array([4, 5, 6])], 'bad-one.pdf', { type: 'application/pdf' })
+      new File([new Uint8Array([4, 5, 6])], 'bad-one.jpg', { type: 'image/jpeg' })
     );
     form.append(
       'files',
@@ -899,8 +1027,8 @@ describe('Quest Proof Submission v2 behavior', () => {
       form,
       { 'idempotency-key': 'proof-v2-behavior-partial' }
     );
-    expect(partial.status).toBe(415);
-    expect((await partial.json()).error.code).toBe('PROOF_FILE_TYPE_NOT_SUPPORTED');
+    expect(partial.status).toBe(422);
+    expect((await partial.json()).error.code).toBe('PROOF_FILE_DIMENSIONS_TOO_LARGE');
     expect(upload).toHaveBeenCalledTimes(4);
 
     const [submission] = await db
@@ -910,6 +1038,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const attachments = await db
       .select({
         fileId: questV2ProofSubmissionFile.fileId,
+        position: questV2ProofSubmissionFile.position,
         status: questV2ProofSubmissionFile.uploadStatus,
         failureCode: questV2ProofSubmissionFile.failureCode,
       })
@@ -919,6 +1048,13 @@ describe('Quest Proof Submission v2 behavior', () => {
       expect.arrayContaining([
         expect.objectContaining({ status: 'PROOF_FILE_READY', failureCode: null }),
         expect.objectContaining({
+          position: 1,
+          status: 'PROOF_FILE_FAILED',
+          fileId: null,
+          failureCode: 'PROOF_FILE_DIMENSIONS_TOO_LARGE',
+        }),
+        expect.objectContaining({
+          position: 3,
           status: 'PROOF_FILE_FAILED',
           fileId: null,
           failureCode: 'PROOF_FILE_TYPE_NOT_SUPPORTED',
@@ -930,7 +1066,7 @@ describe('Quest Proof Submission v2 behavior', () => {
     const failedRetryForm = new FormData();
     failedRetryForm.append(
       'files',
-      new File([new Uint8Array([13, 14, 15])], 'bad-one.pdf', { type: 'application/pdf' })
+      new File([new Uint8Array([13, 14, 15])], 'bad-one.jpg', { type: 'image/jpeg' })
     );
     failedRetryForm.set('retryPosition', '1');
     const failedRetry = await request(
@@ -940,7 +1076,7 @@ describe('Quest Proof Submission v2 behavior', () => {
       failedRetryForm,
       { 'idempotency-key': 'proof-v2-behavior-partial-failed-retry' }
     );
-    expect(failedRetry.status).toBe(415);
+    expect(failedRetry.status).toBe(422);
     const failedRetryAttachments = await db
       .select({
         position: questV2ProofSubmissionFile.position,
@@ -1347,6 +1483,21 @@ describe('Quest Proof Submission v2 behavior', () => {
     );
     expect(confirmed.status).toBe(200);
     expect((await confirmed.json()).data.questStatus).toBe('QUEST_COMPLETED');
+    const [stateChangeAudit] = await db
+      .select()
+      .from(auditRecord)
+      .where(
+        and(
+          eq(auditRecord.action, 'QUEST_STATE_CHANGED'),
+          eq(auditRecord.resourceType, 'QUEST'),
+          eq(auditRecord.resourceId, questId)
+        )
+      );
+    expect(stateChangeAudit).toMatchObject({
+      actorType: 'MEMBER',
+      actorUserId: worker.id,
+      newValue: { state: 'QUEST_COMPLETED' },
+    });
     expect(
       await db
         .select()

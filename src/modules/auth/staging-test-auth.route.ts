@@ -1,27 +1,13 @@
 import { env } from '@/config/env';
-import { db } from '@/database/client';
-import { authUser } from '@/database/schema/auth.schema';
-import { ensureWallet } from '@/modules/wallet';
+import { demoMembers } from '@/shared/demo-members';
 
 import { Elysia } from 'elysia';
-import { eq } from 'drizzle-orm';
 
-import { isValidAdminPassword } from './admin-auth.policy';
 import { createStudentAuth } from './auth.config';
+import { isValidAdminPassword } from './admin-auth.policy';
 
 const stagingTestAuthBasePath = '/api/staging/test-auth';
 const stagingTestAuthSignInPath = `${stagingTestAuthBasePath}/sign-in/email`;
-const stagingTestAuthDefaultSignInPath = `${stagingTestAuthBasePath}/sign-in/default`;
-const stagingTestAuthAccount1SignInPath = `${stagingTestAuthBasePath}/sign-in/account-1`;
-const stagingTestAuthAccount2SignInPath = `${stagingTestAuthBasePath}/sign-in/account-2`;
-const stagingTestAuthPaths = new Set([
-  stagingTestAuthSignInPath,
-  stagingTestAuthDefaultSignInPath,
-  stagingTestAuthAccount1SignInPath,
-  stagingTestAuthAccount2SignInPath,
-  `${stagingTestAuthBasePath}/get-session`,
-  `${stagingTestAuthBasePath}/sign-out`,
-]);
 
 type StagingTestAuthAccount = {
   email?: string;
@@ -95,124 +81,66 @@ const validateTestAuthAccount = (label: string, account: StagingTestAuthAccount)
 };
 
 export const createStagingTestAuthRoute = (options: StagingTestAuthOptions = {}) => {
-  const settings = {
-    enabled: options.enabled ?? env.stagingTestAuthEnabled,
-    deploymentEnv: options.deploymentEnv ?? env.deploymentEnv,
-    account1: {
-      email: options.email?.trim().toLowerCase() ?? env.stagingTestAuthEmail?.trim().toLowerCase(),
-      password: options.password ?? env.stagingTestAuthPassword,
-      firstName: options.firstName ?? env.stagingTestAuthFirstName,
-      lastName: options.lastName ?? env.stagingTestAuthLastName,
-    },
-    account2: {
-      email:
-        options.account2?.email?.trim().toLowerCase() ??
-        env.stagingTestAuthAccount2Email?.trim().toLowerCase(),
-      password: options.account2?.password ?? env.stagingTestAuthAccount2Password,
-      firstName: options.account2?.firstName ?? env.stagingTestAuthAccount2FirstName,
-      lastName: options.account2?.lastName ?? env.stagingTestAuthAccount2LastName,
-    },
-  };
-  const enabled = settings.enabled && settings.deploymentEnv === 'staging';
-
-  if (enabled) {
-    validateTestAuthAccount('Staging test auth', settings.account1);
-    const account2IsConfigured = Object.values(settings.account2).some(Boolean);
-    if (account2IsConfigured) validateTestAuthAccount('Staging Account 2 auth', settings.account2);
-  }
-
-  const accounts = [
-    { key: 'account-1', signInPath: stagingTestAuthAccount1SignInPath, ...settings.account1 },
-    ...(settings.account2.email
-      ? [{ key: 'account-2', signInPath: stagingTestAuthAccount2SignInPath, ...settings.account2 }]
-      : []),
-  ];
-  const account1 = accounts[0];
-  if (!account1) throw new Error('Staging test Account 1 is missing');
-  const accountBySignInPath = new Map(accounts.map((account) => [account.signInPath, account]));
-
+  const enabled =
+    (options.enabled ?? env.stagingTestAuthEnabled) &&
+    (options.deploymentEnv ?? env.deploymentEnv) === 'staging';
+  const password = options.password ?? env.stagingTestAuthPassword;
+  // Explicit account injection is used by integration fixtures. Runtime identities
+  // always come from the one demo Member catalog, never the old email/name env vars.
+  const accounts = options.email
+    ? [
+        {
+          key: 'account-1',
+          email: options.email.trim().toLowerCase(),
+          password,
+          firstName: options.firstName,
+          lastName: options.lastName,
+        },
+        ...(options.account2?.email ? [{ key: 'account-2', ...options.account2 }] : []),
+      ]
+    : demoMembers.map((member) => ({ ...member, password }));
+  if (enabled) accounts.forEach((account) => validateTestAuthAccount('Demo login', account));
+  const accountByPath = new Map(
+    accounts.map((account) => [`${stagingTestAuthBasePath}/sign-in/${account.key}`, account])
+  );
+  // Read/sign-in only: missing seeded Members fail authentication. Login never
+  // creates a Member, edits a Profile, or provisions a Wallet.
   const testAuth = createStudentAuth({
     basePath: stagingTestAuthBasePath,
     emailAndPasswordEnabled: true,
-    allowEmailSignUp: true,
+    allowEmailSignUp: false,
     autoSignIn: false,
+    provisionWalletOnCreate: false,
   });
-
-  const ensureTestStudentPromises = new Map<string, Promise<void>>();
-
-  const ensureTestStudent = async (account: (typeof accounts)[number]): Promise<void> => {
-    const existingPromise = ensureTestStudentPromises.get(account.key);
-    if (existingPromise) return existingPromise;
-
-    const promise = (async () => {
-      const existingStudent = await db
-        .select({ id: authUser.id })
-        .from(authUser)
-        .where(eq(authUser.email, account.email!))
-        .limit(1);
-
-      let studentId = existingStudent[0]?.id;
-      if (!studentId) {
-        const result = await testAuth.api.signUpEmail({
-          body: {
-            email: account.email!,
-            password: account.password!,
-            name: `${account.firstName} ${account.lastName}`,
-            firstName: account.firstName!,
-            lastName: account.lastName!,
-          },
-        });
-
-        if (!result.user) throw new Error('Staging test Student could not be created');
-        studentId = result.user.id;
-      }
-
-      await ensureWallet(studentId);
-    })();
-    ensureTestStudentPromises.set(account.key, promise);
-
-    try {
-      await promise;
-    } finally {
-      ensureTestStudentPromises.delete(account.key);
-    }
-  };
-
   const authHandler = async (request: Request): Promise<Response> => {
     const pathname = new URL(request.url).pathname;
-
-    if (!enabled || !stagingTestAuthPaths.has(pathname)) {
-      return new Response(null, { status: 404 });
-    }
-
-    if (pathname === stagingTestAuthDefaultSignInPath) {
-      if (request.method !== 'POST') return new Response(null, { status: 404 });
-
-      await ensureTestStudent(account1);
-      return testAuth.handler(defaultSignInRequest(request, account1.email!, account1.password!));
-    }
-
-    const account = accountBySignInPath.get(pathname);
+    if (!enabled) return new Response(null, { status: 404 });
+    const account =
+      pathname === `${stagingTestAuthBasePath}/sign-in/default`
+        ? accounts[0]
+        : accountByPath.get(pathname);
     if (account) {
       if (request.method !== 'POST') return new Response(null, { status: 404 });
-
-      await ensureTestStudent(account);
       return testAuth.handler(defaultSignInRequest(request, account.email!, account.password!));
     }
-
     if (pathname === stagingTestAuthSignInPath) {
+      if (request.method !== 'POST') return new Response(null, { status: 404 });
       const body = await readSignInBody(request);
-      const matchesConfiguredCredentials =
-        body?.email === account1.email && body?.password === account1.password;
-
-      if (!matchesConfiguredCredentials) return invalidCredentialsResponse();
-
-      await ensureTestStudent(account1);
+      if (
+        !accounts.some((item) => body?.email === item.email && body?.password === item.password)
+      ) {
+        return invalidCredentialsResponse();
+      }
+      return testAuth.handler(request);
     }
-
-    return testAuth.handler(request);
+    if (
+      (pathname === `${stagingTestAuthBasePath}/get-session` && request.method === 'GET') ||
+      (pathname === `${stagingTestAuthBasePath}/sign-out` && request.method === 'POST')
+    ) {
+      return testAuth.handler(request);
+    }
+    return new Response(null, { status: 404 });
   };
-
   return new Elysia({ name: 'staging-test-auth-route' }).mount(authHandler);
 };
 

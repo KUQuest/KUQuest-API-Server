@@ -1,9 +1,10 @@
 import { app } from '@/app';
 import { env } from '@/config/env';
-import { createStagingTestAuthRoute } from '@/modules/auth/staging-test-auth.route';
 
 import { Elysia } from 'elysia';
 import { beforeAll, describe, expect, it } from 'bun:test';
+
+import { createStagingTestAuthRoute } from '../../fixtures/seeded-test-auth';
 
 const testAuthApp = new Elysia({ name: 'payout-destination-test-auth' }).use(
   createStagingTestAuthRoute({

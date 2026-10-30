@@ -1,0 +1,43 @@
+meta {
+  name: Create Candidate Team
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/teams
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Idempotency-Key: {{idempotencyKey}}
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "name": "KU Creative Team",
+    "headcount": 2
+  }
+}
+
+script:pre-request {
+  bru.setVar("idempotencyKey", crypto.randomUUID());
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data) {
+    bru.setEnvVar("teamId", data.data.id);
+    if (data.data.joinCode) {
+      bru.setEnvVar("joinCode", data.data.joinCode);
+    }
+  }
+}
+
+docs {
+  Worker initiates a Candidate Team as Team Leader for a GROUP + CANDIDATE Quest.
+  Automatically receives a 24-hour Join Code and sets teamId and joinCode into the active environment.
+}

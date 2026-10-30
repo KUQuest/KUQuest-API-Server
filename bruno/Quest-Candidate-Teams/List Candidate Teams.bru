@@ -1,0 +1,19 @@
+meta {
+  name: List Candidate Teams
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}/teams
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+docs {
+  The Hirer lists all submitted Candidate Teams competing for this GROUP Quest.
+}

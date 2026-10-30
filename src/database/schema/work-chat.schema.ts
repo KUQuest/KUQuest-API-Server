@@ -16,7 +16,7 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 
-import { authUser } from './auth.schema';
+import { authAdmin, authUser } from './auth.schema';
 import { file } from './file.schema';
 import { quest, questAssignment } from './quest.schema';
 
@@ -163,6 +163,10 @@ export const chatMessage = pgTable(
     systemType: varchar('system_type', { length: 100 }),
     systemPayload: jsonb('system_payload').$type<Record<string, unknown> | null>(),
     eventId: varchar('event_id', { length: 255 }),
+    hiddenAt: time('hidden_at'),
+    hiddenByAdminId: uuid('hidden_by_admin_id').references(() => authAdmin.id, {
+      onDelete: 'restrict',
+    }),
     deletedAt: time('deleted_at'),
     retentionEligibleAt: time('retention_eligible_at'),
     createdAt: time('created_at').defaultNow().notNull(),
@@ -195,6 +199,10 @@ export const chatMessage = pgTable(
     check(
       'chat_message_deleted_time_check',
       sql`${table.deletedAt} IS NULL OR ${table.deletedAt} >= ${table.createdAt}`
+    ),
+    check(
+      'chat_message_hidden_fields_check',
+      sql`(${table.hiddenAt} IS NULL) = (${table.hiddenByAdminId} IS NULL)`
     ),
     check(
       'chat_message_retention_time_check',

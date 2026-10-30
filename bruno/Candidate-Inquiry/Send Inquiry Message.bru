@@ -1,0 +1,31 @@
+meta {
+  name: Send Inquiry Message
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/chat/candidate-inquiries/{{conversationId}}/messages
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "clientMessageId": "{{clientMessageId}}",
+    "text": "ขอสอบถามรายละเอียดเงื่อนไขเพิ่มเติมก่อนตัดสินใจสมัครครับ"
+  }
+}
+
+script:pre-request {
+  bru.setVar("clientMessageId", crypto.randomUUID());
+}
+
+docs {
+  Sends a message in the private 1-on-1 Candidate Inquiry Conversation.
+}

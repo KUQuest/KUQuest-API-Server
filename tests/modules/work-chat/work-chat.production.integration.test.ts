@@ -1,5 +1,6 @@
 import { createApp } from '@/app';
 import { db, sql } from '@/database/client';
+import { auditRecord } from '@/database/schema/audit.schema';
 import { authUser } from '@/database/schema/auth.schema';
 import { quest, questApplication, questAssignment } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
@@ -119,6 +120,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   if (!postgresAvailable) return;
+  await db.delete(auditRecord).where(inArray(auditRecord.actorUserId, [hirerId, ...workerIds]));
   await db.delete(tag).where(eq(tag.id, tagId));
   await db.delete(authUser).where(inArray(authUser.id, [hirerId, ...workerIds]));
 });

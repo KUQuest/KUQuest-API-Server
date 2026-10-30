@@ -20,7 +20,11 @@ import {
 import type { TopUp } from './top-up.service';
 import type { adminTopUpEventParamsSchema, adminTopUpParamsSchema } from './top-up.admin.schema';
 import type { AdminTopUpListQuery } from './top-up.admin.schema';
-import { listAdminTopUps } from './top-up.admin.service';
+import {
+  getAdminTopUp,
+  listAdminTopUps,
+  listAdminTopUpStatusHistory,
+} from './top-up.admin.service';
 
 type AdminTopUpParams = Static<typeof adminTopUpParamsSchema>;
 type AdminTopUpEventParams = Static<typeof adminTopUpEventParamsSchema>;
@@ -123,6 +127,31 @@ export const retryTopUpEventAdminController = async ({
   try {
     const result = await retryTopUpProviderEvent(params.eventId);
     return apiSuccess({ event: serializeTopUpProviderEvent(result) });
+  } catch (error) {
+    return mapAdminTopUpError(set, error);
+  }
+};
+
+export const getAdminTopUpController = async ({
+  params,
+  set,
+}: AdminContext & { params: AdminTopUpParams }): Promise<ApiResponse> => {
+  try {
+    return apiSuccess(await getAdminTopUp(params.topUpId));
+  } catch (error) {
+    return mapAdminTopUpError(set, error);
+  }
+};
+
+export const listAdminTopUpStatusHistoryController = async ({
+  params,
+  set,
+}: AdminContext & { params: AdminTopUpParams }): Promise<ApiResponse> => {
+  try {
+    const history = await listAdminTopUpStatusHistory(params.topUpId);
+    return apiSuccess(
+      history.map((entry) => ({ ...entry, occurredAt: entry.occurredAt.toISOString() }))
+    );
   } catch (error) {
     return mapAdminTopUpError(set, error);
   }

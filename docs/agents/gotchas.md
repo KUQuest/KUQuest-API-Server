@@ -11,6 +11,12 @@ Mistakes agents made in this repo and the rules they produced, so the same failu
 
 ## Entries
 
+### 2026-10-02 — Verify CD login checks in their production environment
+
+**What happened.** CD deployed and seeded successfully, but login verification first failed because the self-hosted runner had no `jq`, then failed on the fourth Member with HTTP 429.
+**Root cause.** Local workflow validation did not prove runner dependencies or production authentication behavior. Development tests did not exercise Better Auth's production sign-in rate limit.
+**Rule.** Run CD login verification with Bun in the validated API image. Check all 10 demo Member logins and authenticated Profile reads. Honor `Retry-After` or `X-Retry-After` for HTTP 429 with bounded retries. Test temporary and repeated HTTP 429 responses and keep HTTP 401 fatal.
+
 ### 2026-09-15 — Pin a constant revision for unversioned Admin Action resources
 
 **What happened.** When routing Admin Wallet status updates through `walletAdminActionService.executeCommand`, an implementer added an optional `expectedTimestamp?: Date` parameter with branching logic in `prepare` and `apply`. The parameter had no callers, and using `updatedAt` for the request revision would have broken idempotent replays because mutating `updatedAt` on freeze causes `ADMIN_ACTION_KEY_REUSED` on replay.

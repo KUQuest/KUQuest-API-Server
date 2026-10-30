@@ -11,6 +11,7 @@ import {
   chatReadCursor,
 } from '@/database/schema/work-chat.schema';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
+import { FileDimensionsTooLargeError } from '@/shared/object-storage';
 
 import { and, asc, desc, eq, gte, gt, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 
@@ -20,7 +21,13 @@ import {
   WorkChatAttachmentTooLargeError,
   workChatStorage,
 } from './work-chat.storage';
-import { loadMessageDetails, type MessageRow } from './work-chat.service';
+import {
+  loadMessageDetails,
+  memberCanSeeMessage,
+  toWorkChatAvatar,
+  type MessageRow,
+  type WorkChatAvatar,
+} from './work-chat.service';
 
 type CandidateInquiryDatabase = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 type MessageCursor = { sequence: number; id: string };
@@ -30,6 +37,7 @@ export class CandidateInquiryServiceError extends Error {
     readonly code:
       | 'ATTACHMENT_LINK_UNAVAILABLE'
       | 'ATTACHMENT_NOT_FOUND'
+      | 'ATTACHMENT_DIMENSIONS_TOO_LARGE'
       | 'ATTACHMENT_TOO_LARGE'
       | 'ATTACHMENT_UNSUPPORTED'
       | 'ATTACHMENT_UPLOAD_FAILED'
@@ -75,6 +83,7 @@ const getCandidateInquiryMembership = async (
       nextSequence: chatConversation.nextSequence,
       closedAt: chatConversation.closedAt,
       membershipId: chatMembership.id,
+      memberId: chatMembership.memberId,
       joinedAt: chatMembership.joinedAt,
       leftAt: chatMembership.leftAt,
     })
@@ -120,11 +129,13 @@ const messageFields = {
 const loadCandidateMessageRows = async (
   database: CandidateInquiryDatabase,
   conversationId: string,
+  membershipId: string,
   options: { limit: number; before?: MessageCursor; after?: MessageCursor }
 ): Promise<MessageRow[]> => {
   const conditions = [
     eq(chatMessage.conversationId, conversationId),
     isNull(chatMessage.deletedAt),
+    or(isNull(chatMessage.hiddenAt), eq(chatMessage.senderMembershipId, membershipId)),
   ];
   if (options.before) conditions.push(lt(chatMessage.sequence, options.before.sequence));
   if (options.after) conditions.push(gt(chatMessage.sequence, options.after.sequence));
@@ -170,6 +181,7 @@ const decodeMessageCursor = (value: string): MessageCursor => {
 const validateMessageCursor = async (
   database: CandidateInquiryDatabase,
   conversationId: string,
+  membershipId: string,
   cursor: MessageCursor
 ): Promise<void> => {
   const [message] = await database
@@ -180,7 +192,8 @@ const validateMessageCursor = async (
         eq(chatMessage.id, cursor.id),
         eq(chatMessage.conversationId, conversationId),
         eq(chatMessage.sequence, cursor.sequence),
-        isNull(chatMessage.deletedAt)
+        isNull(chatMessage.deletedAt),
+        or(isNull(chatMessage.hiddenAt), eq(chatMessage.senderMembershipId, membershipId))
       )
     )
     .limit(1);
@@ -191,6 +204,7 @@ export type CandidateInquiryParticipant = {
   id: string | null;
   role: 'HIRER' | 'PROSPECTIVE_WORKER';
   displayName: string;
+  avatar: WorkChatAvatar;
 };
 
 const loadCandidateParticipants = async (
@@ -203,9 +217,13 @@ const loadCandidateParticipants = async (
       role: chatMembership.role,
       firstName: authUser.firstName,
       lastName: authUser.lastName,
+      avatarFileId: file.id,
+      avatarBucket: file.bucket,
+      avatarObjectKey: file.objectKey,
     })
     .from(chatMembership)
     .leftJoin(authUser, eq(authUser.id, chatMembership.memberId))
+    .leftJoin(file, and(eq(authUser.imageFileId, file.id), isNull(file.deletedAt)))
     .where(
       and(
         eq(chatMembership.conversationId, conversationId),
@@ -219,6 +237,7 @@ const loadCandidateParticipants = async (
     id: row.id,
     role: row.role as CandidateInquiryParticipant['role'],
     displayName: `${row.firstName ?? ''} ${row.lastName ?? ''}`.trim() || 'Former member',
+    avatar: toWorkChatAvatar(row),
   }));
 };
 
@@ -242,8 +261,15 @@ const loadCandidateSummary = async (
   database: CandidateInquiryDatabase,
   conversation: NonNullable<Awaited<ReturnType<typeof getCandidateInquiryMembership>>>
 ): Promise<CandidateInquiry> => {
-  const [latestRow] = await loadCandidateMessageRows(database, conversation.id, { limit: 1 });
-  const latest = latestRow ? (await loadMessageDetails(database, [latestRow]))[0] : undefined;
+  const [latestRow] = await loadCandidateMessageRows(
+    database,
+    conversation.id,
+    conversation.membershipId,
+    { limit: 1 }
+  );
+  const latest = latestRow
+    ? (await loadMessageDetails(database, [latestRow], conversation.memberId!))[0]
+    : undefined;
   const [readCursor] = await database
     .select({ lastReadSequence: chatReadCursor.lastReadSequence })
     .from(chatReadCursor)
@@ -261,7 +287,11 @@ const loadCandidateSummary = async (
       and(
         eq(chatMessage.conversationId, conversation.id),
         isNull(chatMessage.deletedAt),
-        gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0)
+        gt(chatMessage.sequence, readCursor?.lastReadSequence ?? 0),
+        or(
+          isNull(chatMessage.hiddenAt),
+          eq(chatMessage.senderMembershipId, conversation.membershipId)
+        )
       )
     );
 
@@ -430,7 +460,7 @@ export const listCandidateInquiries = async (
   // keeps the exact boundary. A new Message legitimately advances the
   // aggregate, so the anchor check asserts membership only, never the time.
   const cursorAnchor = cursor
-    ? sql`(select ${lastActivityAt}, ${cursor.id}::uuid from ${chatMessage} where ${chatMessage.conversationId} = ${cursor.id} and ${chatMessage.deletedAt} is null)`
+    ? sql`(select ${lastActivityAt}, ${cursor.id}::uuid from ${chatMessage} where ${chatMessage.conversationId} = ${cursor.id} and ${chatMessage.deletedAt} is null and ${memberCanSeeMessage(db, userId)})`
     : undefined;
   const candidates = await db
     .select({ conversationId: chatMembership.conversationId })
@@ -438,7 +468,11 @@ export const listCandidateInquiries = async (
     .innerJoin(chatConversation, eq(chatConversation.id, chatMembership.conversationId))
     .leftJoin(
       chatMessage,
-      and(eq(chatMessage.conversationId, chatConversation.id), isNull(chatMessage.deletedAt))
+      and(
+        eq(chatMessage.conversationId, chatConversation.id),
+        isNull(chatMessage.deletedAt),
+        or(isNull(chatMessage.hiddenAt), eq(chatMessage.senderMembershipId, chatMembership.id))
+      )
     )
     .where(
       and(
@@ -503,10 +537,10 @@ export const listCandidateInquiryMessages = async (
     throw new CandidateInquiryServiceError('CONVERSATION_NOT_FOUND', 'Conversation not found');
   const before = options.before ? decodeMessageCursor(options.before) : undefined;
   const after = options.after ? decodeMessageCursor(options.after) : undefined;
-  if (before) await validateMessageCursor(db, conversationId, before);
-  if (after) await validateMessageCursor(db, conversationId, after);
+  if (before) await validateMessageCursor(db, conversationId, membership.membershipId, before);
+  if (after) await validateMessageCursor(db, conversationId, membership.membershipId, after);
 
-  const rows = await loadCandidateMessageRows(db, conversationId, {
+  const rows = await loadCandidateMessageRows(db, conversationId, membership.membershipId, {
     limit: options.limit,
     before,
     after,
@@ -514,7 +548,7 @@ export const listCandidateInquiryMessages = async (
   const hasMore = rows.length > options.limit;
   const selectedRows = rows.slice(0, options.limit);
   if (!after) selectedRows.reverse();
-  const items = await loadMessageDetails(db, selectedRows);
+  const items = await loadMessageDetails(db, selectedRows, userId);
   const cursorMessage = after ? selectedRows[selectedRows.length - 1] : selectedRows[0];
   return {
     items,
@@ -667,7 +701,10 @@ export const sendCandidateInquiryMessage = async (
           'The client Message identifier was used for different content'
         );
       }
-      return { message: (await loadMessageDetails(transaction, [existing]))[0]!, created: false };
+      return {
+        message: (await loadMessageDetails(transaction, [existing], userId))[0]!,
+        created: false,
+      };
     }
 
     await enforceCandidateInquiryRateLimit(
@@ -730,7 +767,10 @@ export const sendCandidateInquiryMessage = async (
       .set({ nextSequence: sql`${chatConversation.nextSequence} + 1`, updatedAt: createdAt })
       .where(eq(chatConversation.id, conversationId));
 
-    return { message: (await loadMessageDetails(transaction, [message]))[0]!, created: true };
+    return {
+      message: (await loadMessageDetails(transaction, [message], userId))[0]!,
+      created: true,
+    };
   });
 
   if (result.created) {
@@ -772,6 +812,12 @@ type CandidateInquiryAttachment = {
 };
 
 const mapAttachmentStorageError = (error: unknown): CandidateInquiryServiceError => {
+  if (error instanceof FileDimensionsTooLargeError) {
+    return new CandidateInquiryServiceError(
+      'ATTACHMENT_DIMENSIONS_TOO_LARGE',
+      'Image dimensions must not exceed 25 megapixels'
+    );
+  }
   if (error instanceof WorkChatAttachmentTooLargeError) {
     return new CandidateInquiryServiceError('ATTACHMENT_TOO_LARGE', error.message);
   }
@@ -991,7 +1037,8 @@ export const getCandidateInquiryAttachmentLink = async (
         eq(chatAttachment.conversationId, conversationId),
         eq(chatAttachment.status, 'CONSUMED'),
         isNull(chatAttachment.deletedAt),
-        isNull(chatMessage.deletedAt)
+        isNull(chatMessage.deletedAt),
+        memberCanSeeMessage(db, userId)
       )
     )
     .limit(1);
@@ -1023,7 +1070,8 @@ export const advanceCandidateInquiryReadCursor = async (
         and(
           eq(chatMessage.id, messageId),
           eq(chatMessage.conversationId, conversationId),
-          isNull(chatMessage.deletedAt)
+          isNull(chatMessage.deletedAt),
+          memberCanSeeMessage(transaction, userId)
         )
       )
       .limit(1);
@@ -1060,7 +1108,8 @@ export const advanceCandidateInquiryReadCursor = async (
         and(
           eq(chatMessage.conversationId, conversationId),
           eq(chatMessage.sequence, storedCursor?.lastReadSequence ?? message.sequence),
-          isNull(chatMessage.deletedAt)
+          isNull(chatMessage.deletedAt),
+          memberCanSeeMessage(transaction, userId)
         )
       )
       .limit(1);

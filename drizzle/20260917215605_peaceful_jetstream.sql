@@ -1,0 +1,1 @@
+ALTER TABLE "quest_v2_proof_submission" ADD COLUMN "worker_message" varchar(200);

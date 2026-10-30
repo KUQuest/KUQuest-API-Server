@@ -1,0 +1,33 @@
+meta {
+  name: Send Message
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/chat/conversations/{{conversationId}}/messages
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Cookie: {{userSessionCookie}}
+}
+
+body:json {
+  {
+    "clientMessageId": "{{clientMessageId}}",
+    "text": "สวัสดีครับ เริ่มดำเนินการตามที่ตกลงกันไว้เรียบร้อยครับ"
+  }
+}
+
+script:pre-request {
+  bru.setVar("clientMessageId", crypto.randomUUID());
+}
+
+docs {
+  Sends a text message to the Work Conversation.
+  Requires clientMessageId for idempotency and optimistic UI deduplication.
+  Broadcasts real-time events over WebSocket to active participants and updates the unread counters.
+}

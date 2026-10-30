@@ -1,4 +1,4 @@
-import { authGuard } from '@/modules/auth';
+import { authGuard, memberBanGuard } from '@/modules/auth';
 import { apiSuccessSchema, betterAuthSecurity, responses } from '@/shared/api-response.schema';
 import { API_V1_PREFIX } from '@/shared/api-version';
 import { rejectUnknownFields } from '@/shared/reject-unknown-fields';
@@ -30,6 +30,7 @@ export const portfolioRoute = new Elysia({
   prefix: `${API_V1_PREFIX}/profile/portfolio`,
 })
   .use(authGuard)
+  .use(memberBanGuard)
   .get('', listOwnPortfolio, {
     response: responses(portfolioListRespondSchema, 401),
     detail: {
@@ -43,12 +44,12 @@ export const portfolioRoute = new Elysia({
   .post('', createOwnPortfolio, {
     body: portfolioCreateSchema,
     type: 'multipart/form-data',
-    response: responses(portfolioCreateResponseSchema, 400, 401, 413, 415, 502),
+    response: responses(portfolioCreateResponseSchema, 400, 401, 413, 415, 422, 502),
     detail: {
       tags: ['Portfolio'],
       summary: 'Create a portfolio entry',
       description:
-        'Creates a portfolio entry with up to 10 images (each a valid JPEG, PNG, or WebP file up to 5 MB) and stores their file references.',
+        'Creates a portfolio entry with up to 10 images (each a valid JPEG, PNG, or WebP file up to 5 MB and 25 megapixels) and stores their file references.',
       operationId: 'createOwnPortfolio',
       security: betterAuthSecurity,
     },
@@ -83,10 +84,12 @@ export const portfolioRoute = new Elysia({
     params: portfolioImageCollectionParamSchema,
     body: portfolioImageUploadSchema,
     type: 'multipart/form-data',
-    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 422, 502),
     detail: {
       tags: ['Portfolio'],
       summary: 'Replace a portfolio image',
+      description:
+        'Replaces an image with a valid JPEG, PNG, or WebP file up to 5 MB and 25 megapixels.',
       operationId: 'replaceFirstPortfolioImage',
       security: betterAuthSecurity,
     },
@@ -95,10 +98,12 @@ export const portfolioRoute = new Elysia({
     params: portfolioImageParamSchema,
     body: portfolioImageUploadSchema,
     type: 'multipart/form-data',
-    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 502),
+    response: responses(portfolioMutationResponseSchema, 400, 401, 404, 409, 413, 415, 422, 502),
     detail: {
       tags: ['Portfolio'],
       summary: 'Replace a portfolio image',
+      description:
+        'Replaces an image with a valid JPEG, PNG, or WebP file up to 5 MB and 25 megapixels.',
       operationId: 'replacePortfolioImage',
       security: betterAuthSecurity,
     },

@@ -111,6 +111,7 @@ export const listWalletStatusHistoryAdminController = async ({
       reason: entry.reason ?? '',
       actorUserId: entry.actorUserId,
       actorAdminId: entry.actorAdminId,
+      actorDisplayName: entry.actorDisplayName,
       createdAt: entry.occurredAt.toISOString(),
     }));
     return apiSuccess({ history });

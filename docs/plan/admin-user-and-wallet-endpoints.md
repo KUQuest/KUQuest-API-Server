@@ -48,6 +48,7 @@ Lists all Member Wallets with both Spending and Earnings balances in a single re
 interface AdminWalletListResponse {
   items: Array<{
     id: string; // Wallet UUID
+    displayId: string; // e.g. WLT-000001
     userId: string; // Member UUID
     member: {
       firstName: string;
@@ -66,6 +67,7 @@ interface AdminWalletListResponse {
     };
     createdAt: string;
     updatedAt: string;
+    latestTransactionAt: string | null;
   }>;
   nextCursor: string | null;
 }
@@ -82,6 +84,7 @@ Retrieves a single wallet and its balance compartments by wallet ID.
 interface AdminWalletDetailResponse {
   wallet: {
     id: string;
+    displayId: string; // e.g. WLT-000001
     userId: string;
     member: {
       firstName: string;
@@ -101,13 +104,43 @@ interface AdminWalletDetailResponse {
     projectionMatchesLedger: boolean;
     createdAt: string;
     updatedAt: string;
+    latestTransactionAt: string | null;
   };
 }
 ```
 
-### 3.3 `GET /api/v1/admin/members`
+### 3.3 `GET /api/v1/admin/wallets/:walletId/status-history`
+
+Returns the recorded status changes for one Wallet.
+
+- **Parameters**: `walletId` (UUID)
+- **Response Data Shape**:
+
+```typescript
+interface AdminWalletStatusHistoryResponse {
+  history: Array<{
+    id: string;
+    walletId: string;
+    fromStatus: string | null;
+    toStatus: string;
+    reason: string;
+    actorUserId: string | null;
+    actorAdminId: string | null;
+    actorDisplayName: string | null;
+    createdAt: string;
+  }>;
+}
+```
+
+`actorDisplayName` contains the actor's first and last name. It is `null` when no actor is recorded.
+
+### 3.4 `GET /api/v1/admin/members`
 
 Search and list all Members on the platform for the Admin User Directory table.
+
+`displayId` is a stable Admin identifier (`MEM-######`, at least six digits). It does not replace
+the UUID `id` or KU Student ID. The migration assigns existing Members in `created_at`, then UUID
+order. New Members get IDs from the identity sequence. Gaps can occur; existing IDs do not change.
 
 - **Query Parameters**:
   - `search` (optional): string (matches name, studentId, email)
@@ -120,6 +153,7 @@ Search and list all Members on the platform for the Admin User Directory table.
 interface AdminMemberListResponse {
   items: Array<{
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;
@@ -142,7 +176,7 @@ interface AdminMemberListResponse {
 }
 ```
 
-### 3.4 `GET /api/v1/admin/members/:id`
+### 3.5 `GET /api/v1/admin/members/:id`
 
 Retrieves comprehensive details for a specific Member, including profile, wallet, and marketplace performance statistics.
 
@@ -153,6 +187,7 @@ Retrieves comprehensive details for a specific Member, including profile, wallet
 interface AdminMemberDetailResponse {
   member: {
     id: string;
+    displayId: string; // MEM-######, at least six digits
     email: string;
     firstName: string;
     lastName: string;
@@ -186,6 +221,55 @@ interface AdminMemberDetailResponse {
   };
 }
 ```
+
+### 3.6 Admin Member Profile collections
+
+These reads require an enabled Admin Session. They reject a Member Session. They use a Member UUID
+in the path, but every successful response identifies the Member by `displayId` (`MEM-######`).
+
+- `GET /api/v1/admin/members/:id/profile-tags` returns up to three Profile Tags. It uses the
+  existing derivation: the three most frequent Tags from completed Worker Assignments on
+  `QUEST_COMPLETED` Quests. The response does not need pagination.
+- `GET /api/v1/admin/members/:id/work-experiences` returns `title`, `employmentType`,
+  `organization`, `description`, `startedAt`, and `endedAt`. A null `endedAt` means that the
+  Work Experience is ongoing.
+- `GET /api/v1/admin/members/:id/certificates` returns `name`, `issuer`, `issuedAt`, and optional
+  image metadata (`contentType` and `sizeBytes`). The response does not return a storage URL,
+  bucket, object key, or secret.
+
+Work Experience and Certificate responses include `totalCount` and an opaque `nextCursor`.
+Pagination uses the shared page limits. A real empty collection returns an empty list and a zero
+`totalCount`. A missing Member returns `404 MEMBER_NOT_FOUND`. An invalid cursor returns an error.
+The cursor must belong to the requested Member's collection. A cursor from another Member returns
+`400 INVALID_CURSOR`.
+A failed read remains an error; it does not return an empty list.
+
+### 3.7 `GET /api/v1/admin/members/:id/penalty-history`
+
+This read requires an enabled Admin Session. It rejects a Member Session. The path uses the Member
+UUID. The response identifies the Member by `displayId` (`MEM-######`) and does not return record,
+source, Member, or Admin UUIDs as visible identifiers.
+
+The response includes all `memberPenaltyRecord` rows in newest-first order. Each item contains
+`ladder`, `source`, `sourceDisplayId`, `sequenceNumber`, `result`, `actor`, `reasonCode`, `createdAt`,
+`reviewRating`, `isEffectiveActiveMisconductPenalty`, and `reversal`. `actor` contains `type`
+(`ADMIN` or `SYSTEM`) and a safe `displayName`. `reversal` links the original and reversal by
+`sequenceNumber`, `result`, and `createdAt`; it does not expose a UUID. `sourceDisplayId` uses `RPT`
+for a Report Case, `CND` for a Conduct Report, and the source Review's Quest Display ID (`QST`) for
+a Review-ladder record. It is `null` when the source record is not available.
+
+`confirmedMisconductCount` counts original `MISCONDUCT` records from Report Cases and Conduct
+Reports created on or after Member creation. It includes `PENALTY_EXEMPT` originals and originals
+with a linked reversal. It excludes `PENALTY_REVERSAL` rows. `effectiveActiveMisconductPenaltyCount`
+counts only non-exempt, unreversed original Misconduct records created on or after Member creation.
+`reviewLadderRecordCount` counts original `REVIEW` records separately; Review-ladder records never
+increase `confirmedMisconductCount`. These values come from `memberPenaltyRecord`, not current
+Member status or average rating.
+
+`limit` uses the shared page limit (1–50). `cursor` is Member-scoped. `totalCount` covers every
+penalty record, including reversals, and is not limited to the current page. Empty history returns
+zero counts, an empty `items` list, and a null `nextCursor`. A missing Member returns
+`404 MEMBER_NOT_FOUND`; a cursor from another Member returns `400 INVALID_CURSOR`.
 
 ---
 

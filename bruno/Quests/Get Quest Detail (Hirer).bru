@@ -1,0 +1,27 @@
+meta {
+  name: Get Quest Detail (Hirer)
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/v2/quests/{{questId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: {{userSessionCookie}}
+}
+
+script:post-response {
+  const data = res.getBody();
+  if (data && data.success && data.data && data.data.version) {
+    bru.setEnvVar("questVersion", data.data.version);
+  }
+}
+
+docs {
+  Returns the complete Hirer-scoped projection of the Quest including financial breakdown, conditions, images, and candidates/assignments.
+  Updates questVersion in the environment on success.
+}
