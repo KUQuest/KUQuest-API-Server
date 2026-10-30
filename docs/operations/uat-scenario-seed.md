@@ -22,9 +22,9 @@ All timestamps are the run time. Real Xendit records cannot be backdated.
 ## Guards
 
 The seed runs only in `development`, or in `production/uat` with
-`UAT_SEED_CONFIRM='seed UAT scenario data'`. It needs an `xnd_development_` key. The same
-confirmation lets only this process use Xendit payment simulation on UAT; the running API
-process never sets it, so the HTTP simulate route stays closed on UAT.
+`UAT_SEED_CONFIRM='seed UAT scenario data'`. It needs an `xnd_development_` key. The running
+UAT API also opens the HTTP simulate route (`POST /api/v1/top-ups/{id}/simulate`) whenever it
+runs with an `xnd_development_` key, so UAT testers can complete Top-ups from the app.
 
 ## Run on UAT
 

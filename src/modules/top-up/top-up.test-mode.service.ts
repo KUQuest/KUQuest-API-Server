@@ -27,11 +27,9 @@ export class TopUpTestModeError extends Error {
 /** Exact value a UAT scenario seed process sets; the running UAT API never sets it. */
 export const uatSeedConfirmation = 'seed UAT scenario data';
 
-const isUatSeedProcess = (): boolean =>
-  env.deploymentEnv === 'uat' && process.env.UAT_SEED_CONFIRM === uatSeedConfirmation;
-
+/** UAT testers complete Top-ups through the simulate route; production never qualifies. */
 export const topUpTestSimulationIsEnabled = (): boolean =>
-  (isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv) || isUatSeedProcess()) &&
+  (isFinanceTestRuntime(env.nodeEnv, env.deploymentEnv) || env.deploymentEnv === 'uat') &&
   env.xenditSecretKey?.startsWith('xnd_development_') === true;
 
 const providerErrorPayload = async (response: Response): Promise<string> => {

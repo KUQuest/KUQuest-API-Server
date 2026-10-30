@@ -24,21 +24,11 @@ afterEach(() => {
 describe('UAT Top-up simulation gate', () => {
   const uat = { nodeEnv: 'production', deploymentEnv: 'uat', xenditSecretKey: 'xnd_development_x' };
 
-  test('stays closed for the running UAT API', () => {
+  test('opens for the running UAT API with a Development key', () => {
     Object.assign(env, uat);
     delete process.env.UAT_SEED_CONFIRM;
-    expect(topUpTestSimulationIsEnabled()).toBe(false);
-  });
-
-  test('opens only for a confirmed UAT seed process with a Development key', () => {
-    Object.assign(env, uat);
-    process.env.UAT_SEED_CONFIRM = uatSeedConfirmation;
     expect(topUpTestSimulationIsEnabled()).toBe(true);
 
-    process.env.UAT_SEED_CONFIRM = 'yes';
-    expect(topUpTestSimulationIsEnabled()).toBe(false);
-
-    process.env.UAT_SEED_CONFIRM = uatSeedConfirmation;
     Object.assign(env, { xenditSecretKey: 'xnd_production_x' });
     expect(topUpTestSimulationIsEnabled()).toBe(false);
   });
