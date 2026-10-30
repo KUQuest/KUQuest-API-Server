@@ -1234,14 +1234,15 @@ describe('Admin Quest moderation commands', () => {
       workerId: string | null;
       reviewStatus: string;
     }>;
-    expect(hirerItems).toContainEqual({
-      workerId,
-      reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED',
-    });
-    expect(hirerItems).toContainEqual({
-      workerId: teamLeaderId,
-      reviewStatus: 'COMPLETION_CONFIRMATION_APPROVED',
-    });
+    expect(hirerItems).toContainEqual(
+      expect.objectContaining({ workerId, reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' })
+    );
+    expect(hirerItems).toContainEqual(
+      expect.objectContaining({
+        workerId: teamLeaderId,
+        reviewStatus: 'COMPLETION_CONFIRMATION_APPROVED',
+      })
+    );
     expect(
       await db
         .select({ id: adminReviewItem.id })

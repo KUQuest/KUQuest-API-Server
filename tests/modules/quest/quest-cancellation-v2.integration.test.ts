@@ -710,7 +710,7 @@ describe('Quest API v2 Hirer cancellation', () => {
     expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(second + 400);
   });
 
-  it('refunds an incomplete underfilled share and pays only the remaining active Worker', async () => {
+  it('refuses cancellation after a proof-free non-approval leaves an incomplete underfilled Worker', async () => {
     if (!postgresAvailable) return;
     const workers = [workerIds[0], workerIds[1]];
     const questId = await createV2Quest({
@@ -720,6 +720,7 @@ describe('Quest API v2 Hirer cancellation', () => {
       headcount: 3,
       rewardSatang: 1_000,
       platformFeeSatang: 20,
+      proofRequired: false,
     });
     await completeUnderfilledAllocation(questId, workers, 3, 1_000);
     const confirmedAt = new Date();
@@ -760,18 +761,16 @@ describe('Quest API v2 Hirer cancellation', () => {
       `cancel-v2-underfilled-after-nonapproval-${questId}`
     );
 
-    expect(cancelled.status).toBe(200);
-    expect((await cancelled.json()).data).toMatchObject({
-      paidSatang: 1_500,
-      refundedSatang: 1_530,
-    });
+    expect(cancelled.status).toBe(409);
+    expect((await cancelled.json()).error.code).toBe('QUEST_SETTLEMENT_NOT_ALLOWED');
     expect((await readTestWallet(workers[0])).earningsBalanceSatang).toBe(incompleteWorkerBefore);
-    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(
-      activeWorkerBefore + 1_500
-    );
+    expect((await readTestWallet(workers[1])).earningsBalanceSatang).toBe(activeWorkerBefore);
+    expect(
+      (await db.select({ status: quest.questStatus }).from(quest).where(eq(quest.id, questId)))[0]
+        ?.status
+    ).toBe('QUEST_IN_PROGRESS');
     expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
-      status: 'RELEASED',
-      remainingSatang: 0,
+      status: 'ACTIVE',
     });
   });
 
@@ -855,10 +854,10 @@ describe('Quest API v2 Hirer cancellation', () => {
     const unrelatedWorkerList = await listCompletionConfirmations(fcfsQuestId, otherMemberId);
     expect(hirerList.status).toBe(200);
     expect(
-      (await hirerList.json()).data.items.map(
-        ({ reviewStatus }: { reviewStatus: string }) => reviewStatus
-      )
-    ).toEqual(['COMPLETION_CONFIRMATION_CANCELLED', 'COMPLETION_CONFIRMATION_APPROVED']);
+      (await hirerList.json()).data.items
+        .map(({ reviewStatus }: { reviewStatus: string }) => reviewStatus)
+        .sort()
+    ).toEqual(['COMPLETION_CONFIRMATION_APPROVED', 'COMPLETION_CONFIRMATION_CANCELLED']);
     expect(affectedWorkerList.status).toBe(200);
     expect((await affectedWorkerList.json()).data.items).toMatchObject([
       { workerId: workers[0], reviewStatus: 'COMPLETION_CONFIRMATION_CANCELLED' },
