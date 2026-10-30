@@ -419,6 +419,10 @@ _Avoid_: Report Case, Admin override
 A review opened by the Hirer, a Worker, or an Admin acting for a Worker, within a fixed window after a Failed Quest, that may redirect part of the Hirer's returned settlement to a Worker. It does not reopen or change the Quest State, and never reclaims a Reward already transferred to a Worker. Actors, timing, and decision rules are defined in `docs/rulebook/admin/admin-rulebook.md`.
 _Avoid_: Admin Review Item, `QUEST_DISPUTED`
 
+**Team Dispute Case**:
+A Dispute Case that the Team Leader files for a failed `GROUP + CANDIDATE` Quest. It covers every team member. After an Admin approves an amount, the Team Leader splits that amount in basis points among all team members, the Team Leader included, within 24 hours; the Server splits equally if the deadline passes, then pays each member. See `docs/adr/0036-team-dispute-case-payout-split.md`.
+_Avoid_: a Dispute Case per team member, Team Reward Allocation (that splits a successful Reward).
+
 **Terminal Quest**:
 A Quest in `QUEST_COMPLETED`, `QUEST_CANCELLED`, or
 `QUEST_FAILED`. Its Work Conversation is read-only for Members, but the

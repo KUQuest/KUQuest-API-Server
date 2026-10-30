@@ -68,7 +68,7 @@ Follow the context pointer for the Admin branch being planned or implemented:
 - **Admin managing other Admins**: Enabling or disabling other Admin accounts is out of scope.
 - **Candidate Team member reporting**: A ghosting teammate on `GROUP + CANDIDATE` cannot be reported individually; only the Team Leader carries duties under `CONDUCT_ABANDONED`.
 - **No Conduct Report appeal**: A `CONDUCT_REPORT_UPHELD` decision has no restore path. An Admin may remove its effective penalty through the separate Remove Penalty action without changing the source decision.
-- **Insufficient Hirer balance risk**: When a Dispute Case resolves after the 7-day money hold has released funds, insufficient Hirer balance fails the transfer as an accepted operational risk.
+- **Insufficient Hirer balance risk**: When a Dispute Case resolves after the 7-day money hold has released funds, insufficient Hirer balance fails the transfer as an accepted operational risk. For a team Dispute Case the failure does not reject the Admin decision: the confirmed split stays unpaid and the worker retries (ADR 0036).
 - **Hidden Message retention hold**: A `REPORT_CASE_HIDDEN` case never auto-closes, retaining evidence indefinitely.
 - **Failed Quest Dispute boundary**: Cancelled Quests have no Dispute Case path; Dispute Cases only redirect money from Hirer to Worker.
 

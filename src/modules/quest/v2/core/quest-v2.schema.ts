@@ -674,23 +674,54 @@ export const questV2MoneyHoldSchema = t.Nullable(
   )
 );
 
+const questV2DisputeCaseViewSchema = t.Object({
+  id: t.String({ format: 'uuid' }),
+  displayId: t.String(),
+  status: t.String(),
+  createdAt: t.String({ format: 'date-time' }),
+});
+
+export const questV2DisputeTeamSplitSchema = t.Object({
+  disputeCaseId: t.String({ format: 'uuid' }),
+  status: t.Union([t.Literal('AWAITING_SPLIT'), t.Literal('SPLIT_CONFIRMED'), t.Literal('PAID')]),
+  splitSource: t.Nullable(t.Union([t.Literal('LEADER'), t.Literal('AUTO_EQUAL')])),
+  approvedAmountSatang: t.Integer({ minimum: 1 }),
+  deadlineAt: t.String({ format: 'date-time' }),
+  confirmedAt: t.Nullable(t.String({ format: 'date-time' })),
+  paidAt: t.Nullable(t.String({ format: 'date-time' })),
+  paymentPending: t.Boolean(),
+  viewerIsLeader: t.Boolean(),
+  canSubmitSplit: t.Boolean(),
+  members: t.Array(
+    t.Object({
+      memberId: t.String({ format: 'uuid' }),
+      displayName: t.String(),
+      isLeader: t.Boolean(),
+      percentageBasisPoints: t.Nullable(t.Integer({ minimum: 0, maximum: 10000 })),
+      amountSatang: t.Nullable(t.Integer({ minimum: 0 })),
+      paidAt: t.Nullable(t.String({ format: 'date-time' })),
+    })
+  ),
+});
+
 export const questV2DisputeSchema = t.Nullable(
   t.Object(
     {
       canFile: t.Boolean(),
       windowEndsAt: t.Nullable(t.String({ format: 'date-time' })),
-      myCase: t.Nullable(
-        t.Object({
-          id: t.String({ format: 'uuid' }),
-          displayId: t.String(),
-          status: t.String(),
-          createdAt: t.String({ format: 'date-time' }),
-        })
-      ),
+      viewerRole: t.Union([
+        t.Literal('HIRER'),
+        t.Literal('TEAM_LEADER'),
+        t.Literal('TEAM_MEMBER'),
+        t.Literal('WORKER'),
+      ]),
+      myCase: t.Nullable(questV2DisputeCaseViewSchema),
+      teamCase: t.Nullable(questV2DisputeCaseViewSchema),
+      teamSplit: t.Nullable(questV2DisputeTeamSplitSchema),
     },
     {
       description:
-        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. canFile is the Server decision for the self-file window. myCase is the caller’s own Dispute Case only.',
+        'The caller’s Dispute view. Null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot. canFile is the Server decision for the self-file window; it is false for a Candidate Team member who is not the Team Leader. viewerRole tells the app which screen to show: the TEAM_LEADER files the one Dispute Case for the whole team and confirms the split, a TEAM_MEMBER only reads. myCase is the caller’s own Dispute Case. teamCase is the Candidate Team’s case, shown to every Team member. teamSplit is null until an Admin approves the team case; then it shows the split state, and canSubmitSplit is true only for the Leader before the 24-hour deadline.',
     }
   )
 );

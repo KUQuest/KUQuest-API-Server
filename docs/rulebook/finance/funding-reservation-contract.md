@@ -36,4 +36,4 @@ Every operation creates an immutable audit row in `wallet_funding_reservation_op
 - When a Quest becomes `QUEST_FAILED`, unpaid funding is **not** released immediately to ordinary Spending Balance.
 - The Quest's Funding Reservation remains `ACTIVE` for **7 days** with the returned funds as `remainingSatang`.
 - **Purpose**: Enables post-failure Proof approvals (which settle directly from this held reservation) and Dispute Case resolutions (which redirect funds from this held reservation).
-- **Auto-release**: Exactly 7 days after failure, a background job releases any remaining funds to the Hirer's `SPENDING` balance.
+- **Auto-release**: Exactly 7 days after failure, a background job releases any remaining funds to the Hirer's `SPENDING` balance. The job skips a Quest that has an unpaid team Dispute Case split, until the split is paid (ADR 0036).
