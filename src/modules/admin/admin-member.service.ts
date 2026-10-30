@@ -278,12 +278,15 @@ export const listAdminMemberPenaltyHistory = async (
   const anchor = { time: memberPenaltyRecord.createdAt, id: memberPenaltyRecord.id };
   await assertMemberProfileCollectionCursor(cursor, anchor, where, 'Penalty History');
 
-  const originalMisconduct = sql<boolean>`
+  const misconductRecord = sql<boolean>`
     ${memberPenaltyRecord.ladder} = 'MISCONDUCT'
     AND ${memberPenaltyRecord.source} IN ('REPORT_CASE', 'CONDUCT_REPORT', 'ADMIN')
     AND ${memberPenaltyRecord.result} <> 'PENALTY_REVERSAL'
-    AND ${memberPenaltyRecord.recalculationOfRecordId} IS NULL
     AND ${memberPenaltyRecord.createdAt} >= ${member.createdAt.toISOString()}::timestamptz
+  `;
+  const originalMisconduct = sql<boolean>`
+    ${misconductRecord}
+    AND ${memberPenaltyRecord.recalculationOfRecordId} IS NULL
   `;
   const hasPenaltyReversal = exists(
     db
@@ -291,8 +294,9 @@ export const listAdminMemberPenaltyHistory = async (
       .from(adminMemberPenaltyReversal)
       .where(eq(adminMemberPenaltyReversal.reversalOfRecordId, memberPenaltyRecord.id))
   );
+  // Replacement records from a Remove recalculation count as strikes.
   const effectiveActiveMisconduct = sql<boolean>`
-    ${originalMisconduct}
+    ${misconductRecord}
     AND ${memberPenaltyRecord.result} <> 'PENALTY_EXEMPT'
     AND ${not(hasPenaltyReversal)}
   `;
