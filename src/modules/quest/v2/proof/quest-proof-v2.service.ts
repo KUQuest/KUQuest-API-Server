@@ -1362,6 +1362,13 @@ export const createQuestV2ProofSubmission = async (
         ) {
           return { kind: 'rejected', rejection: 'invalid-draft' };
         }
+        const existing = await submissionForOwner(transaction, questId, checks.owner);
+        if (
+          existing &&
+          (existing.submissionStatus !== null || existing.submittedByUserId !== memberId)
+        ) {
+          return { kind: 'rejected', rejection: 'already-exists' };
+        }
         const preparedFiles = await prepareFileIds(
           transaction,
           memberId,
@@ -1371,8 +1378,13 @@ export const createQuestV2ProofSubmission = async (
         );
         if ('outcome' in preparedFiles)
           return { kind: 'rejected', rejection: preparedFiles.outcome };
-        const existing = await submissionForOwner(transaction, questId, checks.owner);
-        if (existing) return { kind: 'rejected', rejection: 'already-exists' };
+        // A create replaces the submitter's own unsent Draft, so a client that lost
+        // track of a Draft (for example after a rejected file) can always start again.
+        if (existing) {
+          await transaction
+            .delete(questV2ProofSubmission)
+            .where(eq(questV2ProofSubmission.id, existing.id));
+        }
 
         const readyStoredFiles = await persistStoredFiles(
           transaction,

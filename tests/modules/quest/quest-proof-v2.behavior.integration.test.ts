@@ -1522,7 +1522,57 @@ describe('Quest Proof Submission v2 behavior', () => {
     ).toBe('ASSIGNMENT_COMPLETED');
   });
 
-  it('uses first-commit-wins for concurrent Draft commands', async () => {
+  it("replaces the submitter's unsent Draft on create and refuses a create after send", async () => {
+    if (!postgresAvailable || !proofSchemaAvailable) return;
+    const { questId } = await createQuest();
+    const first = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      { description: 'lost draft' },
+      { 'idempotency-key': `proof-v2-behavior-replace-first-${questId}` }
+    );
+    expect(first.status).toBe(201);
+    const firstId = ((await first.json()).data as { id: string }).id;
+
+    const proofFileId = await createFile(worker.id);
+    const replacement = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      { description: 'replacement draft', fileIds: [proofFileId] },
+      { 'idempotency-key': `proof-v2-behavior-replace-second-${questId}` }
+    );
+    expect(replacement.status).toBe(201);
+    const replacementData = (await replacement.json()).data as { id: string; description: string };
+    expect(replacementData.id).not.toBe(firstId);
+    expect(replacementData.description).toBe('replacement draft');
+    const rows = await db
+      .select()
+      .from(questV2ProofSubmission)
+      .where(eq(questV2ProofSubmission.questId, questId));
+    expect(rows.map(({ id }) => id)).toEqual([replacementData.id]);
+
+    const sent = await request(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions/${replacementData.id}/submit`,
+      worker.id,
+      undefined,
+      { 'idempotency-key': `proof-v2-behavior-replace-send-${questId}` }
+    );
+    expect(sent.status).toBe(200);
+    const afterSend = await jsonRequest(
+      'POST',
+      `/api/v2/quests/${questId}/proof-submissions`,
+      worker.id,
+      { description: 'after send' },
+      { 'idempotency-key': `proof-v2-behavior-replace-after-send-${questId}` }
+    );
+    expect(afterSend.status).toBe(409);
+    expect((await afterSend.json()).error.code).toBe('PROOF_SUBMISSION_ALREADY_EXISTS');
+  });
+
+  it('serializes concurrent Draft creates into one Draft', async () => {
     if (!postgresAvailable || !proofSchemaAvailable) return;
     const { questId } = await createQuest();
     const responses = await Promise.all([
@@ -1541,7 +1591,7 @@ describe('Quest Proof Submission v2 behavior', () => {
         { 'idempotency-key': 'proof-v2-behavior-concurrent-second' }
       ),
     ]);
-    expect(responses.map(({ status }) => status).sort()).toEqual([201, 409]);
+    expect(responses.map(({ status }) => status)).toEqual([201, 201]);
     expect(
       await db
         .select()
