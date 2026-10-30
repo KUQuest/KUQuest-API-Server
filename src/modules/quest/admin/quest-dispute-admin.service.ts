@@ -13,6 +13,7 @@ import {
   proofSubmissionImage,
   quest,
   questAssignment,
+  questCandidateTeamV2Member,
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
@@ -31,12 +32,7 @@ import {
   type AdminActionCommandInput,
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
-import {
-  MoneyDomainError,
-  positiveSatang,
-  settleDisputeCase,
-  type WalletTransaction,
-} from '@/modules/wallet';
+import { positiveSatang, settleDisputeCase, type WalletTransaction } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 import {
@@ -51,6 +47,13 @@ import { and, asc, count, desc, eq, or, sql } from 'drizzle-orm';
 import { isMoneyHoldOpen, moneyHoldDurationMs } from '../shared';
 import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { notifyQuestUpdate } from '../v2/realtime';
+import {
+  fullDisputeAmountSatang,
+  openTeamDisputeSplit,
+  readSelectedTeam,
+  readTeamDisputeSplit,
+  type TeamDisputeSplitView,
+} from './quest-dispute-team-split.service';
 import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
 import {
   disputeAdminActionCatalog,
@@ -115,10 +118,11 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_NOT_PENDING'
     | 'DISPUTE_CASE_QUEST_NOT_FAILED'
     | 'DISPUTE_CASE_WORKER_NOT_ASSIGNED'
+    | 'DISPUTE_CASE_ASSIGNMENT_COMPLETED'
     | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
-    | 'DISPUTE_CASE_AMOUNT_REQUIRED'
+    | 'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD'
     | 'DISPUTE_CASE_WINDOW_EXPIRED'
     | 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED'
     | 'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED'
@@ -136,6 +140,8 @@ export type AdminDisputeCaseSummary = {
   displayId: string;
   questId: string;
   filerUserId: string;
+  /** The selected Candidate Team a team-leader filing covers; null otherwise. */
+  teamId: string | null;
   openedByAdminId: string | null;
   status: DisputeCaseStatus;
   category: DisputeCaseCategory | null;
@@ -263,6 +269,7 @@ export const summaryFromRecord = (
   displayId: formatDisputeDisplayId(record.publicSequence),
   questId: record.questId,
   filerUserId: record.filerUserId,
+  teamId: record.teamId,
   openedByAdminId: record.openedByAdminId,
   status: record.status,
   category: record.category,
@@ -359,9 +366,36 @@ export const createAdminDisputeCaseInTransaction = async (
       'An Admin may open a Dispute Case only on behalf of a Worker.'
     );
   }
+  let filingTeamId: string | null = null;
   if (input.filerUserId !== currentQuest.hirerId) {
+    const team = await readSelectedTeam(transaction, input.questId);
+    if (team) {
+      const [membership] = await transaction
+        .select({ memberId: questCandidateTeamV2Member.memberId })
+        .from(questCandidateTeamV2Member)
+        .where(
+          and(
+            eq(questCandidateTeamV2Member.teamId, team.id),
+            eq(questCandidateTeamV2Member.memberId, input.filerUserId)
+          )
+        )
+        .limit(1);
+      if (!membership) {
+        throw new AdminDisputeCaseError(
+          'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+          'The filer did not hold an Assignment on this Quest.'
+        );
+      }
+      if (team.leaderId !== input.filerUserId) {
+        throw new AdminDisputeCaseError(
+          'DISPUTE_CASE_TEAM_LEADER_ONLY',
+          'Only the Candidate Team Leader may file a Dispute Case for the team.'
+        );
+      }
+      filingTeamId = team.id;
+    }
     const [assignment] = await transaction
-      .select({ id: questAssignment.id })
+      .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
       .from(questAssignment)
       .where(
         and(
@@ -376,6 +410,12 @@ export const createAdminDisputeCaseInTransaction = async (
         'The filer did not hold an Assignment on this Quest.'
       );
     }
+    if (assignment.status === 'ASSIGNMENT_COMPLETED') {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_ASSIGNMENT_COMPLETED',
+        'The filer already received the Quest Reward, so the filer has nothing to dispute.'
+      );
+    }
     if (await isSelectedTeamMemberOnly(transaction, input.questId, input.filerUserId)) {
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_TEAM_LEADER_ONLY',
@@ -388,6 +428,7 @@ export const createAdminDisputeCaseInTransaction = async (
     ? await transaction
         .update(adminDisputeCase)
         .set({
+          teamId: filingTeamId,
           category: input.category,
           submittedDetail: input.submittedDetail,
           filerStatement: existing.filerStatement ?? input.filerStatement ?? null,
@@ -408,6 +449,7 @@ export const createAdminDisputeCaseInTransaction = async (
           questId: input.questId,
           filerUserId: input.filerUserId,
           openedByAdminId: input.openedByAdminId,
+          teamId: filingTeamId,
           category: input.category,
           submittedDetail: input.submittedDetail,
           filerStatement: input.filerStatement ?? null,
@@ -1036,26 +1078,6 @@ const assertResolutionInput = (input: ResolveAdminDisputeCaseInput) => {
       'Unsupported Dispute Case outcome.'
     );
   }
-  if (!input.workerId) {
-    throw new AdminDisputeCaseError(
-      'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
-      'A resolved Dispute Case must name a Worker.'
-    );
-  }
-  if (input.amountSatang === undefined) {
-    throw new AdminDisputeCaseError(
-      'DISPUTE_CASE_AMOUNT_REQUIRED',
-      'A resolved Dispute Case must include a positive Satang amount.'
-    );
-  }
-  try {
-    positiveSatang(input.amountSatang);
-  } catch (error) {
-    if (error instanceof MoneyDomainError) {
-      throw new AdminDisputeCaseError('DISPUTE_CASE_AMOUNT_REQUIRED', error.message);
-    }
-    throw error;
-  }
 };
 
 const resolveAdminDisputeCaseInTransaction = (
@@ -1149,13 +1171,26 @@ const resolveAdminDisputeCaseInTransaction = (
             return summaryResultInTransaction(transaction, updated.id);
           }
 
+          // A team case pays the whole Candidate Team: the Leader on record stands for it.
+          const recipientWorkerId = current.teamId ? current.filerUserId : input.workerId;
+          if (
+            !recipientWorkerId ||
+            (current.teamId && input.workerId && input.workerId !== recipientWorkerId)
+          ) {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
+              current.teamId
+                ? 'A team Dispute Case is decided for the Team Leader who filed it.'
+                : 'A resolved Dispute Case must name a Worker.'
+            );
+          }
           const [assignment] = await transaction
-            .select({ id: questAssignment.id })
+            .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
             .from(questAssignment)
             .where(
               and(
                 eq(questAssignment.questId, current.questId),
-                eq(questAssignment.workerId, input.workerId!)
+                eq(questAssignment.workerId, recipientWorkerId)
               )
             )
             .limit(1);
@@ -1165,6 +1200,12 @@ const resolveAdminDisputeCaseInTransaction = (
               'The named Worker did not hold an Assignment on this Quest.'
             );
           }
+          if (assignment.status === 'ASSIGNMENT_COMPLETED') {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_ASSIGNMENT_COMPLETED',
+              'The named Worker already received the Quest Reward.'
+            );
+          }
           if (!currentQuest.fundingReservationId) {
             throw new AdminDisputeCaseError(
               'DISPUTE_CASE_RESERVATION_NOT_FOUND',
@@ -1172,19 +1213,51 @@ const resolveAdminDisputeCaseInTransaction = (
             );
           }
 
-          const settlement = await settleDisputeCase(transaction, {
-            ownerUserId: currentQuest.hirerId,
+          // An Admin chooses no amount: a resolved case takes all the hold can still pay.
+          const fullAmountSatang = await fullDisputeAmountSatang(transaction, {
+            disputeCaseId: current.id,
+            questId: current.questId,
+            hirerId: currentQuest.hirerId,
             reservationId: currentQuest.fundingReservationId,
-            settlementReference: `dispute-case:${current.id}`,
-            recipientUserId: input.workerId!,
-            requestedAmountSatang: positiveSatang(input.amountSatang!),
           });
+          if (fullAmountSatang <= 0) {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD',
+              'The Quest hold has no money left to pay.'
+            );
+          }
+          let resolvedAmountSatang: number;
+          if (current.teamId) {
+            resolvedAmountSatang = positiveSatang(fullAmountSatang);
+            const opened = await openTeamDisputeSplit(transaction, {
+              disputeCase: current,
+              hirerId: currentQuest.hirerId,
+              reservationId: currentQuest.fundingReservationId,
+              approvedAmountSatang: resolvedAmountSatang,
+              now,
+            });
+            if (opened === 'exceeds-hold') {
+              throw new AdminDisputeCaseError(
+                'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD',
+                'The approved amount is more than the Quest hold can still pay.'
+              );
+            }
+          } else {
+            const settlement = await settleDisputeCase(transaction, {
+              ownerUserId: currentQuest.hirerId,
+              reservationId: currentQuest.fundingReservationId,
+              settlementReference: `dispute-case:${current.id}`,
+              recipientUserId: recipientWorkerId,
+              requestedAmountSatang: positiveSatang(fullAmountSatang),
+            });
+            resolvedAmountSatang = settlement.recipientAmountSatang;
+          }
           const [updated] = await transaction
             .update(adminDisputeCase)
             .set({
               status: 'DISPUTE_CASE_RESOLVED',
-              resolvedWorkerId: input.workerId,
-              resolvedAmountSatang: settlement.recipientAmountSatang,
+              resolvedWorkerId: recipientWorkerId,
+              resolvedAmountSatang,
               resolvedByAdminId: input.adminId,
               resolvedAt: now,
               version: sql`${adminDisputeCase.version} + 1`,
@@ -1209,7 +1282,7 @@ const resolveAdminDisputeCaseInTransaction = (
             .where(
               or(
                 eq(walletWallet.userId, currentQuest.hirerId),
-                eq(walletWallet.userId, input.workerId!)
+                eq(walletWallet.userId, recipientWorkerId)
               )
             )
             .orderBy(asc(walletWallet.id));
@@ -1271,10 +1344,25 @@ export const resolveAdminDisputeCase = async (
   return { ...result.result, resourceSummary, outcome: input.outcome };
 };
 
+export type QuestDisputeViewerRole = 'HIRER' | 'TEAM_LEADER' | 'TEAM_MEMBER' | 'WORKER';
+
+type QuestDisputeCaseView = {
+  id: string;
+  displayId: string;
+  status: DisputeCaseStatus;
+  createdAt: Date;
+};
+
 export type QuestDisputeSummary = {
   canFile: boolean;
   windowEndsAt: Date | null;
-  myCase: { id: string; displayId: string; status: DisputeCaseStatus; createdAt: Date } | null;
+  /** Which Dispute screen the app shows: the Team Leader files and splits, a Member only reads. */
+  viewerRole: QuestDisputeViewerRole;
+  myCase: QuestDisputeCaseView | null;
+  /** The Candidate Team's case, visible to every Team member; null for any other Quest. */
+  teamCase: QuestDisputeCaseView | null;
+  /** The split state after the Admin approves a team case; null before that. */
+  teamSplit: TeamDisputeSplitView | null;
 };
 
 /**
@@ -1305,7 +1393,7 @@ export const readQuestDisputeSummary = async (
     viewerId === row.hirerId
       ? [undefined]
       : await db
-          .select({ id: questAssignment.id })
+          .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
           .from(questAssignment)
           .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
           .limit(1);
@@ -1313,21 +1401,56 @@ export const readQuestDisputeSummary = async (
     assignment !== undefined && (await isSelectedTeamMemberOnly(db, questId, viewerId));
   const endsAt = new Date(row.moneyHoldStartedAt.getTime() + disputeFilingWindowMs(false));
   const open = now.getTime() <= endsAt.getTime();
+  const team = await db.transaction((transaction) => readSelectedTeam(transaction, questId));
+  const [teamMembership] = team
+    ? await db
+        .select({ memberId: questCandidateTeamV2Member.memberId })
+        .from(questCandidateTeamV2Member)
+        .where(
+          and(
+            eq(questCandidateTeamV2Member.teamId, team.id),
+            eq(questCandidateTeamV2Member.memberId, viewerId)
+          )
+        )
+        .limit(1)
+    : [undefined];
+  const viewerRole: QuestDisputeViewerRole =
+    viewerId === row.hirerId
+      ? 'HIRER'
+      : team && teamMembership
+        ? team.leaderId === viewerId
+          ? 'TEAM_LEADER'
+          : 'TEAM_MEMBER'
+        : 'WORKER';
+  const caseView = (record: typeof adminDisputeCase.$inferSelect): QuestDisputeCaseView => ({
+    id: record.id,
+    displayId: formatDisputeDisplayId(record.publicSequence),
+    status: record.status,
+    createdAt: record.createdAt,
+  });
+  const [teamCaseRecord] =
+    team && teamMembership
+      ? await db
+          .select()
+          .from(adminDisputeCase)
+          .where(and(eq(adminDisputeCase.questId, questId), eq(adminDisputeCase.teamId, team.id)))
+          .limit(1)
+      : [undefined];
+  const split =
+    team && teamMembership ? await readTeamDisputeSplit(viewerId, questId, now) : undefined;
   return {
     canFile:
       open &&
       !existing &&
+      viewerRole !== 'TEAM_MEMBER' &&
       !teamMemberOnly &&
-      (viewerId === row.hirerId || assignment !== undefined),
+      (viewerId === row.hirerId ||
+        (assignment !== undefined && assignment.status !== 'ASSIGNMENT_COMPLETED')),
     windowEndsAt: open ? endsAt : null,
-    myCase: existing
-      ? {
-          id: existing.id,
-          displayId: formatDisputeDisplayId(existing.publicSequence),
-          status: existing.status,
-          createdAt: existing.createdAt,
-        }
-      : null,
+    viewerRole,
+    myCase: existing ? caseView(existing) : null,
+    teamCase: teamCaseRecord ? caseView(teamCaseRecord) : null,
+    teamSplit: split && !('outcome' in split) ? split : null,
   };
 };
 

@@ -49,6 +49,7 @@ import {
   readQuestDisputeSummary,
   readQuestMoneyHold,
 } from '../../admin/quest-dispute-admin.service';
+import { serializeTeamDisputeSplit } from '../../admin/quest-dispute-team-split.service';
 import type { QuestV2PublishCheck } from './quest-v2.publish.policy';
 import type {
   questV2CreateResponseSchema,
@@ -574,15 +575,19 @@ const serializeMoneyHold = async (viewerId: string, questId: string) => {
   return hold ? { ...hold, releasesAt: hold.releasesAt.toISOString() } : null;
 };
 
+const serializeDisputeCase = <T extends { createdAt: Date }>(record: T | null) =>
+  record ? { ...record, createdAt: record.createdAt.toISOString() } : null;
+
 const serializeDispute = async (viewerId: string, questId: string) => {
   const dispute = await readQuestDisputeSummary(viewerId, questId);
   if (!dispute) return null;
   return {
     canFile: dispute.canFile,
     windowEndsAt: dispute.windowEndsAt?.toISOString() ?? null,
-    myCase: dispute.myCase
-      ? { ...dispute.myCase, createdAt: dispute.myCase.createdAt.toISOString() }
-      : null,
+    viewerRole: dispute.viewerRole,
+    myCase: serializeDisputeCase(dispute.myCase),
+    teamCase: serializeDisputeCase(dispute.teamCase),
+    teamSplit: dispute.teamSplit ? serializeTeamDisputeSplit(dispute.teamSplit) : null,
   };
 };
 

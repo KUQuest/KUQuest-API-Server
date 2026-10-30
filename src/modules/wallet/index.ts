@@ -26,6 +26,7 @@ export {
   getEffectiveFundingReservationPolicy,
   increaseFundingReservation,
   platformFeeForReservation,
+  readDisputeFundsAvailable,
   readFundingReservation,
   readRecipientFundingSettlement,
   releaseFundingReservation,
@@ -34,6 +35,7 @@ export {
   settleFundingReservation,
 } from './wallet.funding.service';
 export type {
+  DisputeFundsAvailable,
   FundingCapacityInput,
   IncreaseFundingReservationInput,
   PlatformFeeForReservationInput,

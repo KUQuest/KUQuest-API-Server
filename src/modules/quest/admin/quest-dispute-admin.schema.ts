@@ -114,7 +114,13 @@ export const adminDisputeResolveDecisionBodySchema = t.Object(
     reasonCode: adminDisputeResolveReasonCodeSchema,
     decisionReasonText: adminDecisionReasonTextSchema,
     workerId: t.Optional(t.String({ format: 'uuid' })),
-    amountSatang: t.Optional(t.Integer({ minimum: 1, maximum: 2_000_000_000 })),
+    amountSatang: t.Optional(
+      t.Integer({
+        minimum: 1,
+        maximum: 2_000_000_000,
+        description: 'Ignored. A resolved case takes all that the Quest hold can still pay.',
+      })
+    ),
   },
   { additionalProperties: false }
 );
@@ -129,6 +135,7 @@ export const adminDisputeSummarySchema = t.Object({
   displayId: t.String(),
   questId: t.String({ format: 'uuid' }),
   filerUserId: t.String({ format: 'uuid' }),
+  teamId: t.Nullable(t.String({ format: 'uuid' })),
   openedByAdminId: t.Nullable(t.String({ format: 'uuid' })),
   status: disputeCaseStatusSchema,
   category: t.Nullable(disputeCaseCategorySchema),

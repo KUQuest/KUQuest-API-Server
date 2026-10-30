@@ -8,12 +8,28 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 
 ## Structural constraints
 
-- **Multiple filers**: A Quest may have more than one Dispute Case, at most one per filer (the Hirer, or a Worker who held an Assignment on that Quest).
+- **Multiple filers**: A Quest may have more than one Dispute Case, at most one per filer (the Hirer, or a Worker who held an Assignment on that Quest). On a `GROUP + CANDIDATE` Quest the only Worker filer is the Team Leader (see Team Dispute Case).
 - **Candidate Team filer**: In `GROUP + CANDIDATE`, only the Team Leader can file for the Team, because the Team has one outcome. The Server refuses a teammate's filing with `403 DISPUTE_CASE_TEAM_LEADER_ONLY`, also when an Admin opens the case on that teammate's behalf.
+- **Paid Worker filer**: A Worker whose Assignment is `ASSIGNMENT_COMPLETED` already received the Quest Reward. That Worker cannot file a Dispute Case. The Server refuses the filing with `409 DISPUTE_CASE_ASSIGNMENT_COMPLETED`, also when an Admin opens the case on that Worker's behalf, and `canFile` is `false`. An Admin cannot name that Worker as the recipient of a decision (the same code).
 - **Per-Quest shared cap**: The total Satang redirected across all of a Quest's Dispute Cases must never exceed what remains in that Quest's held Funding Reservation. The cap starts as the amount returned to the Hirer at failure settlement and shrinks if a post-failure Proof approval settles a Reward first.
 - **One-way money flow**: Money moves exclusively Hirer &rarr; Worker. A Dispute Case can never reclaim a Reward already transferred directly to a Worker before the Quest failed.
 - **Failed Quest scope**: A `QUEST_CANCELLED` Quest has no Dispute Case path.
 - **Partial result scope**: A `GROUP + FIRST_COME_FIRST_SERVED` Quest that ends as `QUEST_COMPLETED` with at least one `ASSIGNMENT_INCOMPLETE` Assignment also has a Dispute Case path. It follows the same rules as `QUEST_FAILED`. Every window and hold in this contract starts when the Quest becomes terminal (`QUEST_COMPLETED` or `QUEST_FAILED`). The returning funding is not in the hold before that time, so a Dispute Case cannot redirect it earlier.
+
+## Team Dispute Case (`GROUP + CANDIDATE`)
+
+See [ADR 0036](../../adr/0036-team-dispute-case-payout-split.md).
+
+- **One filer**: Only the Team Leader of the selected Candidate Team files the Dispute Case for the whole team. The case stores the `teamId` and covers every team member. A team member who is not the Team Leader cannot file (`DISPUTE_CASE_TEAM_LEADER_ONLY`). An Admin who opens a case for the team uses the Team Leader as the filer. The filing windows do not change.
+- **Admin decision**: For a team case, `DISPUTE_CASE_RESOLVED` approves all that the hold can still pay after the other unpaid team approvals of the Quest. If nothing is left, the decision fails with `DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`. The decision moves no money. The case records the Team Leader as `resolvedWorkerId`.
+- **Split deadline**: The Team Leader has 24 hours after the decision to confirm the split.
+- **Split content**: The split lists every team member, the Team Leader included, once. Each share is an integer in basis points (0 to 10000), and the shares total 10000. A confirmed split is immutable and its command is idempotent.
+- **Rounding**: Each amount rounds down. The remaining Satang go one by one to the largest fractional remainders. A tie goes to the earlier team member. The amounts total the approved amount exactly.
+- **No split in time**: The Server splits the amount equally with the same rounding and pays.
+- **Payment**: After the split is confirmed, the Server pays each member with one Wallet Dispute settlement. The settlement reference is `dispute-team-split:{allocationId}:{memberId}`. The Server stores the Ledger Transaction id and `paidAt` on the member row as payment evidence. A member with 0 Satang has no payment.
+- **Hold and balance check**: Before the first payment, the Server checks that the hold can pay the whole split. After the hold released, it checks the remaining Quest cap and the Hirer's Spending Balance. If the check fails, nobody is paid. The split stays confirmed with a `paymentFailureCode` and the worker retries.
+- **Hold pause**: The day-7 hold release skips a Quest that has an unpaid team split.
+- **Visibility**: The Quest `dispute` object has `viewerRole`, `teamCase`, and `teamSplit`. `canFile` is false for a `TEAM_MEMBER`. `GET` and `POST /api/v1/quests/:questId/disputes/team-split` read and confirm the split. Only team members can read it.
 
 ## Filing windows
 
@@ -45,14 +61,14 @@ The filing `category` is separate from the Admin decision `reasonCode`. The cate
 - When a Quest becomes `QUEST_FAILED`, or becomes `QUEST_COMPLETED` with at least one `ASSIGNMENT_INCOMPLETE` Assignment, the returned funding is held for **7 days** in the Quest's Funding Reservation (kept `ACTIVE` with remaining Satang), not released as ordinary Spending Balance.
 - The hold includes the returning Platform Fee; the reservation is not split.
 - Post-failure Proof approvals settle from this held reservation.
-- The hold releases automatically and unconditionally 7 days after `QUEST_FAILED`.
+- The hold releases automatically 7 days after `QUEST_FAILED`. The only pause is an unpaid team split (see Team Dispute Case).
 - If a Dispute Case resolves after the hold has released, funds come from the Hirer's Spending Balance; if insufficient, the transfer fails.
 
 ## Decision and settlement
 
 - Admin resolves a Dispute Case as:
   - `DISPUTE_CASE_DISMISSED`: No money movement; case closes.
-  - `DISPUTE_CASE_RESOLVED`: An explicit positive Satang amount is redirected to the named Worker's Earnings Balance as a reversing Ledger Transaction.
+  - `DISPUTE_CASE_RESOLVED`: The Server redirects all that the Quest hold can still pay, the returned Platform Fee included, to the named Worker's Earnings Balance as a reversing Ledger Transaction. The Admin does not choose an amount, and the Server ignores `amountSatang`. A later case on the same Quest with nothing left fails with `DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`.
 - Each decision requires a controlled `reasonCode` and a non-blank `Idempotency-Key`.
 - An Admin may also provide an optional `decisionReasonText` of 1 to 200 characters with at least one non-whitespace character.
 - The note is stored separately on the immutable Admin Action and is visible only to enabled Admins through the Activity Log. It does not replace `reasonCode` or appear in Member notifications.
