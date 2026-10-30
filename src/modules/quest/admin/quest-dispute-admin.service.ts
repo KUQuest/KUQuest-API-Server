@@ -122,6 +122,7 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_NOT_PENDING'
     | 'DISPUTE_CASE_QUEST_NOT_FAILED'
     | 'DISPUTE_CASE_WORKER_NOT_ASSIGNED'
+    | 'DISPUTE_CASE_ASSIGNMENT_COMPLETED'
     | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
@@ -399,7 +400,7 @@ export const createAdminDisputeCaseInTransaction = async (
       filingTeamId = team.id;
     }
     const [assignment] = await transaction
-      .select({ id: questAssignment.id })
+      .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
       .from(questAssignment)
       .where(
         and(
@@ -412,6 +413,12 @@ export const createAdminDisputeCaseInTransaction = async (
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
         'The filer did not hold an Assignment on this Quest.'
+      );
+    }
+    if (assignment.status === 'ASSIGNMENT_COMPLETED') {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_ASSIGNMENT_COMPLETED',
+        'The filer already received the Quest Reward, so the filer has nothing to dispute.'
       );
     }
     if (await isSelectedTeamMemberOnly(transaction, input.questId, input.filerUserId)) {
@@ -1182,7 +1189,7 @@ const resolveAdminDisputeCaseInTransaction = (
             );
           }
           const [assignment] = await transaction
-            .select({ id: questAssignment.id })
+            .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
             .from(questAssignment)
             .where(
               and(
@@ -1195,6 +1202,12 @@ const resolveAdminDisputeCaseInTransaction = (
             throw new AdminDisputeCaseError(
               'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
               'The named Worker did not hold an Assignment on this Quest.'
+            );
+          }
+          if (assignment.status === 'ASSIGNMENT_COMPLETED') {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_ASSIGNMENT_COMPLETED',
+              'The named Worker already received the Quest Reward.'
             );
           }
           if (!currentQuest.fundingReservationId) {
@@ -1371,7 +1384,7 @@ export const readQuestDisputeSummary = async (
     viewerId === row.hirerId
       ? [undefined]
       : await db
-          .select({ id: questAssignment.id })
+          .select({ id: questAssignment.id, status: questAssignment.assignmentStatus })
           .from(questAssignment)
           .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
           .limit(1);
@@ -1422,7 +1435,8 @@ export const readQuestDisputeSummary = async (
       !existing &&
       viewerRole !== 'TEAM_MEMBER' &&
       !teamMemberOnly &&
-      (viewerId === row.hirerId || assignment !== undefined),
+      (viewerId === row.hirerId ||
+        (assignment !== undefined && assignment.status !== 'ASSIGNMENT_COMPLETED')),
     windowEndsAt: open ? endsAt : null,
     viewerRole,
     myCase: existing ? caseView(existing) : null,
