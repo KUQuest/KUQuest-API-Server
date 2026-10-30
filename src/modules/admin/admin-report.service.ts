@@ -70,11 +70,9 @@ import {
   desc,
   eq,
   exists,
-  gt,
   inArray,
   isNotNull,
   isNull,
-  lt,
   or,
   sql,
 } from 'drizzle-orm';
@@ -117,8 +115,6 @@ export type ReportCaseOutcome =
   'REPORT_CASE_DISMISSED' | 'REPORT_CASE_HIDDEN' | 'REPORT_CASE_RESTORED';
 
 const adminActionService = createAdminActionService(reportAdminActionCatalog);
-const maxEvidenceContextMessages = 3;
-const evidenceProbeLimit = maxEvidenceContextMessages + 1;
 
 const conductReportReasonLabel = (reason: ConductReportReason) => {
   switch (reason) {
@@ -2003,10 +1999,24 @@ const evidenceMessageFrom = (row: EvidenceMessageRow): AdminReportEvidenceMessag
   attachments: [],
 });
 
-const evidenceForInTransaction = async (
+type ReportCaseEvidenceContext = {
+  caseId: string;
+  reportedMessageId: string;
+  conversationId: string;
+  cursorScope: string;
+};
+
+const reportCaseEvidenceCursorScopeFor = (caseId: string, evidenceRefId: string): string =>
+  `REPORT_CASE_${createHash('sha256')
+    .update(`${caseId}:${evidenceRefId}`)
+    .digest('hex')
+    .slice(0, 52)
+    .toUpperCase()}`;
+
+const reportCaseEvidenceContextFor = async (
   database: ReportDatabase,
   evidenceRefId: string
-): Promise<AdminReportCaseEvidenceWithoutAction> => {
+): Promise<ReportCaseEvidenceContext> => {
   const [reference] = await database
     .select({
       caseId: adminReportCase.id,
@@ -2063,100 +2073,146 @@ const evidenceForInTransaction = async (
     throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
   }
 
-  const [before, after] = await Promise.all([
-    selectEvidenceMessageRows(
-      database,
-      and(
-        eq(chatMessage.conversationId, target.conversationId),
-        lt(chatMessage.sequence, target.sequence),
-        isNull(chatMessage.deletedAt)
-      ),
-      'desc',
-      evidenceProbeLimit
-    ),
-    selectEvidenceMessageRows(
-      database,
-      and(
-        eq(chatMessage.conversationId, target.conversationId),
-        gt(chatMessage.sequence, target.sequence),
-        isNull(chatMessage.deletedAt)
-      ),
-      'asc',
-      evidenceProbeLimit
-    ),
-  ]);
+  return {
+    caseId: reference.caseId,
+    reportedMessageId: target.id,
+    conversationId: target.conversationId,
+    cursorScope: reportCaseEvidenceCursorScopeFor(reference.caseId, evidenceRefId),
+  };
+};
 
-  const targetAttachmentRows = await database
-    .select({
-      id: chatAttachment.id,
-      status: chatAttachment.status,
-      originalFilename: chatAttachment.originalFilename,
-      mimeType: chatAttachment.mimeType,
-      sizeBytes: chatAttachment.sizeBytes,
-      bucket: file.bucket,
-      objectKey: file.objectKey,
-      attachmentObjectDeletedAt: chatAttachment.objectDeletedAt,
-      fileObjectDeletedAt: file.objectDeletedAt,
-      fileDeletedAt: file.deletedAt,
-    })
-    .from(chatMessageAttachment)
-    .innerJoin(chatAttachment, eq(chatAttachment.id, chatMessageAttachment.attachmentId))
-    .leftJoin(file, eq(file.id, chatAttachment.fileId))
-    .where(
-      and(
-        eq(chatMessageAttachment.messageId, target.id),
-        eq(chatAttachment.conversationId, target.conversationId),
-        inArray(chatAttachment.status, ['CONSUMED', 'HIDDEN']),
-        isNull(chatAttachment.deletedAt)
+const reportCaseEvidenceCursorAnchor = (
+  database: ReportDatabase,
+  context: ReportCaseEvidenceContext
+): KeysetCursorAnchor => ({
+  read: async (cursor) => {
+    if (cursor.scope !== context.cursorScope) return undefined;
+    const [row] = await database
+      .select({ startTime: chatMessage.createdAt })
+      .from(chatMessage)
+      .where(
+        and(
+          eq(chatMessage.id, cursor.id),
+          eq(chatMessage.conversationId, context.conversationId),
+          isNull(chatMessage.deletedAt)
+        )
       )
-    )
-    .orderBy(asc(chatMessageAttachment.position));
+      .limit(1);
+    return row ? { ...row, id: cursor.id, scope: context.cursorScope } : undefined;
+  },
+  boundary: (anchor, sort) => {
+    const anchorRow = sql`(
+      select ${chatMessage.sequence}, ${chatMessage.id}
+      from ${chatMessage}
+      where ${chatMessage.id} = ${anchor.id}
+        and ${chatMessage.conversationId} = ${context.conversationId}
+        and ${chatMessage.deletedAt} is null
+    )`;
+    return sort === 'oldest'
+      ? sql`(${chatMessage.sequence}, ${chatMessage.id}) > ${anchorRow}`
+      : sql`(${chatMessage.sequence}, ${chatMessage.id}) < ${anchorRow}`;
+  },
+  orderBy: (sort) =>
+    sort === 'oldest'
+      ? [asc(chatMessage.sequence), asc(chatMessage.id)]
+      : [desc(chatMessage.sequence), desc(chatMessage.id)],
+});
 
-  const targetWithAttachments = evidenceMessageFrom(target);
-  targetWithAttachments.attachments = targetAttachmentRows.map((attachment) => {
-    if (
-      !attachment.bucket ||
-      !attachment.objectKey ||
-      attachment.attachmentObjectDeletedAt ||
-      attachment.fileObjectDeletedAt ||
-      attachment.fileDeletedAt
-    ) {
+const reportCaseEvidencePageInTransaction = async (
+  database: ReportDatabase,
+  evidenceRefId: string,
+  pageInput: AdminReportEvidencePageInput
+): Promise<AdminReportCaseEvidenceWithoutAction> => {
+  const context = await reportCaseEvidenceContextFor(database, evidenceRefId);
+  const page = await readKeysetPage({
+    cursorAnchor: reportCaseEvidenceCursorAnchor(database, context),
+    cursor: pageInput.cursor,
+    limit: pageInput.limit,
+    sort: 'oldest',
+    where: and(
+      eq(chatMessage.conversationId, context.conversationId),
+      isNull(chatMessage.deletedAt)
+    ),
+    read: ({ where, limit }) => selectEvidenceMessageRows(database, where, 'asc', limit),
+    rowCursor: (row) => ({
+      startTime: row.createdAt,
+      id: row.id,
+      scope: context.cursorScope,
+    }),
+    invalidCursor: () => new CursorInputError('INVALID_CURSOR', 'Evidence cursor is invalid.'),
+  });
+
+  const messages = page.rows.map(evidenceMessageFrom);
+  const reportedMessage = messages.find((message) => message.id === context.reportedMessageId);
+
+  if (reportedMessage) {
+    const targetAttachmentRows = await database
+      .select({
+        id: chatAttachment.id,
+        status: chatAttachment.status,
+        originalFilename: chatAttachment.originalFilename,
+        mimeType: chatAttachment.mimeType,
+        sizeBytes: chatAttachment.sizeBytes,
+        bucket: file.bucket,
+        objectKey: file.objectKey,
+        attachmentObjectDeletedAt: chatAttachment.objectDeletedAt,
+        fileObjectDeletedAt: file.objectDeletedAt,
+        fileDeletedAt: file.deletedAt,
+      })
+      .from(chatMessageAttachment)
+      .innerJoin(chatAttachment, eq(chatAttachment.id, chatMessageAttachment.attachmentId))
+      .leftJoin(file, eq(file.id, chatAttachment.fileId))
+      .where(
+        and(
+          eq(chatMessageAttachment.messageId, reportedMessage.id),
+          eq(chatAttachment.conversationId, context.conversationId),
+          inArray(chatAttachment.status, ['CONSUMED', 'HIDDEN']),
+          isNull(chatAttachment.deletedAt)
+        )
+      )
+      .orderBy(asc(chatMessageAttachment.position));
+
+    reportedMessage.attachments = targetAttachmentRows.map((attachment) => {
+      if (
+        !attachment.bucket ||
+        !attachment.objectKey ||
+        attachment.attachmentObjectDeletedAt ||
+        attachment.fileObjectDeletedAt ||
+        attachment.fileDeletedAt
+      ) {
+        return {
+          id: attachment.id,
+          status: attachment.status,
+          originalFilename: attachment.originalFilename,
+          mimeType: attachment.mimeType,
+          sizeBytes: attachment.sizeBytes,
+          url: null,
+          urlExpiresAt: null,
+        };
+      }
+      const link = workChatStorage.linkForWithExpiry({
+        bucket: attachment.bucket,
+        objectKey: attachment.objectKey,
+      });
       return {
         id: attachment.id,
         status: attachment.status,
         originalFilename: attachment.originalFilename,
         mimeType: attachment.mimeType,
         sizeBytes: attachment.sizeBytes,
-        url: null,
-        urlExpiresAt: null,
+        url: link.url,
+        urlExpiresAt: link.expiresAt.toISOString(),
       };
-    }
-    const link = workChatStorage.linkForWithExpiry({
-      bucket: attachment.bucket,
-      objectKey: attachment.objectKey,
     });
-    return {
-      id: attachment.id,
-      status: attachment.status,
-      originalFilename: attachment.originalFilename,
-      mimeType: attachment.mimeType,
-      sizeBytes: attachment.sizeBytes,
-      url: link.url,
-      urlExpiresAt: link.expiresAt.toISOString(),
-    };
-  });
+  }
 
   return {
-    caseId: reference.caseId,
+    caseId: context.caseId,
     evidenceRefId,
-    reportedMessageId: target.id,
-    truncated:
-      before.length > maxEvidenceContextMessages || after.length > maxEvidenceContextMessages,
-    messages: [
-      ...before.slice(0, maxEvidenceContextMessages).reverse().map(evidenceMessageFrom),
-      targetWithAttachments,
-      ...after.slice(0, maxEvidenceContextMessages).map(evidenceMessageFrom),
-    ],
+    reportedMessageId: context.reportedMessageId,
+    nextCursor: page.nextCursor ? encodeCursor(page.nextCursor) : null,
+    truncated: page.hasNext,
+    messages,
   };
 };
 
@@ -2190,16 +2246,25 @@ export const getAdminReportEvidence = async (
     resourceType: 'report_case',
     resourceId: reportCaseId,
     requestKey,
-    request: { view: 'case-scoped-evidence', evidenceRef: evidenceRefId },
+    request: {
+      view: 'case-scoped-evidence-history',
+      evidenceRef: evidenceRefId,
+      limit: page.limit,
+      cursor: page.cursor ?? null,
+    },
     metadata: { scope: 'report-case' },
     read: async (database) => {
-      const loaded = await evidenceForInTransaction(database, evidenceRefId);
+      const loaded = await reportCaseEvidencePageInTransaction(database, evidenceRefId, page);
+      if (loaded.caseId !== reportCaseId) {
+        throw new AdminReportError('REPORT_EVIDENCE_NOT_FOUND', 'Report evidence does not exist.');
+      }
       evidence = loaded;
       return {
         resourceSummary: {
           caseId: loaded.caseId,
           referenceId: loaded.evidenceRefId,
           itemCount: loaded.messages.length,
+          hasNext: loaded.nextCursor !== null,
         },
         resourceVersion: null,
         resourceTimestamp: null,
@@ -2209,7 +2274,9 @@ export const getAdminReportEvidence = async (
 
   const loaded =
     evidence ??
-    (await db.transaction((database) => evidenceForInTransaction(database, evidenceRefId)));
+    (await db.transaction((database) =>
+      reportCaseEvidencePageInTransaction(database, evidenceRefId, page)
+    ));
   return { ...loaded, adminActionId: result.adminActionId };
 };
 

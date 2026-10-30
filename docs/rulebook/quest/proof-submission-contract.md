@@ -13,6 +13,7 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
 ## Draft and send
 
 - The required work submitter can save an unsent draft, edit it, delete it, and create a replacement draft before `dueAt`. A draft is visible only to that submitter and creates no System Message or notification.
+- A create command replaces the submitter's own unsent draft in one transaction. A create command after the Proof Submission is sent returns `PROOF_SUBMISSION_ALREADY_EXISTS`.
 - Description is optional and is at most 1,000 characters.
 - The submitter can attach up to five files.
 - Allowed file types are image, PDF, and video. Each file is at most 10 MB. The system does not scan files for malware. Other types are rejected.
