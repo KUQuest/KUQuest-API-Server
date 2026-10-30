@@ -2,7 +2,7 @@ import { env } from '@/config/env';
 import { db } from '@/database/client';
 import * as schema from '@/database/schema/auth.schema';
 import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
-import { readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
+import { describeMemberBan, readMemberPenaltyRestriction } from '@/modules/admin/member-penalty';
 import { createWallet } from '@/modules/wallet/wallet.service';
 
 import { APIError } from 'better-auth/api';
@@ -118,6 +118,7 @@ export const createStudentAuth = ({
               throw new APIError('FORBIDDEN', {
                 code: 'MEMBER_BANNED',
                 message: 'This Member is banned.',
+                memberBan: describeMemberBan(restriction),
               });
             }
           },

@@ -7,6 +7,7 @@ import { Elysia } from 'elysia';
 
 import {
   deleteAvatar,
+  getOwnPenaltyStatus,
   getOwnProfile,
   getPublicProfile,
   getPublicReviews,
@@ -18,6 +19,7 @@ import {
 import {
   avatarUploadResponseSchema,
   avatarUploadSchema,
+  penaltyStatusResponseSchema,
   publicProfileParamsSchema,
   publicProfileResponseSchema,
   profileResponseSchema,
@@ -50,6 +52,17 @@ export const profileRoute = new Elysia({
       tags: ['Profile'],
       summary: 'Get own Profile Rating and completed Quest count',
       operationId: 'getProfileReputation',
+      security: betterAuthSecurity,
+    },
+  })
+  .get('/penalty-status', getOwnPenaltyStatus, {
+    response: responses(penaltyStatusResponseSchema, 401),
+    detail: {
+      tags: ['Profile'],
+      summary: 'Get own Member Penalty status',
+      description:
+        'Returns the strike count and the next result on the Misconduct ladder and the Review ladder, and the Red Flag expiry when a Red Flag is active. An exempt violation does not count as a strike. A Member Ban returns 403 MEMBER_BANNED with the ban details.',
+      operationId: 'getOwnPenaltyStatus',
       security: betterAuthSecurity,
     },
   })
