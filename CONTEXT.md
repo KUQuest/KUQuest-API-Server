@@ -382,7 +382,7 @@ A Member's report about how another Member behaved on one Quest, chosen from a f
 _Avoid_: Report Case (that is about one Message's content), Reporter Entry, treating abusive language as a Conduct Report reason — that opens a Report Case.
 
 **Evidence Reference**:
-A bounded reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs.
+A case-scoped reference from a Report Case to a Message or Attachment required for moderation. It identifies the retained domain record and its hold without copying Message text, file bytes, or signed URLs. An Admin can use it to read cursor pages of retained, non-deleted Messages from the single Conversation that contains the reported Message; it does not grant general Conversation access or expand Attachment access.
 _Avoid_: evidence copy, public file link
 
 **Reporter Entry**:
