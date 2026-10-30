@@ -1117,6 +1117,7 @@ export const getAdminDisputeEvidence = async (
   disputeCaseId: string,
   requestKey: string
 ) => {
+  let evidenceResponse: AdminDisputeEvidence | undefined;
   const result = await adminActionService.recordEvidenceAccess({
     adminId,
     action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
@@ -1125,14 +1126,28 @@ export const getAdminDisputeEvidence = async (
     requestKey,
     request: { view: 'case-scoped-evidence' },
     metadata: {},
-    read: async (transaction) => ({
-      resourceSummary: await evidenceForCaseInTransaction(transaction, disputeCaseId),
-      resourceVersion: null,
-      resourceTimestamp: null,
-    }),
+    read: async (transaction) => {
+      evidenceResponse = await evidenceForCaseInTransaction(transaction, disputeCaseId);
+      return {
+        resourceSummary: {
+          caseId: evidenceResponse.caseId,
+          questId: evidenceResponse.questId,
+          truncated: evidenceResponse.truncated,
+          assignmentCount: evidenceResponse.assignments.length,
+          proofSubmissionCount: evidenceResponse.proofSubmissions.length,
+        },
+        resourceVersion: null,
+        resourceTimestamp: null,
+      };
+    },
   });
+  const evidence =
+    evidenceResponse ??
+    (await db.transaction((transaction) =>
+      evidenceForCaseInTransaction(transaction, disputeCaseId)
+    ));
   return {
-    ...result.resourceSummary,
+    ...evidence,
     adminActionId: result.adminActionId,
   };
 };
