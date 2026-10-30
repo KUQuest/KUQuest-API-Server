@@ -22,12 +22,13 @@ before the Team Leader splits the money.
    Member, 5 days for an Admin) do not change.
    _Reason:_ one case gives the Admin one decision and prevents two cases from
    claiming the same held money.
-2. **Admin approves an amount, not a person.** For a team case the Admin decision
-   `DISPUTE_CASE_RESOLVED` carries only `amountSatang`. The amount must fit the
-   money the hold can still pay, after other unpaid team approvals of the same
-   Quest (`DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`). No money moves at this step. The
-   case records the Team Leader as `resolvedWorkerId`.
-   _Reason:_ the Admin does not know how the team shared the work.
+2. **Admin approves the case, not a person or an amount.** For a team case the
+   Admin decision `DISPUTE_CASE_RESOLVED` approves all that the hold can still
+   pay, after other unpaid team approvals of the same Quest
+   (`DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD` if nothing is left). No money moves at
+   this step. The case records the Team Leader as `resolvedWorkerId`.
+   _Reason:_ the Admin does not know how the team shared the work, and the Admin
+   web has no control for a partial amount.
 3. **Leader split window: 24 hours** from the Admin decision, the same as ADR 0034.
    _Reason:_ one rule for the team and for the app. The window is short, so the
    hold stays bounded (see decision 7).

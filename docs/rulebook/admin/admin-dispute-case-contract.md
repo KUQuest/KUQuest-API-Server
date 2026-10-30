@@ -21,7 +21,7 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 See [ADR 0036](../../adr/0036-team-dispute-case-payout-split.md).
 
 - **One filer**: Only the Team Leader of the selected Candidate Team files the Dispute Case for the whole team. The case stores the `teamId` and covers every team member. A team member who is not the Team Leader cannot file (`DISPUTE_CASE_TEAM_LEADER_ONLY`). An Admin who opens a case for the team uses the Team Leader as the filer. The filing windows do not change.
-- **Admin decision**: For a team case, `DISPUTE_CASE_RESOLVED` carries only a positive `amountSatang`. The amount must not be more than what the hold can still pay after the other unpaid team approvals of the Quest (`DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`). The decision moves no money. The case records the Team Leader as `resolvedWorkerId`.
+- **Admin decision**: For a team case, `DISPUTE_CASE_RESOLVED` approves all that the hold can still pay after the other unpaid team approvals of the Quest. If nothing is left, the decision fails with `DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`. The decision moves no money. The case records the Team Leader as `resolvedWorkerId`.
 - **Split deadline**: The Team Leader has 24 hours after the decision to confirm the split.
 - **Split content**: The split lists every team member, the Team Leader included, once. Each share is an integer in basis points (0 to 10000), and the shares total 10000. A confirmed split is immutable and its command is idempotent.
 - **Rounding**: Each amount rounds down. The remaining Satang go one by one to the largest fractional remainders. A tie goes to the earlier team member. The amounts total the approved amount exactly.
@@ -68,7 +68,7 @@ The filing `category` is separate from the Admin decision `reasonCode`. The cate
 
 - Admin resolves a Dispute Case as:
   - `DISPUTE_CASE_DISMISSED`: No money movement; case closes.
-  - `DISPUTE_CASE_RESOLVED`: An explicit positive Satang amount is redirected to the named Worker's Earnings Balance as a reversing Ledger Transaction.
+  - `DISPUTE_CASE_RESOLVED`: The Server redirects all that the Quest hold can still pay, the returned Platform Fee included, to the named Worker's Earnings Balance as a reversing Ledger Transaction. The Admin does not choose an amount, and the Server ignores `amountSatang`. A later case on the same Quest with nothing left fails with `DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD`.
 - Each decision requires a controlled `reasonCode` and a non-blank `Idempotency-Key`.
 - An Admin may also provide an optional `decisionReasonText` of 1 to 200 characters with at least one non-whitespace character.
 - The note is stored separately on the immutable Admin Action and is visible only to enabled Admins through the Activity Log. It does not replace `reasonCode` or appear in Member notifications.
