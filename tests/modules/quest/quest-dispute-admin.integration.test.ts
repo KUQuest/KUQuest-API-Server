@@ -4,7 +4,13 @@ import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { auditRecord } from '@/database/schema/audit.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
-import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
+import {
+  quest,
+  questAssignment,
+  questCandidateTeamV2,
+  questCandidateTeamV2Member,
+  proofSubmission,
+} from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
 import { createAdminActionService } from '@/modules/admin';
@@ -16,6 +22,7 @@ import {
   submitQuestV2ProofSubmission,
 } from '@/modules/quest';
 import {
+  createAdminDisputeCase,
   createAdminDisputeCaseInTransaction,
   resolveAdminDisputeCase,
   summaryFromRecord,
@@ -588,6 +595,70 @@ describe('Admin Dispute API', () => {
     } finally {
       await decisionReader.cancel();
     }
+  });
+
+  it('lets only the Team Leader file a Dispute Case for a selected Candidate Team', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db.delete(adminDisputeCase).where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+    const leaderId = fixture.workerId;
+    const memberId = await createMember('team-member');
+    await db.insert(questAssignment).values({
+      id: crypto.randomUUID(),
+      questId: fixture.questId,
+      workerId: memberId,
+      assignmentStatus: 'ASSIGNMENT_INCOMPLETE',
+    });
+    const teamId = crypto.randomUUID();
+    await db.insert(questCandidateTeamV2).values({
+      id: teamId,
+      questId: fixture.questId,
+      leaderId,
+      name: 'Dispute team',
+      headcount: 2,
+      state: 'TEAM_SELECTED',
+    });
+    await db
+      .insert(questCandidateTeamV2Member)
+      .values([leaderId, memberId].map((id) => ({ teamId, memberId: id })));
+
+    expect(await readQuestDisputeSummary(memberId, fixture.questId)).toMatchObject({
+      canFile: false,
+      myCase: null,
+    });
+    expect(await readQuestDisputeSummary(leaderId, fixture.questId)).toMatchObject({
+      canFile: true,
+    });
+
+    const filing = {
+      questId: fixture.questId,
+      category: 'OTHER' as const,
+      submittedDetail: 'The Team met the Quest Condition.',
+    };
+    await expect(
+      createAdminDisputeCase({ ...filing, filerUserId: memberId })
+    ).rejects.toMatchObject({
+      code: 'DISPUTE_CASE_TEAM_LEADER_ONLY',
+    });
+    const adminFiled = await adminRequest(`/api/v1/admin/disputes/open/${fixture.questId}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        workerId: memberId,
+        category: 'OTHER',
+        submittedDetail: 'The Team met the Quest Condition.',
+      }),
+    });
+    expect(adminFiled.status).toBe(403);
+    expect(
+      await db
+        .select({ id: adminDisputeCase.id })
+        .from(adminDisputeCase)
+        .where(eq(adminDisputeCase.questId, fixture.questId))
+    ).toEqual([]);
+
+    const leaderCase = await createAdminDisputeCase({ ...filing, filerUserId: leaderId });
+    expect(leaderCase.filerUserId).toBe(leaderId);
   });
 
   it('does not let an Admin file a Worker Dispute Case for the Hirer', async () => {

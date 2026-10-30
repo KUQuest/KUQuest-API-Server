@@ -9,6 +9,7 @@ A Dispute Case reverses part of the automatic settlement a `QUEST_FAILED` Quest 
 ## Structural constraints
 
 - **Multiple filers**: A Quest may have more than one Dispute Case, at most one per filer (the Hirer, or a Worker who held an Assignment on that Quest).
+- **Candidate Team filer**: In `GROUP + CANDIDATE`, only the Team Leader can file for the Team, because the Team has one outcome. The Server refuses a teammate's filing with `403 DISPUTE_CASE_TEAM_LEADER_ONLY`, also when an Admin opens the case on that teammate's behalf.
 - **Per-Quest shared cap**: The total Satang redirected across all of a Quest's Dispute Cases must never exceed what remains in that Quest's held Funding Reservation. The cap starts as the amount returned to the Hirer at failure settlement and shrinks if a post-failure Proof approval settles a Reward first.
 - **One-way money flow**: Money moves exclusively Hirer &rarr; Worker. A Dispute Case can never reclaim a Reward already transferred directly to a Worker before the Quest failed.
 - **Failed Quest scope**: A `QUEST_CANCELLED` Quest has no Dispute Case path.

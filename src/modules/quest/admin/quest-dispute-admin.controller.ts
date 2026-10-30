@@ -59,7 +59,11 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
       error.code === 'DISPUTE_CASE_AMOUNT_REQUIRED'
     )
       set.status = 400;
-    else if (error.code === 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED') set.status = 403;
+    else if (
+      error.code === 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED' ||
+      error.code === 'DISPUTE_CASE_TEAM_LEADER_ONLY'
+    )
+      set.status = 403;
     else set.status = 409;
     return apiError(error.code, error.message);
   }
