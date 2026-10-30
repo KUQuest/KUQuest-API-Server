@@ -8,6 +8,7 @@ import {
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
+  questCandidateTeamV2,
   proofSubmission,
   proofSubmissionImage,
   quest,
@@ -121,11 +122,11 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_NOT_PENDING'
     | 'DISPUTE_CASE_QUEST_NOT_FAILED'
     | 'DISPUTE_CASE_WORKER_NOT_ASSIGNED'
+    | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
     | 'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD'
-    | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_WINDOW_EXPIRED'
     | 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED'
     | 'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED'
@@ -299,6 +300,25 @@ const caseByIdInTransaction = async (
 };
 
 /** Create the queue record after a filing adapter has authenticated its actor. */
+/** A selected Candidate Team has one outcome, so only its Team Leader can file a Dispute Case. */
+const isSelectedTeamMemberOnly = async (
+  reader: typeof db | WalletTransaction,
+  questId: string,
+  memberId: string
+) => {
+  const [team] = await reader
+    .select({ leaderId: questCandidateTeamV2.leaderId })
+    .from(questCandidateTeamV2)
+    .where(
+      and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .limit(1);
+  return team !== undefined && team.leaderId !== memberId;
+};
+
 export const createAdminDisputeCaseInTransaction = async (
   transaction: WalletTransaction,
   input: CreateAdminDisputeCaseInput
@@ -392,6 +412,12 @@ export const createAdminDisputeCaseInTransaction = async (
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_WORKER_NOT_ASSIGNED',
         'The filer did not hold an Assignment on this Quest.'
+      );
+    }
+    if (await isSelectedTeamMemberOnly(transaction, input.questId, input.filerUserId)) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_TEAM_LEADER_ONLY',
+        'Only the Team Leader can file a Dispute Case for a Candidate Team.'
       );
     }
   }
@@ -1349,6 +1375,8 @@ export const readQuestDisputeSummary = async (
           .from(questAssignment)
           .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
           .limit(1);
+  const teamMemberOnly =
+    assignment !== undefined && (await isSelectedTeamMemberOnly(db, questId, viewerId));
   const endsAt = new Date(row.moneyHoldStartedAt.getTime() + disputeFilingWindowMs(false));
   const open = now.getTime() <= endsAt.getTime();
   const team = await db.transaction((transaction) => readSelectedTeam(transaction, questId));
@@ -1393,6 +1421,7 @@ export const readQuestDisputeSummary = async (
       open &&
       !existing &&
       viewerRole !== 'TEAM_MEMBER' &&
+      !teamMemberOnly &&
       (viewerId === row.hirerId || assignment !== undefined),
     windowEndsAt: open ? endsAt : null,
     viewerRole,

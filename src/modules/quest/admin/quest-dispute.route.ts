@@ -40,12 +40,12 @@ export const questDisputeRoute = new Elysia({
   .post('/:questId/disputes', fileAdminDisputeCaseController, {
     params: adminDisputeOpenParamsSchema,
     body: questDisputeFilingBodySchema,
-    response: responses(adminDisputeOpenResponseSchema, 400, 401, 404, 409),
+    response: responses(adminDisputeOpenResponseSchema, 400, 401, 403, 404, 409),
     detail: {
       tags: ['Quest Disputes'],
       summary: 'File a Dispute Case as the Hirer or Worker',
       description:
-        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a Quest with a money hold (QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot) within the one-day self-file window. The Member supplies the required category and submittedDetail and may supply filerStatement.',
+        'Files one Dispute Case for the authenticated Hirer or an assigned Worker on a Quest with a money hold (QUEST_FAILED, or QUEST_COMPLETED with an unpaid slot) within the one-day self-file window. In GROUP + CANDIDATE, only the Team Leader can file. The Member supplies the required category and submittedDetail and may supply filerStatement.',
       operationId: 'fileQuestDispute',
       security: betterAuthSecurity,
     },
