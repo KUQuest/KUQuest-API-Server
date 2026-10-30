@@ -32,12 +32,7 @@ import {
   type AdminActionCommandInput,
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
-import {
-  MoneyDomainError,
-  positiveSatang,
-  settleDisputeCase,
-  type WalletTransaction,
-} from '@/modules/wallet';
+import { positiveSatang, settleDisputeCase, type WalletTransaction } from '@/modules/wallet';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 import {
@@ -53,6 +48,7 @@ import { isMoneyHoldOpen, moneyHoldDurationMs } from '../shared';
 import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import {
+  fullDisputeAmountSatang,
   openTeamDisputeSplit,
   readSelectedTeam,
   readTeamDisputeSplit,
@@ -126,7 +122,6 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
-    | 'DISPUTE_CASE_AMOUNT_REQUIRED'
     | 'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD'
     | 'DISPUTE_CASE_WINDOW_EXPIRED'
     | 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED'
@@ -1068,20 +1063,6 @@ const assertResolutionInput = (input: ResolveAdminDisputeCaseInput) => {
       'Unsupported Dispute Case outcome.'
     );
   }
-  if (input.amountSatang === undefined) {
-    throw new AdminDisputeCaseError(
-      'DISPUTE_CASE_AMOUNT_REQUIRED',
-      'A resolved Dispute Case must include a positive Satang amount.'
-    );
-  }
-  try {
-    positiveSatang(input.amountSatang);
-  } catch (error) {
-    if (error instanceof MoneyDomainError) {
-      throw new AdminDisputeCaseError('DISPUTE_CASE_AMOUNT_REQUIRED', error.message);
-    }
-    throw error;
-  }
 };
 
 const resolveAdminDisputeCaseInTransaction = (
@@ -1217,9 +1198,22 @@ const resolveAdminDisputeCaseInTransaction = (
             );
           }
 
+          // An Admin chooses no amount: a resolved case takes all the hold can still pay.
+          const fullAmountSatang = await fullDisputeAmountSatang(transaction, {
+            disputeCaseId: current.id,
+            questId: current.questId,
+            hirerId: currentQuest.hirerId,
+            reservationId: currentQuest.fundingReservationId,
+          });
+          if (fullAmountSatang <= 0) {
+            throw new AdminDisputeCaseError(
+              'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD',
+              'The Quest hold has no money left to pay.'
+            );
+          }
           let resolvedAmountSatang: number;
           if (current.teamId) {
-            resolvedAmountSatang = positiveSatang(input.amountSatang!);
+            resolvedAmountSatang = positiveSatang(fullAmountSatang);
             const opened = await openTeamDisputeSplit(transaction, {
               disputeCase: current,
               hirerId: currentQuest.hirerId,
@@ -1239,7 +1233,7 @@ const resolveAdminDisputeCaseInTransaction = (
               reservationId: currentQuest.fundingReservationId,
               settlementReference: `dispute-case:${current.id}`,
               recipientUserId: recipientWorkerId,
-              requestedAmountSatang: positiveSatang(input.amountSatang!),
+              requestedAmountSatang: positiveSatang(fullAmountSatang),
             });
             resolvedAmountSatang = settlement.recipientAmountSatang;
           }

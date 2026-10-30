@@ -136,6 +136,19 @@ type OpenInput = {
  * still pay after other unpaid team approvals. No money moves until the Leader
  * confirms a split.
  */
+/** What a resolved case takes: the Quest cap less the other unpaid team approvals. */
+export const fullDisputeAmountSatang = async (
+  transaction: SplitTransaction,
+  input: { disputeCaseId: string; questId: string; hirerId: string; reservationId: string }
+) => {
+  const funds = await readDisputeFundsAvailable(transaction, {
+    ownerUserId: input.hirerId,
+    reservationId: input.reservationId,
+  });
+  const claimed = await claimedByOtherApprovals(transaction, input.questId, input.disputeCaseId);
+  return funds.capSatang - claimed;
+};
+
 export const openTeamDisputeSplit = async (
   transaction: SplitTransaction,
   input: OpenInput

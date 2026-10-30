@@ -30,6 +30,7 @@ import {
   positiveSatang,
   releaseFundingReservation,
   reserveSpending,
+  settleDisputeCase,
 } from '@/modules/wallet';
 
 import {
@@ -66,13 +67,13 @@ type TeamFixture = {
 };
 
 /** A failed GROUP + CANDIDATE Quest: every slot's funding sits in the 7-day hold. */
-const createFailedTeamQuest = async (memberCount = 3): Promise<TeamFixture> => {
+const createFailedTeamQuest = async (memberCount = 3, holdSatang = 1_000): Promise<TeamFixture> => {
   const hirerId = await createMember('Hirer');
   const memberIds: string[] = [];
   for (let index = 0; index < memberCount; index += 1) {
     memberIds.push(await createMember(`Member${index}`));
   }
-  const fundingSatang = 1_000 * memberCount;
+  const fundingSatang = holdSatang;
   await fundTestWallet(hirerId, 10_000);
   const questId = crypto.randomUUID();
   const reservation = await db.transaction((transaction) =>
@@ -151,7 +152,7 @@ const fileTeamCase = (fixture: TeamFixture, filerUserId = fixture.leaderId) =>
     submittedDetail: 'The team met the Quest Condition.',
   });
 
-const approveTeamCase = (disputeCaseId: string, amountSatang: number, now?: Date) =>
+const approveTeamCase = (disputeCaseId: string, now?: Date) =>
   resolveAdminDisputeCase({
     adminId,
     disputeCaseId,
@@ -159,7 +160,6 @@ const approveTeamCase = (disputeCaseId: string, amountSatang: number, now?: Date
     requestKey: `team-split-approve-${disputeCaseId}`,
     reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
     outcome: 'DISPUTE_CASE_RESOLVED',
-    amountSatang,
     now,
   });
 
@@ -263,11 +263,11 @@ describe('team Dispute Case filing', () => {
 describe('Admin approval of a team Dispute Case', () => {
   it('opens an awaiting split for 24 hours and moves no money yet', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createFailedTeamQuest();
+    const fixture = await createFailedTeamQuest(3, 1_500);
     const created = await fileTeamCase(fixture);
     const now = new Date();
 
-    const result = await approveTeamCase(created.id, 1_500, now);
+    const result = await approveTeamCase(created.id, now);
     expect(result.resourceSummary).toMatchObject({
       status: 'DISPUTE_CASE_RESOLVED',
       resolvedWorkerId: fixture.leaderId,
@@ -287,14 +287,43 @@ describe('Admin approval of a team Dispute Case', () => {
     expect(
       (await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId }))!
         .remainingSatang
-    ).toBe(3_000);
+    ).toBe(1_500);
   });
 
-  it('rejects an amount above what the hold can still pay', async () => {
+  it('approves all the hold can pay and ignores an amount from the Admin', async () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await expect(approveTeamCase(created.id, 3_001)).rejects.toMatchObject({
+    const result = await resolveAdminDisputeCase({
+      adminId,
+      disputeCaseId: created.id,
+      expectedVersion: 1,
+      requestKey: `team-split-full-${created.id}`,
+      reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+      outcome: 'DISPUTE_CASE_RESOLVED',
+      amountSatang: 1,
+    });
+    expect(result.resourceSummary).toMatchObject({ resolvedAmountSatang: 1_000 });
+  });
+
+  it('refuses the approval when the hold has nothing left to pay', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createFailedTeamQuest();
+    const created = await fileTeamCase(fixture);
+    const escrow = await readTestQuestEscrow({
+      ownerUserId: fixture.hirerId,
+      questId: fixture.questId,
+    });
+    await db.transaction((transaction) =>
+      settleDisputeCase(transaction, {
+        ownerUserId: fixture.hirerId,
+        reservationId: escrow!.id,
+        settlementReference: `drain-${created.id}`,
+        recipientUserId: fixture.leaderId,
+        requestedAmountSatang: positiveSatang(1_000),
+      })
+    );
+    await expect(approveTeamCase(created.id)).rejects.toMatchObject({
       code: 'DISPUTE_CASE_AMOUNT_EXCEEDS_HOLD',
     });
   });
@@ -305,7 +334,7 @@ describe('Leader split and payment', () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await approveTeamCase(created.id, 1_000);
+    await approveTeamCase(created.id);
     const shares = evenShares(fixture.memberIds, [3_334, 3_333, 3_333]);
     const key = crypto.randomUUID();
 
@@ -321,7 +350,7 @@ describe('Leader split and payment', () => {
     expect(
       (await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId }))!
         .remainingSatang
-    ).toBe(2_000);
+    ).toBe(0);
 
     const allocation = await readAllocation(created.id);
     expect(allocation).toMatchObject({ status: 'PAID', splitSource: 'LEADER' });
@@ -339,10 +368,10 @@ describe('Leader split and payment', () => {
 
   it('rejects a non-leader, an incomplete or wrong-total split, and a late split', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createFailedTeamQuest();
+    const fixture = await createFailedTeamQuest(3, 900);
     const created = await fileTeamCase(fixture);
     const approvedAt = new Date();
-    await approveTeamCase(created.id, 900, approvedAt);
+    await approveTeamCase(created.id, approvedAt);
 
     expect(
       await submitSplit(
@@ -374,7 +403,7 @@ describe('Leader split and payment', () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await approveTeamCase(created.id, 1_000);
+    await approveTeamCase(created.id);
 
     const leaderView = await readTeamDisputeSplit(fixture.leaderId, fixture.questId);
     const memberView = await readTeamDisputeSplit(fixture.memberIds[2]!, fixture.questId);
@@ -399,7 +428,7 @@ describe('automatic equal split', () => {
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
     const approvedAt = new Date();
-    await approveTeamCase(created.id, 1_000, approvedAt);
+    await approveTeamCase(created.id, approvedAt);
     const allocation = await readAllocation(created.id);
 
     expect(
@@ -424,10 +453,10 @@ describe('automatic equal split', () => {
 
   it('runs from the lifecycle worker', async () => {
     if (!postgresAvailable) return;
-    const fixture = await createFailedTeamQuest();
+    const fixture = await createFailedTeamQuest(3, 600);
     const created = await fileTeamCase(fixture);
     const approvedAt = new Date();
-    await approveTeamCase(created.id, 600, approvedAt);
+    await approveTeamCase(created.id, approvedAt);
 
     const result = await runQuestLifecycleWorker({
       clock: { now: () => new Date(approvedAt.getTime() + teamDisputeSplitWindowMs + 1) },
@@ -442,7 +471,7 @@ describe('money hold and balance checks', () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await approveTeamCase(created.id, 1_000);
+    await approveTeamCase(created.id);
     // Age the hold so it ends one minute from now; the approval stays recorded.
     const holdStart = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000 + 60_000);
     await db
@@ -463,15 +492,17 @@ describe('money hold and balance checks', () => {
     ).toMatchObject({
       kind: 'success',
     });
-    const afterPay = await runQuestLifecycleWorker({ clock: { now: () => afterHoldEnds } });
-    expect(afterPay.releasedFailedQuestIds).toContain(fixture.questId);
+    expect(
+      (await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId }))!
+        .remainingSatang
+    ).toBe(0);
   });
 
   it('pays from Spending Balance when the hold ended before the split', async () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await approveTeamCase(created.id, 1_000);
+    await approveTeamCase(created.id);
     const reservation = (await readTestQuestEscrow({
       ownerUserId: fixture.hirerId,
       questId: fixture.questId,
@@ -498,7 +529,7 @@ describe('money hold and balance checks', () => {
     if (!postgresAvailable) return;
     const fixture = await createFailedTeamQuest();
     const created = await fileTeamCase(fixture);
-    await approveTeamCase(created.id, 1_000);
+    await approveTeamCase(created.id);
     const reservation = (await readTestQuestEscrow({
       ownerUserId: fixture.hirerId,
       questId: fixture.questId,

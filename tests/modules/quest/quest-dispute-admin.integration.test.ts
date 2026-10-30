@@ -1087,7 +1087,6 @@ describe('Admin Dispute API', () => {
         outcome: 'DISPUTE_CASE_RESOLVED',
         reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
         workerId: fixture.workerId,
-        amountSatang: 300,
         decisionReasonText,
       }),
     });
@@ -1098,7 +1097,7 @@ describe('Admin Dispute API', () => {
       status: 'DISPUTE_CASE_RESOLVED',
       version: 2,
       resolvedWorkerId: fixture.workerId,
-      resolvedAmountSatang: 300,
+      resolvedAmountSatang: 1_000,
     });
     expect(body.data.resourceSummary).not.toHaveProperty('decisionReasonText');
 
@@ -1111,7 +1110,7 @@ describe('Admin Dispute API', () => {
       ownerUserId: fixture.hirerId,
       questId: fixture.questId,
     });
-    expect(escrow).toMatchObject({ status: 'ACTIVE', remainingSatang: 700 });
+    expect(escrow).toMatchObject({ remainingSatang: 0 });
     if (!escrow) throw new Error('Quest Escrow was not created');
     const [settlement] = await listTestDisputeSettlements(fixture.reservationId);
     expect(
@@ -1119,7 +1118,7 @@ describe('Admin Dispute API', () => {
         amountSatang: settlement.amountSatang,
         ledgerTransactionId: settlement.ledgerTransactionId,
       }
-    ).toEqual({ amountSatang: 300, ledgerTransactionId: expect.any(String) });
+    ).toEqual({ amountSatang: 1_000, ledgerTransactionId: expect.any(String) });
     const [ledger] = await listTestLedgerTransactions([settlement!.ledgerTransactionId]);
     expect({
       eventType: ledger?.eventType,
@@ -1131,7 +1130,7 @@ describe('Admin Dispute API', () => {
     const postings = await listTestLedgerPostings([settlement!.ledgerTransactionId]);
     expect(postings.reduce((total, posting) => total + posting.amountSatang, 0)).toBe(0);
     const workerWallet = await readTestWallet(fixture.workerId);
-    expect(workerWallet.earningsBalanceSatang).toBe(300);
+    expect(workerWallet.earningsBalanceSatang).toBe(1_000);
 
     const activityLog = await adminRequest(
       `/api/v1/admin/activity-log?resourceType=dispute_case&resourceId=${fixture.disputeCaseId}`
@@ -1144,6 +1143,30 @@ describe('Admin Dispute API', () => {
         decisionReasonText,
       })
     );
+  });
+
+  it('pays all the hold can pay even when the Admin sends a smaller amount', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    const response = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}/resolve`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': `dispute-full-${fixture.disputeCaseId}`,
+        'if-match': '1',
+      },
+      body: JSON.stringify({
+        outcome: 'DISPUTE_CASE_RESOLVED',
+        reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
+        workerId: fixture.workerId,
+        amountSatang: 1,
+      }),
+    });
+    expect(response.status).toBe(200);
+    expect((await readTestWallet(fixture.workerId)).earningsBalanceSatang).toBe(1_000);
+    expect(
+      await readTestQuestEscrow({ ownerUserId: fixture.hirerId, questId: fixture.questId })
+    ).toMatchObject({ remainingSatang: 0 });
   });
 
   it('rejects blank and over-200-character Dispute decision notes', async () => {
@@ -1804,7 +1827,6 @@ describe('Admin Dispute API', () => {
         outcome: 'DISPUTE_CASE_RESOLVED',
         reasonCode: 'DISPUTE_VALID_PROOF_NOT_APPROVED',
         workerId: fixture.workerId,
-        amountSatang: 250,
       }),
     });
     expect(response.status).toBe(200);
@@ -1818,10 +1840,10 @@ describe('Admin Dispute API', () => {
       readTestWallet(fixture.hirerId),
       readTestWallet(fixture.workerId),
     ]);
-    expect(hirerWallet.spendingBalanceSatang).toBe(4_750);
+    expect(hirerWallet.spendingBalanceSatang).toBe(4_000);
     expect(hirerWallet.earningsBalanceSatang).toBe(0);
     expect(workerWallet.spendingBalanceSatang).toBe(0);
-    expect(workerWallet.earningsBalanceSatang).toBe(250);
+    expect(workerWallet.earningsBalanceSatang).toBe(1_000);
     const [settlementLedger] = await listTestLedgerTransactions(
       (await listTestDisputeSettlements(fixture.reservationId)).map(
         ({ ledgerTransactionId }) => ledgerTransactionId
@@ -1910,32 +1932,6 @@ describe('Admin Dispute API', () => {
       }
     );
     expect(invalid.status).toBe(400);
-
-    const overCap = await adminRequest(
-      `/api/v1/admin/disputes/${staleFixture.disputeCaseId}/resolve`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'idempotency-key': `dispute-over-cap-${staleFixture.disputeCaseId}`,
-          'if-match': '1',
-        },
-        body: JSON.stringify({
-          outcome: 'DISPUTE_CASE_RESOLVED',
-          reasonCode: 'DISPUTE_WORKER_MET_QUEST_CONDITION',
-          workerId: staleFixture.workerId,
-          amountSatang: 2_000,
-        }),
-      }
-    );
-    expect(overCap.status).toBe(409);
-    expect(await listTestQuestEscrowSettlements(staleFixture.reservationId)).toHaveLength(0);
-    expect(
-      await db
-        .select()
-        .from(adminAction)
-        .where(eq(adminAction.requestKey, `dispute-over-cap-${staleFixture.disputeCaseId}`))
-    ).toHaveLength(0);
 
     const cancelled = await createDisputeFixture('QUEST_CANCELLED');
     const terminal = await adminRequest(

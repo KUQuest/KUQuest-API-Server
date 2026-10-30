@@ -54,11 +54,7 @@ const mapAdminDisputeError = (set: AdminContext['set'], error: unknown): ApiResp
   }
   if (error instanceof AdminDisputeCaseError) {
     if (error.code === 'DISPUTE_CASE_NOT_FOUND') set.status = 404;
-    else if (
-      error.code === 'DISPUTE_CASE_OUTCOME_INVALID' ||
-      error.code === 'DISPUTE_CASE_AMOUNT_REQUIRED'
-    )
-      set.status = 400;
+    else if (error.code === 'DISPUTE_CASE_OUTCOME_INVALID') set.status = 400;
     else if (
       error.code === 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED' ||
       error.code === 'DISPUTE_CASE_TEAM_LEADER_ONLY'
