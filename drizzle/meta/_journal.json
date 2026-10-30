@@ -764,6 +764,13 @@
       "when": 1793401200001,
       "tag": "20261030230001_dispute_case_timeout",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "7",
+      "when": 1793404800000,
+      "tag": "20261030235000_member_notifications",
+      "breakpoints": true
     }
   ]
 }

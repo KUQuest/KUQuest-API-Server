@@ -13,6 +13,7 @@ import {
 } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
+import { memberNotification } from '@/database/schema/notification.schema';
 import { pushDelivery, pushDevice } from '@/database/schema/push.schema';
 import {
   proofSubmission,
@@ -3037,6 +3038,21 @@ describe('Admin Report Case API', () => {
     expect(delivery?.body).not.toContain(decisionReasonText);
     expect(delivery?.deepLink).toMatch(/^kuquest:\/\/conduct-reports\/CND-\d{6}$/);
 
+    const notifications = await db
+      .select()
+      .from(memberNotification)
+      .where(eq(memberNotification.eventKey, `conduct-report-upheld:${fixture.reportId}`));
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      memberId: fixture.reportedMemberId,
+      type: 'CONDUCT_REPORT_UPHELD',
+      result: 'RED_FLAG',
+      ladder: 'MISCONDUCT',
+      source: 'CONDUCT_REPORT',
+      transitionId: fixture.reportId,
+    });
+    expect(JSON.stringify(notifications[0])).not.toContain(reporterId);
+
     const detail = await adminRequest(`/api/v1/admin/reports/${fixture.reportId}`);
     expect(detail.status).toBe(200);
     expect((await detail.json()).data).toMatchObject({
@@ -3068,6 +3084,12 @@ describe('Admin Report Case API', () => {
         .select({ id: pushDelivery.id })
         .from(pushDelivery)
         .where(eq(pushDelivery.eventKey, `conduct-report-upheld:${fixture.reportId}`))
+    ).toHaveLength(1);
+    expect(
+      await db
+        .select({ id: memberNotification.id })
+        .from(memberNotification)
+        .where(eq(memberNotification.eventKey, `conduct-report-upheld:${fixture.reportId}`))
     ).toHaveLength(1);
 
     const repeated = await adminRequest(path, {

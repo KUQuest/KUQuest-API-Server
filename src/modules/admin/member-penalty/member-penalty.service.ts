@@ -13,6 +13,7 @@ import {
   type MemberPenaltyRemoveReasonCode,
   MemberPenaltyCommandError,
 } from '@/modules/admin/member-penalty/member-penalty.policy';
+import { recordMemberNotificationInTransaction } from '@/modules/notification';
 import { changeWalletStatusInTransaction } from '@/modules/wallet/wallet.status.service';
 import { ensureWalletInTransaction } from '@/modules/wallet/wallet.service';
 
@@ -27,6 +28,7 @@ import {
   isNull,
   lte,
   not,
+  or,
   sql as drizzleSql,
   sum,
 } from 'drizzle-orm';
@@ -238,6 +240,38 @@ const reconcileBanWalletStatusInTransaction = async (
   });
 };
 
+const redFlagEndsAt = (record: MemberPenaltyRow): Date => addDays(record.createdAt, 7);
+
+/**
+ * Queues the Member Notification for a new Red Flag or Ban record in the caller's transaction.
+ * The key holds the record ID, so a replay never adds a second notification. A direct Admin
+ * record has no matching notification source, so its source stays empty.
+ */
+const notifyPenaltyApplied = async (
+  transaction: MemberPenaltyTransaction,
+  record: MemberPenaltyRow,
+  now: Date
+): Promise<void> => {
+  const isRedFlag = record.result === 'PENALTY_RED_FLAG';
+  if (!isRedFlag && !isBanResult(record.result)) return;
+  const source = record.source === 'ADMIN' ? undefined : record.source;
+  await recordMemberNotificationInTransaction(transaction, {
+    memberId: record.memberId,
+    type: isRedFlag ? 'PENALTY_RED_FLAG_APPLIED' : 'PENALTY_BAN_APPLIED',
+    eventKey: `penalty-applied:${record.id}`,
+    transitionId: record.id,
+    result: isRedFlag
+      ? 'RED_FLAG'
+      : record.result === 'PENALTY_PERMANENT_BAN'
+        ? 'PERMANENT_BAN'
+        : 'TEMPORARY_BAN',
+    ladder: record.ladder,
+    source,
+    expiresAt: (isRedFlag ? redFlagEndsAt(record) : temporaryBanExpiresAt(record)) ?? undefined,
+    now,
+  });
+};
+
 const rebuildMemberProjections = async (
   transaction: MemberPenaltyTransaction,
   memberId: string,
@@ -260,10 +294,49 @@ const rebuildMemberProjections = async (
       })
   );
 
+  const [previous] = await transaction
+    .select({ bannedUntil: authUser.bannedUntil, redFlagExpiresAt: authUser.redFlagExpiresAt })
+    .from(authUser)
+    .where(eq(authUser.id, memberId))
+    .for('update');
+
   await transaction
     .update(authUser)
     .set({ bannedUntil, redFlagExpiresAt })
     .where(eq(authUser.id, memberId));
+
+  // A projection that was set and is now expired or cleared ends one restriction. The key holds
+  // the old expiry, so a replay of the same transition adds no second notification.
+  const previousRedFlag = previous?.redFlagExpiresAt ?? null;
+  if (previousRedFlag && (previousRedFlag <= now || redFlagExpiresAt === null)) {
+    const transitionId = `red-flag-ended:${previousRedFlag.toISOString()}`;
+    await recordMemberNotificationInTransaction(transaction, {
+      memberId,
+      type: 'PENALTY_RED_FLAG_EXPIRED',
+      eventKey: transitionId,
+      transitionId,
+      result: 'RED_FLAG',
+      expiresAt: previousRedFlag,
+      now,
+    });
+  }
+  const previousBan = previous?.bannedUntil ?? null;
+  if (
+    previousBan &&
+    (previousBan <= now || bannedUntil === null) &&
+    activeBanRecord(records, now) === undefined
+  ) {
+    const transitionId = `ban-ended:${previousBan.toISOString()}`;
+    await recordMemberNotificationInTransaction(transaction, {
+      memberId,
+      type: 'PENALTY_BAN_ENDED',
+      eventKey: transitionId,
+      transitionId,
+      result: 'TEMPORARY_BAN',
+      expiresAt: previousBan,
+      now,
+    });
+  }
 };
 
 const confirmedMisconductRecords = (records: MemberPenaltyRow[], memberCreatedAt: Date) =>
@@ -613,6 +686,7 @@ export const addAdminMemberPenalty = async (input: {
     if (!created) throw new Error('Admin Member Penalty Add command could not be recorded.');
 
     await rebuildMemberProjections(transaction, input.memberId, now);
+    await notifyPenaltyApplied(transaction, created, now);
     if (isBanResult(created.result)) {
       await reconcileBanWalletStatusInTransaction(
         transaction,
@@ -755,6 +829,7 @@ export const recordMemberConfirmedViolationInTransaction = async (
 
   if (!created) throw new Error('Member Penalty record could not be created.');
   await rebuildMemberProjections(transaction, input.memberId, input.now);
+  await notifyPenaltyApplied(transaction, created, input.now);
   if (isBanResult(created.result)) {
     await reconcileBanWalletStatusInTransaction(
       transaction,
@@ -874,6 +949,7 @@ export const recordReviewAveragePenaltyInTransaction = async (
 
   if (!created) throw new Error('Review penalty record could not be created.');
   await rebuildMemberProjections(transaction, input.memberId, input.now);
+  await notifyPenaltyApplied(transaction, created, input.now);
   if (isBanResult(created.result)) {
     await reconcileBanWalletStatusInTransaction(
       transaction,
@@ -895,11 +971,13 @@ export const processExpiredMemberBanWalletFreeze = async (
   db.transaction(async (transaction) => {
     await lockMemberPenaltyMutation(transaction, memberId);
     const [lockedMember] = await transaction
-      .select({ bannedUntil: authUser.bannedUntil })
+      .select({ bannedUntil: authUser.bannedUntil, redFlagExpiresAt: authUser.redFlagExpiresAt })
       .from(authUser)
       .where(eq(authUser.id, memberId))
       .for('update');
-    if (!lockedMember?.bannedUntil || lockedMember.bannedUntil > now) return false;
+    const banExpired = lockedMember?.bannedUntil && lockedMember.bannedUntil <= now;
+    const redFlagExpired = lockedMember?.redFlagExpiresAt && lockedMember.redFlagExpiresAt <= now;
+    if (!banExpired && !redFlagExpired) return false;
 
     const records = await readMemberRecords(transaction, memberId);
     await rebuildMemberProjections(transaction, memberId, now);
@@ -908,7 +986,10 @@ export const processExpiredMemberBanWalletFreeze = async (
     return true;
   });
 
-/** Clear expired Member Ban projections and lift only an automatic Wallet freeze. */
+/**
+ * Clear expired Member Ban and Red Flag projections, lift only an automatic Wallet freeze, and
+ * queue the matching Member Notification once per expiry.
+ */
 export const processExpiredMemberBanWalletFreezes = async (now = new Date()): Promise<number> => {
   let processed = 0;
   let firstError: unknown;
@@ -916,8 +997,13 @@ export const processExpiredMemberBanWalletFreezes = async (now = new Date()): Pr
   const expiredMembers = await db
     .select({ id: authUser.id })
     .from(authUser)
-    .where(and(isNotNull(authUser.bannedUntil), lte(authUser.bannedUntil, now)))
-    .orderBy(asc(authUser.bannedUntil), asc(authUser.id))
+    .where(
+      or(
+        and(isNotNull(authUser.bannedUntil), lte(authUser.bannedUntil, now)),
+        and(isNotNull(authUser.redFlagExpiresAt), lte(authUser.redFlagExpiresAt, now))
+      )
+    )
+    .orderBy(asc(authUser.id))
     .limit(expiredBanBatchSize);
 
   for (const member of expiredMembers) {
