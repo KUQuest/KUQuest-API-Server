@@ -235,6 +235,7 @@ export const ensureFrontendDemoDisputeQuest = async (
         startTime: new Date(failedAt.getTime() - 2 * 60 * 60 * 1000),
         dueAt: new Date(failedAt.getTime() - 60 * 60 * 1000),
         failedAt,
+        moneyHoldStartedAt: failedAt,
         proofRequired: true,
         createdAt: new Date(failedAt.getTime() - 3 * 60 * 60 * 1000),
         updatedAt: failedAt,

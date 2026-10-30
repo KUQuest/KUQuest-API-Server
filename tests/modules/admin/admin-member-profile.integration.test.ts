@@ -327,6 +327,8 @@ beforeAll(async () => {
           dueAt: null,
           failedAt:
             group.questStatus === 'QUEST_FAILED' ? new Date('2025-01-02T00:00:00.000Z') : null,
+          moneyHoldStartedAt:
+            group.questStatus === 'QUEST_FAILED' ? new Date('2025-01-02T00:00:00.000Z') : null,
         },
       };
     })

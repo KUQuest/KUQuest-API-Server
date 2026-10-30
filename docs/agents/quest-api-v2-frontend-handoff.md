@@ -442,16 +442,18 @@ The event contains no Quest or Candidate data.
 
 Failure and Dispute change types fire once per transition:
 
-| changeType              | When it fires                                                                                                                                                    | Who gets it                     |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                         | Hirer and the submitting Worker |
-| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                               | Hirer and the submitting Worker |
-| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure.                                                      | Hirer and the Workers           |
-| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. The 1-day self-file window starts.                                                                           | Hirer and the Workers           |
-| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees `failedAt + 1 day` has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time. | Hirer and the Workers           |
-| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                              | The filer only                  |
+| changeType              | When it fires                                                                                                                                                                                                                                                                                   | Who gets it                     |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `PROOF_REVIEWED`        | The Hirer reviewed a Proof. Read `reviewedBy`, `reviewReason`, and `reviewedAt` on the Proof Submission.                                                                                                                                                                                        | Hirer and the submitting Worker |
+| `PROOF_AUTO_APPROVED`   | The 24-hour review window ended and the Server approved the Proof.                                                                                                                                                                                                                              | Hirer and the submitting Worker |
+| `QUEST_FAILED`          | Yes: it fires at `dueAt` when work is unfinished (and when a Proof is not approved). One event per failure. In GROUP + FIRST_COME_FIRST_SERVED, a not-approved Proof fails the Quest only when no Worker completed and no Worker is still Active.                                               | Hirer and the Workers           |
+| `DISPUTE_WINDOW_OPENED` | Sent right after `QUEST_FAILED` in the same commit. A GROUP + FIRST_COME_FIRST_SERVED Quest that completes with a not-approved Worker also sends it right after `QUEST_COMPLETED`, to the Hirer, the Workers who were Active, and every not-approved Worker. The 1-day self-file window starts. | Hirer and the Workers           |
+| `DISPUTE_WINDOW_CLOSED` | Sent once, when the lifecycle worker first sees that the hold start + 1 day has passed. It can lag by one worker interval; use `dispute.windowEndsAt` for the exact time.                                                                                                                       | Hirer and the Workers           |
+| `DISPUTE_CASE_UPDATED`  | A Dispute Case was created, resolved, or dismissed.                                                                                                                                                                                                                                             | The filer only                  |
 
 A Worker whose Assignment ended with the failure and who has no Proof left to review gets the socket closed after `QUEST_FAILED`, so that Worker may miss `DISPUTE_WINDOW_OPENED`. Read the Quest after reconnect and use `dispute` from REST.
+
+When a GROUP + FIRST_COME_FIRST_SERVED Quest completes with a not-approved Worker, the not-approved Workers keep the Quest socket while the money hold is open. The Workers who completed get the socket closed after `DISPUTE_WINDOW_OPENED`, so they receive it.
 
 Read `GET /api/v2/quests/mine` from the first cursor page after `SUBSCRIBED`,
 after each event, and after reconnect. Continue paging as needed. REST is
@@ -1119,7 +1121,8 @@ in the list, so a finished Quest still names everyone who worked it. Use it for
 the Group FCFS roster instead of the Work Conversation participants, which drop
 each Worker who finishes before the others.
 
-dispute and moneyHold are null unless the Quest is QUEST_FAILED. See section 13.2.
+dispute and moneyHold are null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED
+with a not-approved GROUP + FIRST_COME_FIRST_SERVED Worker. See section 13.3.
 The same two fields are on GET /api/v2/quests/:questId for the Hirer.
 
 capabilities.canViewOnly is true in QUEST_COMPLETED, QUEST_CANCELLED, and
@@ -2705,8 +2708,13 @@ Success status: HTTP 200.
 ```
 
 Approval settles the relevant money and can complete the Quest.
-Non-approval changes the Quest to QUEST_FAILED and creates the relevant admin
-review item.
+Non-approval makes the Assignment ASSIGNMENT_INCOMPLETE and creates the relevant
+admin review item. In GROUP + FIRST_COME_FIRST_SERVED, `questStatus` stays
+QUEST_IN_PROGRESS while another Worker is Active, and the other Workers can
+still send Proof until `dueAt`. When the last Active Worker has a result, the
+Quest becomes QUEST_COMPLETED if one Worker is ASSIGNMENT_COMPLETED, otherwise
+QUEST_FAILED. In every other mode, non-approval changes the Quest to
+QUEST_FAILED.
 The system can auto-approve a pending Proof after 24 hours.
 
 Errors include:
@@ -2851,11 +2859,11 @@ Hirer only. It is read-only: no Idempotency-Key, no ledger write, no event, no s
 
 `platformFeeSatang` is the Platform Fee the Platform keeps; it is 0 when the fee is part of the refund. `computedAt` is a UTC instant. `previewVersion` is an opaque token of the Quest facts behind the amounts. Money can move between preview and confirm, so treat the amounts as a preview and send the token back on `POST /cancel`.
 
-Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, or an Assigned Quest with a pending Quest Edit Request or no active Worker, as `POST /cancel` refuses).
+Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST_SETTLEMENT_NOT_ALLOWED (not cancellable, an Assigned Quest with a pending Quest Edit Request or no active Worker, or a GROUP + FIRST_COME_FIRST_SERVED Quest in progress with a not-approved Worker, as `POST /cancel` refuses). Admin termination of that running Quest answers 409 QUEST_ACTION_NOT_ALLOWED.
 
 ### 13.3 Dispute window and money hold after failure
 
-`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED.
+`GET /api/v2/quests/:questId` (Hirer) and `GET /api/v2/quests/:questId/participation` (Worker) return two nullable objects. Both are null unless the Quest is QUEST_FAILED, or QUEST_COMPLETED with a not-approved GROUP + FIRST_COME_FIRST_SERVED Worker. The hold starts when the Quest becomes QUEST_FAILED or QUEST_COMPLETED; the not-approved decision alone opens no window.
 
 ```json
 {
@@ -2872,12 +2880,14 @@ Errors: 403 QUEST_NOT_AUTHORIZED (not the Hirer), 404 QUEST_NOT_FOUND, 409 QUEST
 }
 ```
 
-- `dispute.windowEndsAt` is `failedAt + 1 day`; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
+- `dispute.windowEndsAt` is the hold start + 1 day; it is null once the window closed. `canFile` is true while the window is open, the viewer has no case, and the viewer is the Hirer or holds an Assignment.
 - `dispute.myCase` is `{ id, displayId, status, createdAt }` or null. It is the viewer's own case only.
 - GROUP rule: each Member (the Hirer and every assigned Worker) can file one Dispute Case per Quest and sees only their own `myCase`.
 - File with `POST /api/v1/quests/:questId/disputes` and read your case with `GET /api/v1/quests/:questId/disputes/mine`. Filing after the window answers 409 `DISPUTE_CASE_WINDOW_EXPIRED`. (The existing code is used; there is no separate `DISPUTE_WINDOW_CLOSED` error.) Filing again returns the Member's existing case.
-- `moneyHold.releasesAt` is `failedAt + 7 days`. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
+- `moneyHold.releasesAt` is the hold start + 7 days. A Dispute Case does **not** suspend or extend the hold (Admin Rulebook), so the date never moves and there is no `ON_DISPUTE_HOLD` state. `status` turns RELEASED after the lifecycle worker releases the Funding Reservation; `releasesAt` stays the nominal time, so show "released" from `status`, not from the clock.
 - `moneyHold.heldSatang` is what the Hirer's Funding Reservation still holds. It is null for a Worker, who has no view of the Hirer's reservation; a Worker sees only `releasesAt` and `status`.
+
+A GROUP + FIRST_COME_FIRST_SERVED Worker whose Proof is not approved while the Quest goes on gets one data-only Push with `type` `PROOF_NOT_APPROVED`, `questId`, and `assignmentId`. A later failure of the Quest sends that Worker the `QUEST_FAILED` Push too. When the Quest completes instead, each not-approved Worker gets one data-only Push with `type` `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`, `questId`, and `assignmentId`, because the 1-day Dispute window opens then. Its `eventKey` is `quest-v2:QUEST_COMPLETED_DISPUTE_WINDOW_OPEN:<assignmentId>` and its deep link is `kuquest://quest/<questId>`. The Worker whose Proof was the last one not approved gets only this Push, not `PROOF_NOT_APPROVED`. Completed Workers get neither Push.
 
 Push (B7): the Server sends no iOS push (APNs) in this release. That is an infrastructure and product decision. Use the realtime events in section 5.2 and in-app banners on iOS.
 

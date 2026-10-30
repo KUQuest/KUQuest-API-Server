@@ -722,6 +722,34 @@
       "when": 1791486409002,
       "tag": "20261008190648_heavy_red_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793301541580,
+      "tag": "20261029191901_green_vulture",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1793354400000,
+      "tag": "20261030100000_admin_finance_realtime_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1793372400000,
+      "tag": "20261030150000_admin_member_wallet_realtime_event",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1793398800000,
+      "tag": "20261030210000_admin_finance_legacy_sse_payload",
+      "breakpoints": true
     }
   ]
 }

@@ -656,9 +656,11 @@ describe('Quest Assignment API v2', () => {
     if (!postgresAvailable) return;
     const activeQuestId = await createOpenSingleFcfsQuest();
     const completedQuestId = await createOpenSingleFcfsQuest({ questStatus: 'QUEST_COMPLETED' });
+    const failedAt = new Date();
     const incompleteQuestId = await createOpenSingleFcfsQuest({
       questStatus: 'QUEST_FAILED',
-      failedAt: new Date(),
+      failedAt,
+      moneyHoldStartedAt: failedAt,
     });
     const cancelledQuestId = await createOpenSingleFcfsQuest({
       questStatus: 'QUEST_CANCELLED',

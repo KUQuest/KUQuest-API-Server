@@ -23,6 +23,7 @@ import {
   WorkChatTransitionError,
   type QuestTransaction,
 } from '../work-chat/quest-work-chat.port';
+import { notifyAdminQuestAndMembersUpdated } from '../admin-updates';
 
 /**
  * Every legal Quest State transition, keyed by the State being entered. A pair
@@ -83,7 +84,7 @@ export class QuestTransitionNotAllowedError extends Error {
 /** Columns the entered State owns beyond the State itself, its version and its stamps. */
 export type QuestTransitionColumns = Omit<
   Partial<typeof quest.$inferInsert>,
-  'id' | 'questStatus' | 'version' | 'updatedAt'
+  'id' | 'questStatus' | 'version' | 'updatedAt' | 'failedAt' | 'moneyHoldStartedAt'
 >;
 
 export type QuestStateTransition = {
@@ -95,6 +96,8 @@ export type QuestStateTransition = {
   /** Quest row version the caller locked. When present, the write is guarded on it too. */
   version?: number;
   columns?: QuestTransitionColumns;
+  /** A `QUEST_COMPLETED` Quest with an unpaid slot holds the returned funding like a failure. */
+  holdRemainder?: boolean;
   /**
    * The Work Conversation entries this transition implies. An empty list states
    * that the Quest has no Work Conversation step, so a forgotten entry is a
@@ -107,12 +110,14 @@ export type QuestStateTransition = {
   reasonCode?: string | null;
 };
 
-const terminalStamp = (to: QuestStatus, now: Date): QuestTransitionColumns =>
+const terminalStamp = ({ to, now, holdRemainder }: QuestStateTransition) =>
   to === questStatus.failed
-    ? { failedAt: now }
+    ? { failedAt: now, moneyHoldStartedAt: now }
     : to === questStatus.cancelled
       ? { cancelledAt: now }
-      : {};
+      : to === questStatus.completed && holdRemainder
+        ? { moneyHoldStartedAt: now }
+        : {};
 
 const applyWorkChat = async (
   tx: QuestTransaction,
@@ -154,7 +159,7 @@ export const applyQuestStateTransition = async (
   const [updated] = await tx
     .update(quest)
     .set({
-      ...terminalStamp(input.to, input.now),
+      ...terminalStamp(input),
       ...input.columns,
       questStatus: input.to,
       version: sql`${quest.version} + 1`,
@@ -186,6 +191,9 @@ export const applyQuestStateTransition = async (
     });
   }
   await applyWorkChat(tx, input, entries);
+  if (input.actor.actorType !== 'ADMIN') {
+    await notifyAdminQuestAndMembersUpdated(tx, input.questId);
+  }
   if (input.from === questStatus.open && input.to === questStatus.assigned) {
     await notifyQuestRosterUpdate(tx, input.questId);
   }

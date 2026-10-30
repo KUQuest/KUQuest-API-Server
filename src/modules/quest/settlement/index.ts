@@ -11,6 +11,7 @@ export {
   completeQuest,
   failQuestInTransaction,
   failQuestV2InTransaction,
+  markAssignmentIncompleteV2InTransaction,
   questV2CancellationOperationScope,
   settleApprovedLegacyQuestProofAfterFailureInTransaction,
   settleApprovedQuestInTransaction,

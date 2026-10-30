@@ -1,6 +1,7 @@
 import { db } from '@/database/client';
 import { department, faculty, occupation } from '@/database/schema/academic.schema';
 import { authUser } from '@/database/schema/auth.schema';
+import { notifyAdminResourceUpdated } from '@/modules/admin/admin-update.delivery';
 import { isRedFlagActive } from '@/modules/admin/member-penalty';
 import { file } from '@/database/schema/file.schema';
 import { quest, questAssignment } from '@/database/schema/quest.schema';
@@ -117,15 +118,20 @@ export const updateProfile = async (
   }
 
   try {
-    const updated = await db
-      .update(authUser)
-      .set({ ...data, version: sql`${authUser.version} + 1` })
-      .where(
-        expectedVersion === undefined
-          ? eq(authUser.id, userId)
-          : and(eq(authUser.id, userId), eq(authUser.version, expectedVersion))
-      )
-      .returning({ id: authUser.id });
+    const updated = await db.transaction(async (transaction) => {
+      const rows = await transaction
+        .update(authUser)
+        .set({ ...data, version: sql`${authUser.version} + 1` })
+        .where(
+          expectedVersion === undefined
+            ? eq(authUser.id, userId)
+            : and(eq(authUser.id, userId), eq(authUser.version, expectedVersion))
+        )
+        .returning({ id: authUser.id });
+
+      if (rows[0]) await notifyAdminResourceUpdated(transaction, 'MEMBER', rows[0].id);
+      return rows;
+    });
 
     if (updated.length > 0) return 'updated';
     if (expectedVersion !== undefined && (await studentExists(userId))) return 'conflict';

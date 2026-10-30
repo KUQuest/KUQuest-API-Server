@@ -42,6 +42,7 @@ const readQuest = async (questId: string) =>
         questStatus: quest.questStatus,
         version: quest.version,
         failedAt: quest.failedAt,
+        moneyHoldStartedAt: quest.moneyHoldStartedAt,
       })
       .from(quest)
       .where(eq(quest.id, questId))
@@ -177,7 +178,39 @@ describe('Quest State transition module', () => {
     const row = await readQuest(questId);
     expect(row.questStatus).toBe('QUEST_FAILED');
     expect(row.version).toBe(2);
-    expect(row.failedAt).not.toBeNull();
+    expect(row.failedAt).toEqual(new Date('2030-02-02T10:00:00.000Z'));
+    expect(row.moneyHoldStartedAt).toEqual(row.failedAt);
+  });
+
+  it('starts the money hold on completion only when the caller holds the remainder', async () => {
+    if (!postgresAvailable) return;
+    const now = new Date('2030-02-03T10:00:00.000Z');
+    const complete = (questId: string, holdRemainder?: boolean) =>
+      db.transaction((transaction) =>
+        applyQuestStateTransition(transaction, {
+          actor: { actorType: 'SYSTEM' },
+          questId,
+          from: 'QUEST_IN_PROGRESS',
+          to: 'QUEST_COMPLETED',
+          now,
+          holdRemainder,
+          workChat: [],
+        })
+      );
+    const heldId = await createQuest('QUEST_IN_PROGRESS');
+    const paidId = await createQuest('QUEST_IN_PROGRESS');
+
+    expect(await complete(heldId, true)).toBe(true);
+    expect(await complete(paidId)).toBe(true);
+    expect(await readQuest(heldId)).toMatchObject({
+      questStatus: 'QUEST_COMPLETED',
+      failedAt: null,
+      moneyHoldStartedAt: now,
+    });
+    expect(await readQuest(paidId)).toMatchObject({
+      questStatus: 'QUEST_COMPLETED',
+      moneyHoldStartedAt: null,
+    });
   });
 
   it('answers false and writes nothing when another transaction moved the Quest first', async () => {
@@ -200,6 +233,7 @@ describe('Quest State transition module', () => {
       questStatus: 'QUEST_IN_PROGRESS',
       version: 1,
       failedAt: null,
+      moneyHoldStartedAt: null,
     });
     expect(
       await db

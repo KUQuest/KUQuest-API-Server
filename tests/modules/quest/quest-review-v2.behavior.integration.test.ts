@@ -131,6 +131,7 @@ const createQuest = async (
     ...overrides,
     questStatus,
     failedAt: overrides.failedAt ?? (questStatus === 'QUEST_FAILED' ? terminalAt : null),
+    moneyHoldStartedAt: overrides.failedAt ?? (questStatus === 'QUEST_FAILED' ? terminalAt : null),
     cancelledAt: questStatus === 'QUEST_CANCELLED' ? terminalAt : null,
   });
   await db.insert(questAssignment).values(

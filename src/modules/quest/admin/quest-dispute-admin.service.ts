@@ -15,11 +15,13 @@ import {
   questV2ProofSubmission,
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
+import { walletWallet } from '@/database/schema/wallet.schema';
 import {
   formatDisputeDisplayId,
   formatDisplayIdSql,
   formatQuestDisplayId,
   getAdminMemberModerationContext,
+  notifyAdminResourceUpdated,
 } from '@/modules/admin';
 import type { AdminMemberModerationContextFields, AdminMemberStatus } from '@/modules/admin';
 import {
@@ -43,6 +45,7 @@ import {
 
 import { and, asc, count, desc, eq, or, sql } from 'drizzle-orm';
 
+import { isMoneyHoldOpen, moneyHoldDurationMs } from '../shared';
 import { readQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import { questV2ProofStorage } from '../v2/proof/quest-proof-v2.storage';
@@ -70,6 +73,25 @@ const notifyDisputeCaseUpdated = (
     changeType: 'DISPUTE_CASE_UPDATED',
   });
 
+/**
+ * Admin Dispute Case queues, counts, detail, and linked Admin Quest detail use
+ * these rows as their source. Notify in the same transaction as each write so
+ * rollback and idempotent replay do not publish a stale invalidation.
+ */
+const notifyAdminDisputeCaseViewsUpdated = async (
+  transaction: WalletTransaction,
+  record: Pick<typeof adminDisputeCase.$inferSelect, 'id' | 'questId'>,
+  walletIds: string[] = []
+) => {
+  await notifyAdminResourceUpdated(transaction, 'DISPUTE_CASE', record.id);
+  await notifyAdminResourceUpdated(transaction, 'QUEST', record.questId);
+  await Promise.all(
+    [...new Set(walletIds)].map((walletId) =>
+      notifyAdminResourceUpdated(transaction, 'WALLET', walletId)
+    )
+  );
+};
+
 /** Rulebook: Hirer/Worker self-file within 1 day of failure; Admin on a Worker's behalf within 5. */
 const disputeFilingWindowMs = (adminOpened: boolean) =>
   adminOpened ? 5 * dayMs : disputeSelfFileWindowMs;
@@ -91,7 +113,6 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_OUTCOME_INVALID'
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
     | 'DISPUTE_CASE_WINDOW_EXPIRED'
-    | 'DISPUTE_CASE_FAILED_AT_UNAVAILABLE'
     | 'DISPUTE_CASE_RESPONDENT_NOT_ALLOWED'
     | 'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED'
     | 'DISPUTE_CASE_RESPONSE_ALREADY_SUBMITTED';
@@ -285,28 +306,20 @@ export const createAdminDisputeCaseInTransaction = async (
     .select({
       id: quest.id,
       hirerId: quest.hirerId,
-      questStatus: quest.questStatus,
-      failedAt: quest.failedAt,
+      moneyHoldStartedAt: quest.moneyHoldStartedAt,
     })
     .from(quest)
     .where(eq(quest.id, input.questId))
     .for('update');
-  if (!currentQuest || currentQuest.questStatus !== 'QUEST_FAILED') {
+  if (!currentQuest || !isMoneyHoldOpen(currentQuest)) {
     throw new AdminDisputeCaseError(
       'DISPUTE_CASE_QUEST_NOT_FAILED',
-      'Only a failed Quest can receive a Dispute Case.'
+      'Only a Quest with a money hold can receive a Dispute Case.'
     );
   }
 
   const filingWindow = disputeFilingWindowMs(Boolean(input.openedByAdminId));
-  const failedAt = currentQuest.failedAt;
-  if (!failedAt) {
-    throw new AdminDisputeCaseError(
-      'DISPUTE_CASE_FAILED_AT_UNAVAILABLE',
-      'The Quest failure time is unavailable.'
-    );
-  }
-  if (now.getTime() > failedAt.getTime() + filingWindow) {
+  if (now.getTime() > currentQuest.moneyHoldStartedAt.getTime() + filingWindow) {
     throw new AdminDisputeCaseError(
       'DISPUTE_CASE_WINDOW_EXPIRED',
       'The Dispute Case filing window has expired.'
@@ -373,6 +386,7 @@ export const createAdminDisputeCaseInTransaction = async (
         .returning();
   if (created) {
     await notifyDisputeCaseUpdated(transaction, created);
+    await notifyAdminDisputeCaseViewsUpdated(transaction, created);
     return created;
   }
   const [concurrent] = await transaction
@@ -406,8 +420,7 @@ export const submitDisputeCaseResponse = async ({
         quest: {
           id: quest.id,
           hirerId: quest.hirerId,
-          questStatus: quest.questStatus,
-          failedAt: quest.failedAt,
+          moneyHoldStartedAt: quest.moneyHoldStartedAt,
         },
       })
       .from(adminDisputeCase)
@@ -416,10 +429,10 @@ export const submitDisputeCaseResponse = async ({
       .for('update');
     if (!row)
       throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
-    if (row.quest.questStatus !== 'QUEST_FAILED') {
+    if (!isMoneyHoldOpen(row.quest)) {
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_QUEST_NOT_FAILED',
-        'A response is only available while the Quest is failed.'
+        'A response is only available while the Quest has a money hold.'
       );
     }
     if (row.disputeCase.status !== 'DISPUTE_CASE_PENDING') {
@@ -429,14 +442,7 @@ export const submitDisputeCaseResponse = async ({
       );
     }
 
-    const failedAt = row.quest.failedAt;
-    if (!failedAt) {
-      throw new AdminDisputeCaseError(
-        'DISPUTE_CASE_FAILED_AT_UNAVAILABLE',
-        'The Quest failure time is unavailable.'
-      );
-    }
-    if (now.getTime() > failedAt.getTime() + 7 * dayMs) {
+    if (now.getTime() > row.quest.moneyHoldStartedAt.getTime() + moneyHoldDurationMs) {
       throw new AdminDisputeCaseError(
         'DISPUTE_CASE_RESPONSE_WINDOW_EXPIRED',
         'The Dispute Case response window has expired.'
@@ -500,6 +506,7 @@ export const submitDisputeCaseResponse = async ({
       );
     }
     await notifyDisputeCaseUpdated(transaction, updated);
+    await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
     return summaryFromRecord(updated);
   });
 
@@ -964,23 +971,23 @@ export const resolveAdminDisputeCase = async (
             .select({
               id: quest.id,
               hirerId: quest.hirerId,
-              questStatus: quest.questStatus,
-              failedAt: quest.failedAt,
-              updatedAt: quest.updatedAt,
+              moneyHoldStartedAt: quest.moneyHoldStartedAt,
               fundingReservationId: quest.fundingReservationId,
             })
             .from(quest)
             .where(eq(quest.id, current.questId))
             .for('update');
-          if (!currentQuest || currentQuest.questStatus !== 'QUEST_FAILED') {
+          if (!currentQuest || !isMoneyHoldOpen(currentQuest)) {
             throw new AdminDisputeCaseError(
               'DISPUTE_CASE_QUEST_NOT_FAILED',
-              'Only a failed Quest can have a Dispute Case resolved.'
+              'Only a Quest with a money hold can have a Dispute Case resolved.'
             );
           }
-          const failedAt = currentQuest.failedAt ?? currentQuest.updatedAt;
           const filingWindow = disputeFilingWindowMs(Boolean(current.openedByAdminId));
-          if (current.createdAt.getTime() > failedAt.getTime() + filingWindow) {
+          if (
+            current.createdAt.getTime() >
+            currentQuest.moneyHoldStartedAt.getTime() + filingWindow
+          ) {
             throw new AdminDisputeCaseError(
               'DISPUTE_CASE_WINDOW_EXPIRED',
               'Dispute Case was opened after its allowed filing window.'
@@ -1011,6 +1018,7 @@ export const resolveAdminDisputeCase = async (
                 'Dispute Case changed before dismissal.'
               );
             await notifyDisputeCaseUpdated(transaction, updated);
+            await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
             return summaryResultInTransaction(transaction, updated.id);
           }
 
@@ -1068,7 +1076,22 @@ export const resolveAdminDisputeCase = async (
               'DISPUTE_CASE_NOT_PENDING',
               'Dispute Case changed before resolution.'
             );
+          const affectedWallets = await transaction
+            .select({ id: walletWallet.id })
+            .from(walletWallet)
+            .where(
+              or(
+                eq(walletWallet.userId, currentQuest.hirerId),
+                eq(walletWallet.userId, input.workerId!)
+              )
+            )
+            .orderBy(asc(walletWallet.id));
           await notifyDisputeCaseUpdated(transaction, updated);
+          await notifyAdminDisputeCaseViewsUpdated(
+            transaction,
+            updated,
+            affectedWallets.map(({ id }) => id)
+          );
           return summaryResultInTransaction(transaction, updated.id);
         },
       };
@@ -1084,7 +1107,7 @@ export type QuestDisputeSummary = {
 };
 
 /**
- * The viewer's Dispute view of a Quest. Null unless the Quest is `QUEST_FAILED`.
+ * The viewer's Dispute view of a Quest. Null unless the Quest has a money hold.
  * `canFile` and `windowEndsAt` follow the self-file window used by `createAdminDisputeCase`.
  */
 export const readQuestDisputeSummary = async (
@@ -1095,14 +1118,12 @@ export const readQuestDisputeSummary = async (
   const [row] = await db
     .select({
       hirerId: quest.hirerId,
-      questStatus: quest.questStatus,
-      failedAt: quest.failedAt,
-      updatedAt: quest.updatedAt,
+      moneyHoldStartedAt: quest.moneyHoldStartedAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
     .limit(1);
-  if (!row || row.questStatus !== 'QUEST_FAILED') return null;
+  if (!row || !isMoneyHoldOpen(row)) return null;
 
   const [existing] = await db
     .select()
@@ -1117,7 +1138,7 @@ export const readQuestDisputeSummary = async (
           .from(questAssignment)
           .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
           .limit(1);
-  const endsAt = new Date((row.failedAt ?? row.updatedAt).getTime() + disputeFilingWindowMs(false));
+  const endsAt = new Date(row.moneyHoldStartedAt.getTime() + disputeFilingWindowMs(false));
   const open = now.getTime() <= endsAt.getTime();
   return {
     canFile: open && !existing && (viewerId === row.hirerId || assignment !== undefined),
@@ -1141,9 +1162,9 @@ export type QuestMoneyHold = {
 };
 
 /**
- * The 7-day hold on a failed Quest. It ends at `failedAt + 7 days` and a Dispute Case does not
+ * The 7-day money hold. It ends at `moneyHoldStartedAt + 7 days` and a Dispute Case does not
  * move that instant (Admin Rulebook), so `releasesAt` stays the nominal time even if the
- * lifecycle worker runs late. Null unless the Quest is `QUEST_FAILED`.
+ * lifecycle worker runs late. Null unless the Quest has a money hold.
  */
 export const readQuestMoneyHold = async (
   viewerId: string,
@@ -1152,15 +1173,13 @@ export const readQuestMoneyHold = async (
   const [row] = await db
     .select({
       hirerId: quest.hirerId,
-      questStatus: quest.questStatus,
-      failedAt: quest.failedAt,
-      updatedAt: quest.updatedAt,
+      moneyHoldStartedAt: quest.moneyHoldStartedAt,
     })
     .from(quest)
     .where(eq(quest.id, questId))
     .limit(1);
-  if (!row || row.questStatus !== 'QUEST_FAILED') return null;
-  const releasesAt = new Date((row.failedAt ?? row.updatedAt).getTime() + 7 * dayMs);
+  if (!row || !isMoneyHoldOpen(row)) return null;
+  const releasesAt = new Date(row.moneyHoldStartedAt.getTime() + moneyHoldDurationMs);
   const escrow = await db.transaction((transaction) =>
     readQuestEscrow(transaction, { ownerUserId: row.hirerId, questId })
   );

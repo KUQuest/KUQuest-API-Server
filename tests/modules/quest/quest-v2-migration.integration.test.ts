@@ -669,6 +669,7 @@ const createOpenGroupCandidateQuest = async (
 ) => {
   const id = randomUUID();
   questIds.push(id);
+  const failedAt = overrides.questStatus === 'QUEST_FAILED' ? new Date() : null;
   await db.insert(quest).values({
     id,
     hirerId: hirer.id,
@@ -690,7 +691,8 @@ const createOpenGroupCandidateQuest = async (
     startTime: new Date('2030-01-01T10:00:00.000Z'),
     dueAt: new Date('2030-01-01T11:00:00.000Z'),
     proofRequired: true,
-    failedAt: overrides.questStatus === 'QUEST_FAILED' ? new Date() : null,
+    failedAt,
+    moneyHoldStartedAt: failedAt,
     ...overrides,
   });
   return id;
@@ -1983,7 +1985,7 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(rejectedReview.status).toBe(200);
     expect((await rejectedReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_NOT_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_IN_PROGRESS',
     });
     expect(
       (
@@ -2011,8 +2013,11 @@ describe('Quest API v1 to v2 migration verification', () => {
     expect(pendingReview.status).toBe(200);
     expect((await pendingReview.json()).data).toMatchObject({
       proof: { status: 'PROOF_APPROVED' },
-      questStatus: 'QUEST_FAILED',
+      questStatus: 'QUEST_COMPLETED',
     });
+    expect(
+      await readTestQuestEscrow({ ownerUserId: hirer.id, questId: failedQuest.questId })
+    ).toMatchObject({ status: 'ACTIVE', remainingSatang: 1_020 });
 
     const autoQuest = await createInProgressQuest({
       mode: 'FIRST_COME_FIRST_SERVED',

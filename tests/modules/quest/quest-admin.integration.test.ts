@@ -399,6 +399,7 @@ beforeAll(async () => {
     tagId,
     startTime: new Date('2030-06-06T00:00:00.000Z'),
     failedAt: new Date('2030-06-07T00:00:00.000Z'),
+    moneyHoldStartedAt: new Date('2030-06-07T00:00:00.000Z'),
   });
   await db.insert(questAssignment).values({
     questId: disputeQuestId,

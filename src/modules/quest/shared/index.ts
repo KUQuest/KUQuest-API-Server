@@ -1,4 +1,5 @@
 export * from './command';
+export * from './admin-updates';
 export * from './escrow';
 export * from './image';
 export * from './title';
@@ -14,6 +15,7 @@ export {
   type WorkChatMembershipWriter,
 } from './work-chat';
 export * from './contracts';
+export { isMoneyHoldOpen, moneyHoldDurationMs } from './money-hold';
 export {
   startQuestWork,
   questV1StartWorkOperationScope,
