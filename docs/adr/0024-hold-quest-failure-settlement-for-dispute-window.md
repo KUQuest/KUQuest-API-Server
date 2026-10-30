@@ -55,4 +55,8 @@ The code this decision needs — keeping the reservation `ACTIVE` and
 releasing it at day 7 — is listed in `docs/reconciliation/admin-reconciliation.md`
 §Migration and implementation checklist.
 
+Amendment (ADR 0036): an approved team Dispute Case with an unpaid split pauses
+the day-7 release of that Quest until the split is paid. The pause is bounded by
+the 24-hour split deadline plus payment retries.
+
 Status: accepted.

@@ -1074,6 +1074,70 @@ export const settleFundingReservation = async (
   return result;
 };
 
+export type DisputeFundsAvailable = {
+  /** What the Quest's Funding Reservation can still redirect to Workers. */
+  capSatang: number;
+  /** What a payment can use now: the cap while held, else the cap limited by Spending Balance. */
+  payableSatang: number;
+};
+
+/**
+ * Read how many Satang a Dispute Case payment can use. While the reservation is
+ * ACTIVE the held remainder pays. After the hold released, the remaining cap
+ * is paid from the Hirer's Spending Balance, so the Spending Balance limits it.
+ */
+export const readDisputeFundsAvailable = async (
+  transaction: WalletTransaction,
+  input: { ownerUserId: string; reservationId: string }
+): Promise<DisputeFundsAvailable> => {
+  const [reservation] = await transaction
+    .select()
+    .from(walletFundingReservation)
+    .where(
+      and(
+        eq(walletFundingReservation.id, input.reservationId),
+        eq(walletFundingReservation.ownerUserId, input.ownerUserId)
+      )
+    )
+    .limit(1);
+  if (!reservation) {
+    throw new MoneyDomainError(
+      'FUNDING_RESERVATION_NOT_FOUND',
+      'Funding Reservation does not exist.'
+    );
+  }
+  if (reservation.status === 'ACTIVE') {
+    return { capSatang: reservation.remainingSatang, payableSatang: reservation.remainingSatang };
+  }
+  if (reservation.status !== 'RELEASED') return { capSatang: 0, payableSatang: 0 };
+  const [fundingSettled] = await transaction
+    .select({
+      totalAmountSatang: sql<number>`coalesce(sum(${walletFundingReservationSettlement.totalAmountSatang}), 0)`,
+    })
+    .from(walletFundingReservationSettlement)
+    .where(eq(walletFundingReservationSettlement.reservationId, reservation.id));
+  const [disputeSettled] = await transaction
+    .select({
+      amountSatang: sql<number>`coalesce(sum(${walletDisputeSettlement.amountSatang}), 0)`,
+    })
+    .from(walletDisputeSettlement)
+    .where(eq(walletDisputeSettlement.reservationId, reservation.id));
+  const [ownerWallet] = await transaction
+    .select({ spendingBalanceSatang: walletWallet.spendingBalanceSatang })
+    .from(walletWallet)
+    .where(eq(walletWallet.id, reservation.walletId));
+  const capSatang = Math.max(
+    reservation.totalReservedSatang -
+      Number(fundingSettled?.totalAmountSatang ?? 0) -
+      Number(disputeSettled?.amountSatang ?? 0),
+    0
+  );
+  return {
+    capSatang,
+    payableSatang: Math.min(capSatang, ownerWallet?.spendingBalanceSatang ?? 0),
+  };
+};
+
 /**
  * Redirect a Dispute Case amount from the Quest Funding Reservation.
  *

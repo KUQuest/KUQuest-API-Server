@@ -10,11 +10,11 @@ import {
   questTeamInvitation,
   questV2TeamRewardAllocation,
 } from '@/database/schema/quest.schema';
-import { adminDisputeCase } from '@/database/schema/admin.schema';
+import { adminDisputeCase, adminDisputeTeamAllocation } from '@/database/schema/admin.schema';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
-import { and, asc, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, lte, ne, notExists } from 'drizzle-orm';
 
 import {
   assignmentStatus,
@@ -28,6 +28,10 @@ import {
   disputeDecisionWindowExpiredSql,
   disputeSelfFileWindowMs,
 } from '../admin/quest-dispute-admin.service';
+import {
+  dueTeamDisputeSplitIds,
+  settleDueTeamDisputeSplit,
+} from '../admin/quest-dispute-team-split.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import { readQuestEscrow, releaseQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { autoApproveDueProofs } from '../v1';
@@ -99,7 +103,8 @@ export type QuestLifecycleWorkerError = {
     | 'quest-proof-upload-cleanup'
     | 'work-chat-attachment-cleanup'
     | 'provider-event-payload-purge'
-    | 'team-reward-allocation-timeout';
+    | 'team-reward-allocation-timeout'
+    | 'team-dispute-split';
   id?: string;
   cause: unknown;
 };
@@ -115,6 +120,7 @@ export type QuestLifecycleWorkerResult = {
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
   autoAllocatedTeamRewardQuestIds: string[];
+  settledTeamDisputeSplitQuestIds: string[];
   autoApprovedProofIds: string[];
   autoApprovedCompletionConfirmationIds: string[];
   errors: QuestLifecycleWorkerError[];
@@ -372,7 +378,23 @@ const dueMoneyHoldReleaseIds = async (now: Date, limit: number) =>
   db
     .select({ id: quest.id })
     .from(quest)
-    .where(lte(quest.moneyHoldStartedAt, new Date(now.getTime() - moneyHoldDurationMs)))
+    .where(
+      and(
+        lte(quest.moneyHoldStartedAt, new Date(now.getTime() - moneyHoldDurationMs)),
+        // An approved team Dispute Case keeps the hold until its split is paid.
+        notExists(
+          db
+            .select({ id: adminDisputeTeamAllocation.id })
+            .from(adminDisputeTeamAllocation)
+            .where(
+              and(
+                eq(adminDisputeTeamAllocation.questId, quest.id),
+                ne(adminDisputeTeamAllocation.status, 'PAID')
+              )
+            )
+        )
+      )
+    )
     .orderBy(asc(quest.moneyHoldStartedAt), asc(quest.id))
     .limit(limit);
 
@@ -418,6 +440,17 @@ const releaseMoneyHold = async (questId: string, now: Date): Promise<boolean> =>
       current.moneyHoldStartedAt.getTime() > now.getTime() - moneyHoldDurationMs
     )
       return false;
+    const [unpaidSplit] = await transaction
+      .select({ id: adminDisputeTeamAllocation.id })
+      .from(adminDisputeTeamAllocation)
+      .where(
+        and(
+          eq(adminDisputeTeamAllocation.questId, current.id),
+          ne(adminDisputeTeamAllocation.status, 'PAID')
+        )
+      )
+      .limit(1);
+    if (unpaidSplit) return false;
     // The Quest row lock above serializes the worker runs. This status read makes the
     // worker report each release exactly once, because an idempotent replay of a
     // completed release returns the same result as the first release.
@@ -692,6 +725,18 @@ export const runQuestLifecycleWorker = async (
     options.onError
   );
 
+  const dueTeamDisputeSplits = await dueTeamDisputeSplitIds(now, limit);
+  const paidTeamDisputeSplitIds = await processIds(
+    dueTeamDisputeSplits.map(({ id }) => id),
+    'team-dispute-split',
+    (id) => settleDueTeamDisputeSplit(id, now),
+    errors,
+    options.onError
+  );
+  const settledTeamDisputeSplitQuestIds = dueTeamDisputeSplits
+    .filter(({ id }) => paidTeamDisputeSplitIds.includes(id))
+    .map(({ questId }) => questId);
+
   const closedDisputeWindowQuestIds = await processIds(
     (await dueDisputeWindowCloseIds(now, limit)).map(({ id }) => id),
     'dispute-window-close',
@@ -755,6 +800,7 @@ export const runQuestLifecycleWorker = async (
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,
     autoAllocatedTeamRewardQuestIds,
+    settledTeamDisputeSplitQuestIds,
     autoApprovedProofIds,
     autoApprovedCompletionConfirmationIds,
     errors,

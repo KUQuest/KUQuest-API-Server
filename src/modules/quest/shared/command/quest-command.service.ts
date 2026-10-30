@@ -72,6 +72,7 @@ const questCommandInvalidations: Record<
   { quest: boolean; members?: 'quest-roster' | 'related' }
 > = {
   dispute_case: { quest: false },
+  'dispute-team-split': { quest: false },
   'quest-v2-conduct-report': { quest: false },
   'quest-v2-review': { quest: false },
   'quest-v2-team-reward-allocation': { quest: false },

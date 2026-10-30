@@ -23,6 +23,7 @@ import {
   questV2CompletionConfirmation,
   questV2ProofSubmission,
 } from './quest.schema';
+import { walletLedgerTransaction } from './wallet.schema';
 import { chatAttachment, chatConversation, chatMessage } from './work-chat.schema';
 
 export const adminAction = pgTable(
@@ -530,6 +531,8 @@ export const adminDisputeCase = pgTable(
       .notNull()
       .references(() => authUser.id),
     openedByAdminId: uuid('opened_by_admin_id').references(() => authAdmin.id),
+    /** The selected Candidate Team a team-leader filing covers; null for any other filing. */
+    teamId: uuid('team_id').references(() => questCandidateTeamV2.id),
     category: text('category').$type<DisputeCaseCategory>(),
     submittedDetail: text('submitted_detail'),
     filerStatement: text('filer_statement'),
@@ -581,6 +584,101 @@ export const adminDisputeCase = pgTable(
         OR (${table.status} = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}) = 0 AND ${table.resolvedAt} IS NOT NULL)
         OR (${table.status} = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(${table.resolvedWorkerId}, ${table.resolvedAmountSatang}, ${table.resolvedByAdminId}, ${table.resolvedAt}) = 4)
       )`
+    ),
+  ]
+);
+
+export const disputeTeamAllocationStatuses = ['AWAITING_SPLIT', 'SPLIT_CONFIRMED', 'PAID'] as const;
+export type DisputeTeamAllocationStatus = (typeof disputeTeamAllocationStatuses)[number];
+
+export const disputeTeamAllocationSources = ['LEADER', 'AUTO_EQUAL'] as const;
+export type DisputeTeamAllocationSource = (typeof disputeTeamAllocationSources)[number];
+
+/** The Admin-approved Satang of a team Dispute Case, waiting for the Leader's split. */
+export const adminDisputeTeamAllocation = pgTable(
+  'admin_dispute_team_allocations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    disputeCaseId: uuid('dispute_case_id')
+      .notNull()
+      .references(() => adminDisputeCase.id, { onDelete: 'cascade' }),
+    questId: uuid('quest_id')
+      .notNull()
+      .references(() => quest.id, { onDelete: 'cascade' }),
+    teamId: uuid('team_id')
+      .notNull()
+      .references(() => questCandidateTeamV2.id),
+    leaderId: uuid('leader_id')
+      .notNull()
+      .references(() => authUser.id),
+    status: text('status').$type<DisputeTeamAllocationStatus>().default('AWAITING_SPLIT').notNull(),
+    splitSource: text('split_source').$type<DisputeTeamAllocationSource>(),
+    approvedAmountSatang: integer('approved_amount_satang').notNull(),
+    splitDeadlineAt: timestamp('split_deadline_at', { withTimezone: true }).notNull(),
+    splitConfirmedAt: timestamp('split_confirmed_at', { withTimezone: true }),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    /** The Wallet error code of the last failed payment attempt; cleared when payment succeeds. */
+    paymentFailureCode: text('payment_failure_code'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_dispute_team_allocations_case_key').on(table.disputeCaseId),
+    index('admin_dispute_team_allocations_quest_idx').on(table.questId),
+    index('admin_dispute_team_allocations_due_idx').on(table.status, table.splitDeadlineAt),
+    check(
+      'admin_dispute_team_allocations_status_check',
+      sql`${table.status} IN ('AWAITING_SPLIT', 'SPLIT_CONFIRMED', 'PAID')`
+    ),
+    check(
+      'admin_dispute_team_allocations_source_check',
+      sql`${table.splitSource} IS NULL OR ${table.splitSource} IN ('LEADER', 'AUTO_EQUAL')`
+    ),
+    check(
+      'admin_dispute_team_allocations_amount_check',
+      sql`${table.approvedAmountSatang} BETWEEN 1 AND 2000000000`
+    ),
+    check(
+      'admin_dispute_team_allocations_progress_check',
+      sql`(
+        (${table.status} = 'AWAITING_SPLIT' AND ${table.splitSource} IS NULL AND ${table.splitConfirmedAt} IS NULL AND ${table.paidAt} IS NULL)
+        OR (${table.status} = 'SPLIT_CONFIRMED' AND ${table.splitSource} IS NOT NULL AND ${table.splitConfirmedAt} IS NOT NULL AND ${table.paidAt} IS NULL)
+        OR (${table.status} = 'PAID' AND ${table.splitSource} IS NOT NULL AND ${table.splitConfirmedAt} IS NOT NULL AND ${table.paidAt} IS NOT NULL AND ${table.paymentFailureCode} IS NULL)
+      )`
+    ),
+  ]
+);
+
+/** One immutable split row per Team member, with the Ledger Transaction that paid it. */
+export const adminDisputeTeamAllocationMember = pgTable(
+  'admin_dispute_team_allocation_members',
+  {
+    allocationId: uuid('allocation_id')
+      .notNull()
+      .references(() => adminDisputeTeamAllocation.id, { onDelete: 'cascade' }),
+    memberId: uuid('member_id')
+      .notNull()
+      .references(() => authUser.id),
+    percentageBasisPoints: integer('percentage_basis_points').notNull(),
+    amountSatang: integer('amount_satang').notNull(),
+    /** The payment evidence; null while unpaid and for a member whose amount is zero. */
+    ledgerTransactionId: uuid('ledger_transaction_id').references(() => walletLedgerTransaction.id),
+    paidAt: timestamp('paid_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('admin_dispute_team_allocation_members_key').on(table.allocationId, table.memberId),
+    check(
+      'admin_dispute_team_allocation_members_basis_points_check',
+      sql`${table.percentageBasisPoints} BETWEEN 0 AND 10000`
+    ),
+    check(
+      'admin_dispute_team_allocation_members_amount_check',
+      sql`${table.amountSatang} BETWEEN 0 AND 2000000000`
+    ),
+    check(
+      'admin_dispute_team_allocation_members_paid_check',
+      sql`(${table.ledgerTransactionId} IS NULL) = (${table.paidAt} IS NULL OR ${table.amountSatang} = 0)`
     ),
   ]
 );
