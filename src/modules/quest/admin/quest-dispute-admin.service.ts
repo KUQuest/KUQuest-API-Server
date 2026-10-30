@@ -131,6 +131,7 @@ export type AdminDisputeCaseSummary = {
   filerUserId: string;
   openedByAdminId: string | null;
   status: DisputeCaseStatus;
+  category: DisputeCaseCategory | null;
   version: number;
   resolvedWorkerId: string | null;
   resolvedAmountSatang: number | null;
@@ -257,6 +258,7 @@ export const summaryFromRecord = (
   filerUserId: record.filerUserId,
   openedByAdminId: record.openedByAdminId,
   status: record.status,
+  category: record.category,
   version: record.version,
   resolvedWorkerId: record.resolvedWorkerId,
   resolvedAmountSatang: record.resolvedAmountSatang,
@@ -1097,7 +1099,16 @@ export const resolveAdminDisputeCase = async (
       };
     },
   });
-  return { ...result, outcome: input.outcome };
+  let resourceSummary = result.resourceSummary;
+  if (!Object.prototype.hasOwnProperty.call(resourceSummary, 'category')) {
+    const [persistedCase] = await db
+      .select({ category: adminDisputeCase.category })
+      .from(adminDisputeCase)
+      .where(eq(adminDisputeCase.id, input.disputeCaseId))
+      .limit(1);
+    resourceSummary = { ...resourceSummary, category: persistedCase?.category ?? null };
+  }
+  return { ...result, resourceSummary, outcome: input.outcome };
 };
 
 export type QuestDisputeSummary = {

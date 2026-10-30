@@ -131,6 +131,7 @@ export const adminDisputeSummarySchema = t.Object({
   filerUserId: t.String({ format: 'uuid' }),
   openedByAdminId: t.Nullable(t.String({ format: 'uuid' })),
   status: disputeCaseStatusSchema,
+  category: t.Nullable(disputeCaseCategorySchema),
   version: t.Integer({ minimum: 1 }),
   resolvedWorkerId: t.Nullable(t.String({ format: 'uuid' })),
   resolvedAmountSatang: t.Nullable(t.Integer({ minimum: 1 })),

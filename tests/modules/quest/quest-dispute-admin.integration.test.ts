@@ -5,9 +5,11 @@ import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { quest, questAssignment, proofSubmission } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { createAdminActionService } from '@/modules/admin';
 import { runQuestLifecycleWorker } from '@/modules/quest/lifecycle';
 import { autoApproveDueProofs, reviewProof } from '@/modules/quest/v1';
-import { createAdminDisputeCaseInTransaction } from '@/modules/quest/admin';
+import { createAdminDisputeCaseInTransaction, summaryFromRecord } from '@/modules/quest/admin';
+import { disputeAdminActionCatalog } from '@/modules/quest/admin/quest-dispute-admin.policy';
 import {
   readQuestDisputeSummary,
   readQuestMoneyHold,
@@ -38,6 +40,7 @@ import { Elysia } from 'elysia';
 
 let postgresAvailable = false;
 let adminCookie = '';
+let adminId = '';
 let memberCookie = '';
 /** Fixture Quests whose seeded queue rows must leave the shared queue. */
 
@@ -81,6 +84,8 @@ type DisputeFixture = {
   workerId: string;
   reservationId: string;
 };
+
+type LegacyDisputeSummary = Omit<ReturnType<typeof summaryFromRecord>, 'category'>;
 
 const createDisputeFixture = async (
   status: 'QUEST_FAILED' | 'QUEST_COMPLETED' | 'QUEST_CANCELLED' = 'QUEST_FAILED',
@@ -294,6 +299,7 @@ beforeAll(async () => {
   });
   const createdAdminId = adminSignUp.user?.id;
   if (!createdAdminId) throw new Error('Dispute Admin was not created.');
+  adminId = createdAdminId;
   const adminLogin = await app.handle(
     new Request('http://localhost/api/admin/auth/sign-in/email', {
       method: 'POST',
@@ -375,10 +381,17 @@ describe('Admin Dispute API', () => {
         'application/json'
       ]?.schema
     );
+    const listSchemaText = JSON.stringify(
+      document.paths['/api/v1/admin/disputes']?.get?.responses?.['200']?.content?.[
+        'application/json'
+      ]?.schema
+    );
     expect(detailSchemaText).toContain('memberStatus');
     expect(detailSchemaText).toContain('previousReportCount');
     expect(detailSchemaText).toContain('confirmedViolationCount');
     expect(detailSchemaText).toContain('previousModerationActions');
+    expect(listSchemaText).toContain('category');
+    expect(listSchemaText).toContain('PROOF_REVIEW');
   });
 
   it('opens an Admin-filed Dispute Case through the production queue route', async () => {
@@ -575,7 +588,9 @@ describe('Admin Dispute API', () => {
     };
     expect(queue.status).toBe(200);
     expect(queueBody.data.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: fixture.disputeCaseId })])
+      expect.arrayContaining([
+        expect.objectContaining({ id: fixture.disputeCaseId, category: 'PROOF_REVIEW' }),
+      ])
     );
     expect(queueBody.data.items[0]?.displayId).toEqual(expect.stringMatching(/^DSP-\d{6,}$/));
 
@@ -625,6 +640,27 @@ describe('Admin Dispute API', () => {
       action: 'DISPUTE_CASE_EVIDENCE_ACCESS',
       resourceId: fixture.disputeCaseId,
     });
+  });
+
+  it('returns a null Category in an Admin list summary when no Category is stored', async () => {
+    if (!postgresAvailable) return;
+    const fixture = await createDisputeFixture();
+    await db
+      .update(adminDisputeCase)
+      .set({ category: null, submittedDetail: null })
+      .where(eq(adminDisputeCase.id, fixture.disputeCaseId));
+
+    const response = await adminRequest(
+      `/api/v1/admin/disputes?q=${encodeURIComponent(fixture.disputeCaseId)}`
+    );
+    const body = (await response.json()) as {
+      data: { items: Array<{ id: string; category: string | null }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.data.items).toEqual([
+      expect.objectContaining({ id: fixture.disputeCaseId, category: null }),
+    ]);
   });
 
   it('walks every seeded queue row once per sort across a microsecond tie and rejects stale and malformed cursors', async () => {
@@ -835,25 +871,81 @@ describe('Admin Dispute API', () => {
           decisionReasonText,
         }),
       });
-    const first = await request();
-    const firstBody = await first.json();
+    const legacyActionService = createAdminActionService(disputeAdminActionCatalog);
+    const legacyAction = await legacyActionService.executeCommand<LegacyDisputeSummary>({
+      adminId,
+      action: 'DISPUTE_CASE_DISMISS',
+      resourceType: 'dispute_case',
+      resourceId: fixture.disputeCaseId,
+      requestKey,
+      reasonCode: 'DISPUTE_INSUFFICIENT_EVIDENCE',
+      decisionReasonText,
+      expectedVersion: 1,
+      request: {
+        outcome: 'DISPUTE_CASE_DISMISSED',
+        workerId: null,
+        amountSatang: null,
+      },
+      metadata: {},
+      prepare: async (transaction) => {
+        const [current] = await transaction
+          .select({ version: adminDisputeCase.version })
+          .from(adminDisputeCase)
+          .where(eq(adminDisputeCase.id, fixture.disputeCaseId))
+          .for('update');
+        if (!current) return { outcome: 'conflict' };
+        return {
+          currentVersion: current.version,
+          apply: async () => {
+            const now = new Date();
+            const [updated] = await transaction
+              .update(adminDisputeCase)
+              .set({
+                status: 'DISPUTE_CASE_DISMISSED',
+                resolvedByAdminId: adminId,
+                resolvedAt: now,
+                version: 2,
+                updatedAt: now,
+              })
+              .where(
+                and(
+                  eq(adminDisputeCase.id, fixture.disputeCaseId),
+                  eq(adminDisputeCase.version, 1),
+                  eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING')
+                )
+              )
+              .returning();
+            if (!updated) throw new Error('Legacy Dispute Case was not dismissed.');
+            const legacySummary: Record<string, unknown> = { ...summaryFromRecord(updated) };
+            delete legacySummary.category;
+            return {
+              resourceSummary: legacySummary as LegacyDisputeSummary,
+              resourceVersion: updated.version,
+              resourceTimestamp: null,
+            };
+          },
+        };
+      },
+    });
+    expect(legacyAction.resourceSummary).not.toHaveProperty('category');
+
     const replay = await request();
     const replayBody = await replay.json();
-    expect(first.status).toBe(200);
-    expect(firstBody).toMatchObject({
+    expect(replay.status).toBe(200);
+    expect(replayBody.data.adminActionId).toBe(legacyAction.adminActionId);
+    expect(replayBody).toMatchObject({
       data: {
         resourceSummary: {
           id: fixture.disputeCaseId,
           status: 'DISPUTE_CASE_DISMISSED',
+          category: 'PROOF_REVIEW',
           version: 2,
         },
         resourceVersion: 2,
         adminActionId: expect.any(String),
       },
     });
-    expect(firstBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
-    expect(replay.status).toBe(200);
-    expect(replayBody).toEqual(firstBody);
+    expect(replayBody.data.resourceSummary).not.toHaveProperty('decisionReasonText');
     const detail = await adminRequest(`/api/v1/admin/disputes/${fixture.disputeCaseId}`);
     expect(detail.status).toBe(200);
     expect((await detail.json()).data.decision).toEqual({
