@@ -2769,7 +2769,14 @@ The mode rules are:
   Confirmation for that Worker's Assignment. A non-approval affects only that
   Assignment. Other Workers can continue. The final Quest State is
   `QUEST_COMPLETED` if at least one Assignment succeeds; otherwise it is
-  `QUEST_FAILED`.
+  `QUEST_FAILED`. The not-approved Worker gets the `COMPLETION_REVIEWED` Push
+  for the decision. If the Quest then completes, that Worker keeps the Quest
+  socket during the money hold and gets the `QUEST_COMPLETED_DISPUTE_WINDOW_OPEN`
+  Push, as for a not-approved Proof (see the socket rules and section 13.3).
+  While a not-approved Worker is
+  `ASSIGNMENT_INCOMPLETE` on the running Quest, Hirer cancellation answers
+  409 `QUEST_SETTLEMENT_NOT_ALLOWED` and Admin termination answers 409
+  `QUEST_ACTION_NOT_ALLOWED`.
 - `GROUP + CANDIDATE`: the Team Leader creates one Completion Confirmation for
   the Team. A non-approval fails the Quest and affects every Team Assignment.
 
