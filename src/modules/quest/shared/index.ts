@@ -2,6 +2,7 @@ export * from './command';
 export * from './admin-updates';
 export * from './escrow';
 export * from './image';
+export * from './title';
 export * from './transition';
 export {
   defaultQuestWorkChatMembershipWriter,

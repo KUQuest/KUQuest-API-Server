@@ -1,7 +1,15 @@
 import { app } from '@/app';
 import { db } from '@/database/client';
+import { quest } from '@/database/schema/quest.schema';
+import { tag } from '@/database/schema/tag.schema';
 import { walletLedgerAccount } from '@/database/schema/wallet.schema';
-import { createSealedLedgerTransaction, ensureWallet, signedSatang } from '@/modules/wallet';
+import {
+  createSealedLedgerTransaction,
+  ensureWallet,
+  positiveSatang,
+  reserveSpending,
+  signedSatang,
+} from '@/modules/wallet';
 
 import { Elysia } from 'elysia';
 import { describe, expect, it } from 'bun:test';
@@ -260,5 +268,73 @@ describe('Wallet HTTP routes', () => {
       })
     );
     expect(invalidLimit.status).toBe(400);
+  });
+  it('names the Quest on a Wallet activity that a Quest Escrow created', async () => {
+    const { cookie, userId } = await signInTestMember('account-1');
+    const wallet = await ensureWallet(userId);
+    const [spendingAcc] = await db
+      .select({ id: walletLedgerAccount.id })
+      .from(walletLedgerAccount)
+      .where(
+        and(eq(walletLedgerAccount.walletId, wallet.id), eq(walletLedgerAccount.type, 'SPENDING'))
+      );
+    const [suspenseAcc] = await db
+      .select({ id: walletLedgerAccount.id })
+      .from(walletLedgerAccount)
+      .where(eq(walletLedgerAccount.code, 'platform:PLATFORM_SUSPENSE'));
+    if (!spendingAcc || !suspenseAcc) throw new Error('Missing ledger accounts for test');
+    await createSealedLedgerTransaction({
+      businessReference: `test:fund:http:${crypto.randomUUID()}`,
+      eventType: 'TOP_UP',
+      postings: [
+        { accountId: spendingAcc.id, amountSatang: signedSatang(5_000) },
+        { accountId: suspenseAcc.id, amountSatang: signedSatang(-5_000) },
+      ],
+    });
+
+    const tagId = crypto.randomUUID();
+    const questId = crypto.randomUUID();
+    await db.insert(tag).values({ id: tagId, name: `Wallet Activity ${tagId}` });
+    await db.insert(quest).values({
+      id: questId,
+      hirerId: userId,
+      title: 'Wallet activity Quest title',
+      condition: 'Complete the activity fixture work',
+      mode: 'NO_CANDIDATE',
+      participation: 'SOLO',
+      questStatus: 'QUEST_OPEN',
+      rewardSatang: 1_000,
+      tagId,
+      headcount: 1,
+      startTime: new Date(Date.now() + 86_400_000),
+    });
+    await db.transaction((tx) =>
+      reserveSpending(tx, {
+        ownerUserId: userId,
+        callerScope: 'quest',
+        callerReference: questId,
+        amountSatang: positiveSatang(1_000),
+      })
+    );
+
+    const response = await app.handle(
+      new Request('http://localhost/api/v1/wallet/activities?limit=20', { headers: { cookie } })
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      data: {
+        activities: Array<{
+          type: string;
+          quest: { id: string; title: string | null } | null;
+        }>;
+      };
+    };
+    const hold = body.data.activities.find((activity) => activity.quest?.id === questId);
+    expect(hold).toMatchObject({
+      type: 'HOLD',
+      quest: { id: questId, title: 'Wallet activity Quest title' },
+    });
+    const topUps = body.data.activities.filter((activity) => activity.type === 'TOP_UP');
+    expect(topUps.every((activity) => activity.quest === null)).toBe(true);
   });
 });

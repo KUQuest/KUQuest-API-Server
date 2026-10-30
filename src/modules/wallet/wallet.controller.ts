@@ -2,6 +2,7 @@ import type { AuthedContext } from '@/modules/auth';
 import { apiError, apiSuccess } from '@/shared/api-response';
 import type { ApiResponse } from '@/shared/api-response';
 
+import { readQuestTitles } from '@/modules/quest/shared/title';
 import { MAX_PAGE_LIMIT } from '@/shared/cursor';
 import type { Static } from 'elysia';
 
@@ -88,6 +89,9 @@ export const getWalletActivitiesController = async ({
 }): Promise<ApiResponse> => {
   try {
     const activities = await getWalletActivities(session.user.id, query?.limit ?? MAX_PAGE_LIMIT);
+    const questTitles = await readQuestTitles(
+      activities.flatMap(({ questId }) => (questId ? [questId] : []))
+    );
     return apiSuccess({
       activities: activities.map((activity) => ({
         id: activity.id,
@@ -102,6 +106,9 @@ export const getWalletActivitiesController = async ({
         payoutReservedDeltaSatang: activity.payoutReservedDeltaSatang,
         resourceType: activity.resourceType,
         resourceId: activity.resourceId,
+        quest: activity.questId
+          ? { id: activity.questId, title: questTitles.get(activity.questId) ?? null }
+          : null,
       })),
     });
   } catch (error) {

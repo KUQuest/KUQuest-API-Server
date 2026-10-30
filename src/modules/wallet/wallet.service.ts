@@ -4,6 +4,10 @@ import {
   type LedgerEventType,
   paymentMoneyPolicyRevision,
   walletActivity,
+  walletDisputeSettlement,
+  walletFundingReservation,
+  walletFundingReservationOperation,
+  walletFundingReservationSettlement,
   walletLedgerAccount,
   walletLedgerPosting,
   walletLedgerTransaction,
@@ -219,7 +223,74 @@ export const getWalletActivities = async (userId: string, limit = MAX_PAGE_LIMIT
     .where(eq(walletActivity.userId, userId))
     .orderBy(desc(walletActivity.occurredAt))
     .limit(limit);
-  return activities.map(validateActivityAmounts);
+  const questIds = await questIdsByLedgerTransaction(
+    activities.map((activity) => activity.ledgerTransactionId)
+  );
+  return activities.map((activity) => ({
+    ...validateActivityAmounts(activity),
+    questId: questIds.get(activity.ledgerTransactionId) ?? null,
+  }));
+};
+
+/**
+ * Maps each Ledger Transaction to the Quest whose Funding Reservation it moved.
+ * Wallet stays opaque (ADR 0009): it reads the caller scope and reference of the
+ * Funding Reservation and reports the reference only for the `quest` scope.
+ */
+const questIdsByLedgerTransaction = async (ledgerTransactionIds: string[]) => {
+  const questIds = new Map<string, string>();
+  if (ledgerTransactionIds.length === 0) return questIds;
+
+  const reservationColumns = {
+    callerScope: walletFundingReservation.callerScope,
+    callerReference: walletFundingReservation.callerReference,
+  };
+  const rowSets = await Promise.all([
+    db
+      .select({
+        ledgerTransactionId: walletFundingReservation.createdLedgerTransactionId,
+        ...reservationColumns,
+      })
+      .from(walletFundingReservation)
+      .where(inArray(walletFundingReservation.createdLedgerTransactionId, ledgerTransactionIds)),
+    db
+      .select({
+        ledgerTransactionId: walletFundingReservationOperation.ledgerTransactionId,
+        ...reservationColumns,
+      })
+      .from(walletFundingReservationOperation)
+      .innerJoin(
+        walletFundingReservation,
+        eq(walletFundingReservation.id, walletFundingReservationOperation.reservationId)
+      )
+      .where(inArray(walletFundingReservationOperation.ledgerTransactionId, ledgerTransactionIds)),
+    db
+      .select({
+        ledgerTransactionId: walletFundingReservationSettlement.ledgerTransactionId,
+        ...reservationColumns,
+      })
+      .from(walletFundingReservationSettlement)
+      .innerJoin(
+        walletFundingReservation,
+        eq(walletFundingReservation.id, walletFundingReservationSettlement.reservationId)
+      )
+      .where(inArray(walletFundingReservationSettlement.ledgerTransactionId, ledgerTransactionIds)),
+    db
+      .select({
+        ledgerTransactionId: walletDisputeSettlement.ledgerTransactionId,
+        ...reservationColumns,
+      })
+      .from(walletDisputeSettlement)
+      .innerJoin(
+        walletFundingReservation,
+        eq(walletFundingReservation.id, walletDisputeSettlement.reservationId)
+      )
+      .where(inArray(walletDisputeSettlement.ledgerTransactionId, ledgerTransactionIds)),
+  ]);
+  for (const row of rowSets.flat()) {
+    if (row.callerScope === 'quest') questIds.set(row.ledgerTransactionId, row.callerReference);
+  }
+  return questIds;
 };
 
 export const ensureInitialMoneyPolicy = async () => {

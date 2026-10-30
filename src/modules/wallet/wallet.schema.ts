@@ -57,6 +57,13 @@ export const walletActivitySchema = t.Object({
   payoutReservedDeltaSatang: t.Integer(),
   resourceType: t.Union([t.String(), t.Null()]),
   resourceId: t.Union([t.String(), t.Null()]),
+  quest: t.Union([
+    t.Object({
+      id: t.String({ format: 'uuid' }),
+      title: t.Union([t.String(), t.Null()]),
+    }),
+    t.Null(),
+  ]),
 });
 
 export const walletActivitiesResponseSchema = t.Object({
