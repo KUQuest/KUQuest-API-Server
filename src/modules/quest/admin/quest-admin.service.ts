@@ -4,7 +4,9 @@ import { adminAction, adminDisputeCase } from '@/database/schema/admin.schema';
 import { authAdmin, authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import { formatDisplayIdSql, formatQuestDisplayId } from '@/modules/admin';
+import { proofStorage } from '@/modules/quest/v1/services/quest-proof.storage';
 import { questV2Storage } from '@/modules/quest/v2';
+import { questV2ProofStorage } from '@/modules/quest/v2/proof';
 import { CursorInputError, type CursorPayload } from '@/shared/cursor';
 import { readKeysetPage } from '@/shared/keyset-page';
 import {
@@ -20,6 +22,7 @@ import {
   questApiVersion,
   questApplication,
   questAssignment,
+  questCandidateTeamV2,
   questConditionItem,
   questEditHistory,
   questEditRequest,
@@ -30,6 +33,8 @@ import {
   questTeamMember,
   questV2EditRequest,
   questV2EditRequestResponse,
+  questV2ProofSubmission,
+  questV2ProofSubmissionFile,
   type QuestApiVersion,
 } from '@/database/schema/quest.schema';
 
@@ -308,18 +313,24 @@ export type AdminQuestProofFile = {
   contentType: string;
   sizeBytes: number;
   position: number;
+  url: string;
+  urlExpiresAt: Date;
 };
 
 export type AdminQuestProof = {
   id: string;
+  apiVersion: QuestApiVersion;
   worker: AdminQuestMember | null;
   team: { id: string; name: string } | null;
   submittedBy: AdminQuestMember;
   content: string;
+  description: string | null;
+  workerMessage: string | null;
   submissionStatus: string;
   reviewNote: string | null;
   submittedAt: Date;
   reviewedAt: Date | null;
+  reviewedBy: 'HIRER' | 'AUTO_APPROVE' | null;
   files: AdminQuestProofFile[];
 };
 
@@ -483,7 +494,7 @@ const assignmentsFor = async (questId: string): Promise<AdminQuestAssignment[]> 
   }));
 };
 
-const proofSubmissionsFor = async (questId: string): Promise<AdminQuestProof[]> => {
+const v1ProofSubmissionsFor = async (questId: string): Promise<AdminQuestProof[]> => {
   const rows = await db
     .select({
       proof: proofSubmission,
@@ -525,26 +536,124 @@ const proofSubmissionsFor = async (questId: string): Promise<AdminQuestProof[]> 
           contentType: file.contentType,
           sizeBytes: file.sizeBytes,
           position: proofSubmissionImage.position,
+          bucket: file.bucket,
+          objectKey: file.objectKey,
         })
         .from(proofSubmissionImage)
-        .innerJoin(file, eq(file.id, proofSubmissionImage.fileId))
+        .innerJoin(file, and(eq(file.id, proofSubmissionImage.fileId), isNull(file.deletedAt)))
         .where(eq(proofSubmissionImage.proofSubmissionId, row.proof.id))
         .orderBy(asc(proofSubmissionImage.position));
       return {
         id: row.proof.id,
+        apiVersion: questApiVersion.v1,
         worker: row.proof.workerId ? (workerById.get(row.proof.workerId) ?? null) : null,
         team: row.proof.teamId ? (teamById.get(row.proof.teamId) ?? null) : null,
         submittedBy: row.submittedBy,
         content: row.proof.content,
+        description: null,
+        workerMessage: null,
         submissionStatus: row.proof.submissionStatus,
         reviewNote: row.proof.reviewNote,
         submittedAt: row.proof.submittedAt,
         reviewedAt: row.proof.reviewedAt,
-        files,
+        reviewedBy: null,
+        files: files.map(({ bucket, objectKey, ...proofFile }) => {
+          const link = proofStorage.linkForWithExpiry({ bucket, objectKey });
+          return { ...proofFile, url: link.url, urlExpiresAt: link.expiresAt };
+        }),
       };
     })
   );
 };
+
+const v2ProofSubmissionsFor = async (questId: string): Promise<AdminQuestProof[]> => {
+  const rows = await db
+    .select({ proof: questV2ProofSubmission, submittedBy: memberColumns })
+    .from(questV2ProofSubmission)
+    .innerJoin(authUser, eq(authUser.id, questV2ProofSubmission.submittedByUserId))
+    .where(
+      and(eq(questV2ProofSubmission.questId, questId), isNotNull(questV2ProofSubmission.sentAt))
+    )
+    .orderBy(asc(questV2ProofSubmission.sentAt), asc(questV2ProofSubmission.id));
+
+  const workerIds = [
+    ...new Set(rows.map((row) => row.proof.workerId).filter((id): id is string => id !== null)),
+  ];
+  const teamIds = [
+    ...new Set(rows.map((row) => row.proof.teamId).filter((id): id is string => id !== null)),
+  ];
+  const [workers, teams] = await Promise.all([
+    workerIds.length
+      ? db
+          .select(memberColumns)
+          .from(authUser)
+          .where(or(...workerIds.map((id) => eq(authUser.id, id))))
+      : Promise.resolve([]),
+    teamIds.length
+      ? db
+          .select({ id: questCandidateTeamV2.id, name: questCandidateTeamV2.name })
+          .from(questCandidateTeamV2)
+          .where(or(...teamIds.map((id) => eq(questCandidateTeamV2.id, id))))
+      : Promise.resolve([]),
+  ]);
+  const workerById = new Map(workers.map((worker) => [worker.id, worker]));
+  const teamById = new Map(teams.map((team) => [team.id, team]));
+
+  return Promise.all(
+    rows.map(async (row) => {
+      const files = await db
+        .select({
+          fileId: file.id,
+          contentType: file.contentType,
+          sizeBytes: file.sizeBytes,
+          position: questV2ProofSubmissionFile.position,
+          bucket: file.bucket,
+          objectKey: file.objectKey,
+        })
+        .from(questV2ProofSubmissionFile)
+        .innerJoin(
+          file,
+          and(eq(file.id, questV2ProofSubmissionFile.fileId), isNull(file.deletedAt))
+        )
+        .where(
+          and(
+            eq(questV2ProofSubmissionFile.proofSubmissionId, row.proof.id),
+            eq(questV2ProofSubmissionFile.uploadStatus, 'PROOF_FILE_READY')
+          )
+        )
+        .orderBy(asc(questV2ProofSubmissionFile.position));
+      const description = row.proof.description;
+
+      return {
+        id: row.proof.id,
+        apiVersion: questApiVersion.v2,
+        worker: row.proof.workerId ? (workerById.get(row.proof.workerId) ?? null) : null,
+        team: row.proof.teamId ? (teamById.get(row.proof.teamId) ?? null) : null,
+        submittedBy: row.submittedBy,
+        content: description ?? row.proof.workerMessage ?? '',
+        description,
+        workerMessage: row.proof.workerMessage,
+        submissionStatus: row.proof.submissionStatus!,
+        reviewNote: row.proof.reviewReason,
+        submittedAt: row.proof.sentAt!,
+        reviewedAt: row.proof.reviewedAt,
+        reviewedBy: row.proof.reviewedBy,
+        files: files.map(({ bucket, objectKey, ...proofFile }) => {
+          const link = questV2ProofStorage.linkForWithExpiry({ bucket, objectKey });
+          return { ...proofFile, url: link.url, urlExpiresAt: link.expiresAt };
+        }),
+      };
+    })
+  );
+};
+
+const proofSubmissionsFor = async (
+  questId: string,
+  apiVersion: QuestApiVersion
+): Promise<AdminQuestProof[]> =>
+  apiVersion === questApiVersion.v2
+    ? v2ProofSubmissionsFor(questId)
+    : v1ProofSubmissionsFor(questId);
 
 const editHistoryFor = async (questId: string): Promise<AdminQuestEditHistoryEntry[]> => {
   const fieldEdits = await db
@@ -756,7 +865,7 @@ export const getAdminQuestDetail = async (
     applicationsFor(questId),
     teamsFor(questId),
     assignmentsFor(questId),
-    proofSubmissionsFor(questId),
+    proofSubmissionsFor(questId, row.quest.apiVersion),
     editHistoryFor(questId),
     adminActionsFor(questId),
   ]);

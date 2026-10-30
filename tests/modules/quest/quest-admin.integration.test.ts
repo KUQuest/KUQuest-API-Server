@@ -10,6 +10,9 @@ import {
   quest,
   questApplication,
   questAssignment,
+  questCandidateTeamV2,
+  questV2ProofSubmission,
+  questV2ProofSubmissionFile,
   questEditHistory,
   questEditRequest,
   questEditRequestResponse,
@@ -21,6 +24,7 @@ import {
 } from '@/database/schema/quest.schema';
 import { tag } from '@/database/schema/tag.schema';
 import { createAdminAuth } from '@/modules/auth/admin-auth.config';
+import { questV2ProofStorage } from '@/modules/quest/v2/proof';
 import { ensureInitialMoneyPolicy } from '@/modules/wallet';
 import { encodeCursor } from '@/shared/cursor';
 
@@ -59,6 +63,7 @@ const questIds: string[] = [];
 const fixtureHirerIds: string[] = [];
 const questImageFileId = randomUUID();
 const questImageId = randomUUID();
+const v2ProofFileId = randomUUID();
 const disputeQuestId = randomUUID();
 const disputeCaseIds = [randomUUID(), randomUUID()] as const;
 const detailStateChangedAt = new Date('2030-06-03T01:00:00.000Z');
@@ -76,6 +81,11 @@ let proofId = '';
 let fileId = '';
 let editRequestId = '';
 let teamId = '';
+let v2ProofSubmissionId = '';
+let v2DraftProofSubmissionId = '';
+let v2GroupQuestId = '';
+let v2TeamId = '';
+let v2TeamProofSubmissionId = '';
 
 const getCookieHeader = (response: Response): string =>
   (response.headers.getSetCookie?.() ?? []).map((cookie) => cookie.split(';', 1)[0]).join('; ');
@@ -386,6 +396,82 @@ beforeAll(async () => {
     expiresAt: new Date('2030-06-06T00:00:00.000Z'),
     appliedAt: new Date('2030-06-05T12:00:00.000Z'),
   });
+  v2ProofSubmissionId = randomUUID();
+  await db.insert(questV2ProofSubmission).values({
+    id: v2ProofSubmissionId,
+    questId: v2QuestId,
+    workerId: workerIds[0]!,
+    submittedByUserId: workerIds[0]!,
+    description: 'V2 proof description for Admin review.',
+    workerMessage: 'The attached report contains the result.',
+    submissionStatus: 'PROOF_NOT_APPROVED',
+    sentAt: new Date('2030-06-05T13:00:00.000Z'),
+    reviewReason: 'Add the missing result.',
+    reviewedAt: new Date('2030-06-05T14:00:00.000Z'),
+    reviewedBy: 'HIRER',
+  });
+  await db.insert(file).values({
+    id: v2ProofFileId,
+    bucket: 'test-bucket',
+    objectKey: `admin-v2-proof/${v2ProofFileId}`,
+    contentType: 'application/pdf',
+    sizeBytes: 4096,
+    uploadedByUserId: workerIds[0]!,
+  });
+  await db.insert(questV2ProofSubmissionFile).values({
+    proofSubmissionId: v2ProofSubmissionId,
+    fileId: v2ProofFileId,
+    position: 0,
+    uploadStatus: 'PROOF_FILE_READY',
+  });
+  v2DraftProofSubmissionId = randomUUID();
+  await db.insert(questV2ProofSubmission).values({
+    id: v2DraftProofSubmissionId,
+    questId: v2QuestId,
+    workerId: workerIds[1]!,
+    submittedByUserId: workerIds[1]!,
+    description: 'Unsent V2 draft for Admin visibility check.',
+    submissionStatus: null,
+    sentAt: null,
+  });
+
+  v2GroupQuestId = randomUUID();
+  questIds.push(v2GroupQuestId);
+  await db.insert(quest).values({
+    id: v2GroupQuestId,
+    hirerId,
+    apiVersion: 'v2',
+    title: 'V2 Group Quest proof detail',
+    condition: 'Deliver team work',
+    mode: 'CANDIDATE',
+    participation: 'GROUP',
+    v2Mode: 'CANDIDATE',
+    v2Participation: 'GROUP',
+    questStatus: 'QUEST_IN_PROGRESS',
+    headcount: 2,
+    rewardSatang: 1_000,
+    tagId,
+    startTime: new Date('2030-06-06T00:00:00.000Z'),
+  });
+  v2TeamId = randomUUID();
+  await db.insert(questCandidateTeamV2).values({
+    id: v2TeamId,
+    questId: v2GroupQuestId,
+    leaderId: workerIds[1]!,
+    name: 'V2 Proof Team',
+    headcount: 2,
+    state: 'TEAM_SELECTED',
+  });
+  v2TeamProofSubmissionId = randomUUID();
+  await db.insert(questV2ProofSubmission).values({
+    id: v2TeamProofSubmissionId,
+    questId: v2GroupQuestId,
+    teamId: v2TeamId,
+    submittedByUserId: workerIds[1]!,
+    description: 'Team proof description for Admin review.',
+    submissionStatus: 'PROOF_PENDING',
+    sentAt: new Date('2030-06-06T12:00:00.000Z'),
+  });
   questIds.push(disputeQuestId);
   await db.insert(quest).values({
     id: disputeQuestId,
@@ -419,6 +505,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (questIds.length > 0) await db.delete(quest).where(inArray(quest.id, questIds));
+  await db.delete(file).where(eq(file.id, v2ProofFileId));
   if (fixtureHirerIds.length > 0)
     await db.delete(authUser).where(inArray(authUser.id, fixtureHirerIds));
 });
@@ -868,7 +955,14 @@ describe('Admin Quest API routes', () => {
           id: workerIds[0],
           studentId: studentIdFor(workerIds[0]!),
         }),
-        files: [expect.objectContaining({ fileId, contentType: 'image/png', sizeBytes: 2048 })],
+        files: [
+          expect.objectContaining({
+            fileId,
+            contentType: 'image/png',
+            sizeBytes: 2048,
+            url: expect.stringMatching(/^https?:\/\//),
+          }),
+        ],
       }),
     ]);
     expect(body.data.editHistory).toEqual(
@@ -988,6 +1082,77 @@ describe('Admin Quest API routes', () => {
         apiVersion: 'v2',
         requestStatus: 'EDIT_REQUEST_APPLIED',
         responses: [],
+      }),
+    ]);
+  });
+
+  it('returns sent v2 Proof Submissions with temporary evidence links and excludes drafts', async () => {
+    const originalLinkForWithExpiry = questV2ProofStorage.linkForWithExpiry;
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+    const url = `https://storage.test/test-bucket/admin-v2-proof/${v2ProofFileId}`;
+    const requestedObjects: Array<{ bucket: string; objectKey: string }> = [];
+    questV2ProofStorage.linkForWithExpiry = (target) => {
+      requestedObjects.push(target);
+      return { url, expiresAt };
+    };
+
+    try {
+      const response = await adminRequest(`/api/v1/admin/quests/${v2QuestId}`);
+      const body = (await response.json()) as { data: Record<string, any> };
+
+      expect(response.status).toBe(200);
+      expect(body.data.proofSubmissions).toHaveLength(1);
+      expect(body.data.proofSubmissions).toEqual([
+        expect.objectContaining({
+          id: v2ProofSubmissionId,
+          apiVersion: 'v2',
+          worker: expect.objectContaining({ id: workerIds[0] }),
+          submittedBy: expect.objectContaining({ id: workerIds[0] }),
+          content: 'V2 proof description for Admin review.',
+          description: 'V2 proof description for Admin review.',
+          workerMessage: 'The attached report contains the result.',
+          submissionStatus: 'PROOF_NOT_APPROVED',
+          reviewNote: 'Add the missing result.',
+          submittedAt: '2030-06-05T13:00:00.000Z',
+          reviewedAt: '2030-06-05T14:00:00.000Z',
+          reviewedBy: 'HIRER',
+          files: [
+            expect.objectContaining({
+              fileId: v2ProofFileId,
+              contentType: 'application/pdf',
+              sizeBytes: 4096,
+              position: 0,
+              url,
+              urlExpiresAt: expiresAt.toISOString(),
+            }),
+          ],
+        }),
+      ]);
+      expect(body.data.proofSubmissions.map(({ id }: { id: string }) => id)).not.toContain(
+        v2DraftProofSubmissionId
+      );
+      expect(requestedObjects).toEqual([
+        { bucket: 'test-bucket', objectKey: `admin-v2-proof/${v2ProofFileId}` },
+      ]);
+    } finally {
+      questV2ProofStorage.linkForWithExpiry = originalLinkForWithExpiry;
+    }
+  });
+
+  it('returns the V2 Candidate Team for a team Proof Submission', async () => {
+    const response = await adminRequest(`/api/v1/admin/quests/${v2GroupQuestId}`);
+    const body = (await response.json()) as { data: Record<string, any> };
+
+    expect(response.status).toBe(200);
+    expect(body.data.proofSubmissions).toEqual([
+      expect.objectContaining({
+        id: v2TeamProofSubmissionId,
+        apiVersion: 'v2',
+        worker: null,
+        team: { id: v2TeamId, name: 'V2 Proof Team' },
+        submittedBy: expect.objectContaining({ id: workerIds[1] }),
+        description: 'Team proof description for Admin review.',
+        submissionStatus: 'PROOF_PENDING',
       }),
     ]);
   });
