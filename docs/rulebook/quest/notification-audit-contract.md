@@ -40,8 +40,52 @@ Part of the [Quest and Work Chat Rulebook](quest-work-chat-rulebook.md). Defines
   - These Events carry `transitionId` (equal to `eventKey`) and, for a window, the server `expiresAt`. The client counts down from `expiresAt`. The Push worker does not send an Event when the underfilled state changed before delivery.
 - **Muting and critical events**:
   - A Member can mute non-critical Push per Quest.
-  - Critical Events remain deliverable: approval, non-approval, missing work at `dueAt`, `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and Quest Edits requiring a response.
+  - Critical Events remain deliverable: the five Member Penalty Notification types, approval, non-approval, missing work at `dueAt`, `QUEST_FAILED`, `QUEST_COMPLETED`, `QUEST_CANCELLED`, and Quest Edits requiring a response.
 - **Privacy**: Push contains a short update and relevant link. It never contains private proof details or evidence.
+
+### Member Penalty Notifications
+
+A Member Penalty Notification is a Member-level Push. It has no `questId`.
+The Server sends no localized text. The Android client builds the alert text from `type`, `result`, and `expiresAt`.
+
+| `type`                     | Recipient                                       | Sent when                                                                                                         |
+| -------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `PENALTY_RED_FLAG_APPLIED` | The penalized Member                            | A Red Flag becomes active.                                                                                        |
+| `PENALTY_RED_FLAG_EXPIRED` | The penalized Member                            | A Red Flag reaches `expiresAt`, or a penalty removal ends it early.                                               |
+| `PENALTY_BAN_APPLIED`      | The penalized Member                            | A temporary or permanent Member Ban starts.                                                                       |
+| `PENALTY_BAN_ENDED`        | The penalized Member                            | A temporary Member Ban reaches `expiresAt`, or a penalty removal ends it early. A permanent ban has no end Event. |
+| `CONDUCT_REPORT_UPHELD`    | The reported Member of an upheld Conduct Report | An Admin upholds the Conduct Report.                                                                              |
+
+- **Critical Events**: All five types are critical. A Member cannot mute them, per Quest or in any other way, except by disabling a Push Device.
+- **Payload**: The payload is data-only and has these fields:
+  - `type`: one of the five types above.
+  - `notificationId`: the stable ID of the inbox item for this Event.
+  - `transitionId`: the stable ID of the penalty transition. It equals `eventKey`, so retries and client deduplication use one key.
+  - `result`: `RED_FLAG`, `TEMPORARY_BAN`, or `PERMANENT_BAN`.
+  - `ladder`: `MISCONDUCT` or `REVIEW`.
+  - `source`: `REPORT_CASE`, `CONDUCT_REPORT`, or `REVIEW_AVERAGE`.
+  - `expiresAt`: the server time at which the restriction ends. The Server omits it for a permanent ban.
+- **Source of Events**: `memberPenaltyRecord` is the source of truth (see [Admin Member Penalty Contract](../admin/admin-member-penalty-contract.md)). Each applied, expired, or ended transition creates one Event per recipient. A penalty removal that ends a restriction creates the matching expired or ended Event. A direct Admin penalty action uses the same types; its `source` is the source recorded in `memberPenaltyRecord`.
+- **Privacy**: The payload never contains the reporter, Message text, proof details, evidence, the Admin note, or the filed Conduct Report reason. The reported Member learns only the result and the end time.
+- **Banned Members**: A banned Member cannot sign in and cannot reach the notification inbox. The Push is still sent to the Push Device. A client can show it, but the Member cannot open the inbox until the ban ends.
+
+## Notification inbox contract
+
+The notification inbox is a Member's server-side list of Member Penalty Notification Events. It lets a Member see an Event that the Push did not show, for example after the Member disabled a Push Device.
+
+- **Content**: The inbox holds Events only. It does not hold Work Conversation messages or System Messages. Chat history stays in the Work Conversation.
+- **Retention**: The Server keeps an inbox item for at least 90 days after `createdAt`.
+- **Scope**: A Member reads and changes only that Member's items. Every route needs a signed-in session.
+- `GET /api/v1/notifications` returns the Member's items, newest first.
+  - Query: `cursor` (opaque), `limit` (1 to 50, default 20), `unreadOnly` (boolean).
+  - Response: `items` and `nextCursor`. `nextCursor` is `null` on the last page.
+  - Item: `id`, `type`, `createdAt`, `readAt` (`null` when unread), `questId` (always `null` for Member Penalty Notifications), `result`, and `expiresAt` (`null` for a permanent ban).
+- `GET /api/v1/notifications/unread-count` returns `{ count }`.
+- `POST /api/v1/notifications/read` marks items read. The body is `{ ids }` (1 to 100 IDs) or `{ all: true }`. The command is idempotent: a second call keeps the first `readAt`. An ID that belongs to another Member is ignored.
+- **Localization**: The Server sends no localized text in the inbox. The client builds text from `type`, `result`, and `expiresAt`.
+- **Banned Members**: Sign-in denial blocks inbox routes for a banned Member (`403 MEMBER_BANNED`).
+
+The decisions for this inbox are in [ADR 0035](../../adr/0035-member-notification-inbox.md).
 
 ## Audit and retention
 
