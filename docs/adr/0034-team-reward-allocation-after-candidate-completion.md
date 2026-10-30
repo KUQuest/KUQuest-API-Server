@@ -29,4 +29,13 @@ without turning an Escrow settlement into an unrelated Peer-to-Peer transfer.
 The Quest can be `QUEST_COMPLETED` while settlement remains pending. Every team
 member can read the roster, deadline, and final allocation; each participation
 projection continues to expose only that member's own settlement amount.
-Cancellation rules before successful completion are unchanged.
+
+## Amendment: cancellation
+
+A `GROUP + CANDIDATE` cancellation from `QUEST_ASSIGNED` or `QUEST_IN_PROGRESS`
+also opens this allocation for its Worker Reward pool, because a single transfer
+to the Team Leader gave teammates no share. Quest Escrow keeps the pool and any
+Hirer refund until the allocation settles, because a Funding Reservation can only
+release its full remainder. The cancellation result reports the amounts that
+settlement will move. A pending Team Completion Confirmation still pays no Reward
+and refunds the Hirer at once.

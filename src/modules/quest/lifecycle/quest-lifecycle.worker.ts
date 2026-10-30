@@ -10,6 +10,7 @@ import {
   questTeamInvitation,
   questV2TeamRewardAllocation,
 } from '@/database/schema/quest.schema';
+import { adminDisputeCase } from '@/database/schema/admin.schema';
 import { purgeExpiredProviderEventPayloads } from '@/modules/top-up';
 import { cleanupExpiredWorkChatAttachments } from '@/modules/work-chat';
 
@@ -22,7 +23,11 @@ import {
   questStatus,
 } from '../shared/contracts/quest.contract';
 import { isMoneyHoldOpen, moneyHoldDurationMs } from '../shared';
-import { disputeSelfFileWindowMs } from '../admin/quest-dispute-admin.service';
+import {
+  autoDismissOverdueDisputeCase,
+  disputeDecisionWindowExpiredSql,
+  disputeSelfFileWindowMs,
+} from '../admin/quest-dispute-admin.service';
 import { notifyQuestUpdate } from '../v2/realtime';
 import { readQuestEscrow, releaseQuestEscrow } from '../shared/escrow/quest-escrow.service';
 import { autoApproveDueProofs } from '../v1';
@@ -83,6 +88,7 @@ export type QuestLifecycleWorkerError = {
     | 'underfilled-detection'
     | 'underfilled-timeout'
     | 'failure-hold-release'
+    | 'dispute-case-timeout'
     | 'dispute-window-close'
     | 'invitation-expiry'
     | 'edit-timeout'
@@ -104,6 +110,7 @@ export type QuestLifecycleWorkerResult = {
   timedOutUnderfilledQuestIds: string[];
   failedQuestIds: string[];
   releasedFailedQuestIds: string[];
+  timedOutDisputeCaseIds: string[];
   closedDisputeWindowQuestIds: string[];
   timedOutEditRequestIds: string[];
   expiredInvitationIds: string[];
@@ -367,6 +374,16 @@ const dueMoneyHoldReleaseIds = async (now: Date, limit: number) =>
     .from(quest)
     .where(lte(quest.moneyHoldStartedAt, new Date(now.getTime() - moneyHoldDurationMs)))
     .orderBy(asc(quest.moneyHoldStartedAt), asc(quest.id))
+    .limit(limit);
+
+const dueDisputeCaseIds = async (now: Date, limit: number) =>
+  db
+    .select({ id: adminDisputeCase.id })
+    .from(adminDisputeCase)
+    .where(
+      and(eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'), disputeDecisionWindowExpiredSql(now))
+    )
+    .orderBy(asc(adminDisputeCase.createdAt), asc(adminDisputeCase.id))
     .limit(limit);
 
 const dueTeamRewardAllocationQuestIds = async (now: Date, limit: number) =>
@@ -656,6 +673,14 @@ export const runQuestLifecycleWorker = async (
     options.onError
   );
 
+  const timedOutDisputeCaseIds = await processIds(
+    (await dueDisputeCaseIds(now, limit)).map(({ id }) => id),
+    'dispute-case-timeout',
+    (id) => autoDismissOverdueDisputeCase(id, now),
+    errors,
+    options.onError
+  );
+
   const autoAllocatedTeamRewardQuestIds = await processIds(
     (await dueTeamRewardAllocationQuestIds(now, limit)).map(({ questId }) => questId),
     'team-reward-allocation-timeout',
@@ -725,6 +750,7 @@ export const runQuestLifecycleWorker = async (
     timedOutUnderfilledQuestIds,
     failedQuestIds: [...failedQuestIds, ...legacyFailedQuestIds],
     releasedFailedQuestIds,
+    timedOutDisputeCaseIds,
     closedDisputeWindowQuestIds,
     timedOutEditRequestIds: [...timedOutLegacyEditRequestIds, ...timedOutV2EditRequestIds],
     expiredInvitationIds,

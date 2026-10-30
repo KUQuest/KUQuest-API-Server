@@ -17,4 +17,5 @@ export const isReadableCandidateTeamRoster = (current: CandidateRosterQuestAcces
   (current.questState === 'QUEST_OPEN' ||
     current.questState === 'QUEST_ASSIGNED' ||
     current.questState === 'QUEST_IN_PROGRESS' ||
-    current.questState === 'QUEST_COMPLETED');
+    current.questState === 'QUEST_COMPLETED' ||
+    current.questState === 'QUEST_CANCELLED');

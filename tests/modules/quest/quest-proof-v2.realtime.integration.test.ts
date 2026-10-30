@@ -426,7 +426,7 @@ describe('Quest Proof v2 realtime source updates', () => {
       await stopRealtimeTestServer(server.server!, port);
     }
   });
-  it('auto-approves only at the Review Window boundary through the lifecycle worker', async () => {
+  it('auto-approves at the 24-hour Review Window boundary when dueAt is earlier', async () => {
     const [hirer, worker] = sessions;
     if (!hirer || !worker) throw new Error('Test sessions are missing');
     const created = await createQuestV2(
@@ -486,18 +486,24 @@ describe('Quest Proof v2 realtime source updates', () => {
       expect(sent.status).toBe(200);
       await hirerSocket.nextText();
       await workerSocket.nextText();
-      const sentAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const reviewWindowMs = 24 * 60 * 60 * 1000;
+      const sentAt = new Date(Date.now() - reviewWindowMs);
+      const dueAt = new Date(sentAt.getTime() + reviewWindowMs - 1);
       await db
         .update(questV2ProofSubmission)
         .set({ sentAt, updatedAt: sentAt })
         .where(eq(questV2ProofSubmission.id, draft.data.id));
-      const beforeBoundary = new Date(sentAt.getTime() + 24 * 60 * 60 * 1000 - 1);
+      await db
+        .update(quest)
+        .set({ startTime: new Date(sentAt.getTime() - 60 * 60 * 1000), dueAt })
+        .where(eq(quest.id, questId));
+      const beforeBoundary = new Date(sentAt.getTime() + reviewWindowMs - 1);
       const early = await runQuestLifecycleWorker({
         clock: { now: () => beforeBoundary },
         batchSize: 1,
       });
       expect(early.autoApprovedProofIds).not.toContain(draft.data.id);
-      const atBoundary = new Date(sentAt.getTime() + 24 * 60 * 60 * 1000);
+      const atBoundary = new Date(sentAt.getTime() + reviewWindowMs);
       const eligible = await runQuestLifecycleWorker({
         clock: { now: () => atBoundary },
         batchSize: 1,

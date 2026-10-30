@@ -1,5 +1,5 @@
 {
-  "id": "7a704e7c-4b6b-48d9-890f-021aee259429",
+  "id": "27fe3ee4-59ca-452d-9237-b6262f59125d",
   "prevId": "9a38293c-9c3b-4040-8ce9-5ba9524fbb78",
   "version": "7",
   "dialect": "postgresql",
@@ -1201,7 +1201,7 @@
         },
         "admin_dispute_cases_terminal_fields_check": {
           "name": "admin_dispute_cases_terminal_fields_check",
-          "value": "(\n        (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_PENDING' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 0)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\") = 0 AND num_nonnulls(\"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 2)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 4)\n      )"
+          "value": "(\n        (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_PENDING' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 0)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_DISMISSED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\") = 0 AND \"admin_dispute_cases\".\"resolved_at\" IS NOT NULL)\n        OR (\"admin_dispute_cases\".\"status\" = 'DISPUTE_CASE_RESOLVED' AND num_nonnulls(\"admin_dispute_cases\".\"resolved_worker_id\", \"admin_dispute_cases\".\"resolved_amount_satang\", \"admin_dispute_cases\".\"resolved_by_admin_id\", \"admin_dispute_cases\".\"resolved_at\") = 4)\n      )"
         }
       },
       "isRLSEnabled": false
@@ -3606,193 +3606,6 @@
       },
       "policies": {},
       "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.member_notifications": {
-      "name": "member_notifications",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "member_id": {
-          "name": "member_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "type": {
-          "name": "type",
-          "type": "varchar(64)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event_key": {
-          "name": "event_key",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "quest_id": {
-          "name": "quest_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "result": {
-          "name": "result",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ladder": {
-          "name": "ladder",
-          "type": "varchar(16)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "varchar(32)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "transition_id": {
-          "name": "transition_id",
-          "type": "varchar(200)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "read_at": {
-          "name": "read_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "member_notifications_member_event_uidx": {
-          "name": "member_notifications_member_event_uidx",
-          "columns": [
-            {
-              "expression": "member_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "event_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "member_notifications_member_newest_idx": {
-          "name": "member_notifications_member_newest_idx",
-          "columns": [
-            {
-              "expression": "member_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "\"created_at\" desc",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "\"id\" desc",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "member_notifications_member_unread_idx": {
-          "name": "member_notifications_member_unread_idx",
-          "columns": [
-            {
-              "expression": "member_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"member_notifications\".\"read_at\" is null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "member_notifications_member_id_auth_user_id_fk": {
-          "name": "member_notifications_member_id_auth_user_id_fk",
-          "tableFrom": "member_notifications",
-          "tableTo": "auth_user",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "member_notifications_event_key_check": {
-          "name": "member_notifications_event_key_check",
-          "value": "btrim(\"member_notifications\".\"event_key\") <> ''"
-        },
-        "member_notifications_type_check": {
-          "name": "member_notifications_type_check",
-          "value": "\"member_notifications\".\"type\" IN ('PENALTY_RED_FLAG_APPLIED', 'PENALTY_RED_FLAG_EXPIRED', 'PENALTY_BAN_APPLIED', 'PENALTY_BAN_ENDED', 'CONDUCT_REPORT_UPHELD')"
-        },
-        "member_notifications_result_check": {
-          "name": "member_notifications_result_check",
-          "value": "\"member_notifications\".\"result\" IS NULL OR \"member_notifications\".\"result\" IN ('RED_FLAG', 'TEMPORARY_BAN', 'PERMANENT_BAN')"
-        },
-        "member_notifications_ladder_check": {
-          "name": "member_notifications_ladder_check",
-          "value": "\"member_notifications\".\"ladder\" IS NULL OR \"member_notifications\".\"ladder\" IN ('MISCONDUCT', 'REVIEW')"
-        },
-        "member_notifications_source_check": {
-          "name": "member_notifications_source_check",
-          "value": "\"member_notifications\".\"source\" IS NULL OR \"member_notifications\".\"source\" IN ('REPORT_CASE', 'CONDUCT_REPORT', 'REVIEW_AVERAGE')"
-        }
-      },
       "isRLSEnabled": false
     },
     "public.payment_money_policy_revisions": {

@@ -8,6 +8,7 @@ import {
 import { authUser } from '@/database/schema/auth.schema';
 import { file } from '@/database/schema/file.schema';
 import {
+  questCandidateTeamV2,
   proofSubmission,
   proofSubmissionImage,
   quest,
@@ -16,6 +17,7 @@ import {
   questV2ProofSubmissionFile,
 } from '@/database/schema/quest.schema';
 import { walletWallet } from '@/database/schema/wallet.schema';
+import { recordAudit } from '@/modules/audit/audit.service';
 import {
   formatDisputeDisplayId,
   formatDisplayIdSql,
@@ -26,6 +28,7 @@ import {
 import type { AdminMemberModerationContextFields, AdminMemberStatus } from '@/modules/admin';
 import {
   createAdminActionService,
+  type AdminActionCommandInput,
   type AdminActionResult,
 } from '@/modules/admin/admin-action.service';
 import {
@@ -59,6 +62,9 @@ const dayMs = 24 * 60 * 60 * 1000;
 
 /** Rulebook: a Hirer or Worker may self-file within 1 day of the Quest failing. */
 export const disputeSelfFileWindowMs = dayMs;
+
+/** Rulebook: each Dispute Case has seven days from `createdAt` for an Admin decision. */
+export const disputeDecisionWindowMs = 7 * dayMs;
 
 /** Tells the filer that their Dispute Case changed; clients refetch the Quest. */
 const notifyDisputeCaseUpdated = (
@@ -109,6 +115,7 @@ export class AdminDisputeCaseError extends Error {
     | 'DISPUTE_CASE_NOT_PENDING'
     | 'DISPUTE_CASE_QUEST_NOT_FAILED'
     | 'DISPUTE_CASE_WORKER_NOT_ASSIGNED'
+    | 'DISPUTE_CASE_TEAM_LEADER_ONLY'
     | 'DISPUTE_CASE_RESERVATION_NOT_FOUND'
     | 'DISPUTE_CASE_OUTCOME_INVALID'
     | 'DISPUTE_CASE_AMOUNT_REQUIRED'
@@ -223,7 +230,7 @@ export type ResolveAdminDisputeCaseInput = {
   outcome: DisputeCaseOutcome;
   workerId?: string;
   amountSatang?: number;
-  now?: Date;
+  now?: Date | (() => Date);
 };
 
 export type CreateAdminDisputeCaseInput = {
@@ -282,6 +289,25 @@ const caseByIdInTransaction = async (
 };
 
 /** Create the queue record after a filing adapter has authenticated its actor. */
+/** A selected Candidate Team has one outcome, so only its Team Leader can file a Dispute Case. */
+const isSelectedTeamMemberOnly = async (
+  reader: typeof db | WalletTransaction,
+  questId: string,
+  memberId: string
+) => {
+  const [team] = await reader
+    .select({ leaderId: questCandidateTeamV2.leaderId })
+    .from(questCandidateTeamV2)
+    .where(
+      and(
+        eq(questCandidateTeamV2.questId, questId),
+        eq(questCandidateTeamV2.state, 'TEAM_SELECTED')
+      )
+    )
+    .limit(1);
+  return team !== undefined && team.leaderId !== memberId;
+};
+
 export const createAdminDisputeCaseInTransaction = async (
   transaction: WalletTransaction,
   input: CreateAdminDisputeCaseInput
@@ -350,6 +376,12 @@ export const createAdminDisputeCaseInTransaction = async (
         'The filer did not hold an Assignment on this Quest.'
       );
     }
+    if (await isSelectedTeamMemberOnly(transaction, input.questId, input.filerUserId)) {
+      throw new AdminDisputeCaseError(
+        'DISPUTE_CASE_TEAM_LEADER_ONLY',
+        'Only the Team Leader can file a Dispute Case for a Candidate Team.'
+      );
+    }
   }
 
   const [created] = existing
@@ -408,6 +440,84 @@ export const createAdminDisputeCaseInTransaction = async (
 
 export const createAdminDisputeCase = async (input: CreateAdminDisputeCaseInput) =>
   db.transaction((transaction) => createAdminDisputeCaseInTransaction(transaction, input));
+
+export const disputeDecisionWindowExpiredSql = (now: Date) =>
+  sql<boolean>`${adminDisputeCase.createdAt} + ${disputeDecisionWindowMs} * interval '1 millisecond' <= ${now.toISOString()}::timestamptz`;
+
+const dismissOverdueDisputeCaseInTransaction = async (
+  transaction: WalletTransaction,
+  disputeCaseId: string,
+  readNow: Date | (() => Date)
+) => {
+  const [row] = await transaction
+    .select({ disputeCase: adminDisputeCase })
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.id, disputeCaseId))
+    .for('update');
+  const now = typeof readNow === 'function' ? readNow() : readNow;
+  if (!row) {
+    return { changed: false, systemDismissed: false, notFound: true, checkedAt: now } as const;
+  }
+  if (row.disputeCase.status !== 'DISPUTE_CASE_PENDING') {
+    return {
+      changed: false,
+      systemDismissed:
+        row.disputeCase.status === 'DISPUTE_CASE_DISMISSED' &&
+        row.disputeCase.resolvedByAdminId === null,
+      notFound: false,
+      checkedAt: now,
+    } as const;
+  }
+  const [deadline] = await transaction
+    .select({ decisionWindowExpired: disputeDecisionWindowExpiredSql(now) })
+    .from(adminDisputeCase)
+    .where(eq(adminDisputeCase.id, disputeCaseId));
+  if (!deadline?.decisionWindowExpired) {
+    return { changed: false, systemDismissed: false, notFound: false, checkedAt: now } as const;
+  }
+
+  const [updated] = await transaction
+    .update(adminDisputeCase)
+    .set({
+      status: 'DISPUTE_CASE_DISMISSED',
+      resolvedByAdminId: null,
+      resolvedAt: now,
+      version: sql`${adminDisputeCase.version} + 1`,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(adminDisputeCase.id, disputeCaseId),
+        eq(adminDisputeCase.status, 'DISPUTE_CASE_PENDING'),
+        disputeDecisionWindowExpiredSql(now)
+      )
+    )
+    .returning();
+  if (!updated) {
+    return { changed: false, systemDismissed: false, notFound: false, checkedAt: now } as const;
+  }
+
+  await recordAudit(transaction, {
+    actorType: 'SYSTEM',
+    action: 'DISPUTE_CASE_AUTO_DISMISSED',
+    resourceType: 'DISPUTE_CASE',
+    resourceId: updated.id,
+    oldValue: { status: row.disputeCase.status },
+    newValue: { status: updated.status },
+    reason: 'The 7-day Dispute Case decision window expired.',
+    createdAt: now,
+  });
+  await notifyDisputeCaseUpdated(transaction, updated);
+  await notifyAdminDisputeCaseViewsUpdated(transaction, updated);
+  return { changed: true, systemDismissed: true, notFound: false, checkedAt: now } as const;
+};
+
+/** Dismiss one pending Dispute Case when its decision window has ended. */
+export const autoDismissOverdueDisputeCase = async (disputeCaseId: string, now = new Date()) =>
+  db.transaction(async (transaction) => {
+    const result = await dismissOverdueDisputeCaseInTransaction(transaction, disputeCaseId, now);
+    return result.changed;
+  });
 
 export const submitDisputeCaseResponse = async ({
   disputeCaseId,
@@ -933,14 +1043,14 @@ const assertResolutionInput = (input: ResolveAdminDisputeCaseInput) => {
   }
 };
 
-export const resolveAdminDisputeCase = async (
-  input: ResolveAdminDisputeCaseInput
-): Promise<ResolveAdminDisputeCaseResult> => {
-  assertResolutionInput(input);
-  const now = input.now ?? new Date();
+const resolveAdminDisputeCaseInTransaction = (
+  decisionTransaction: WalletTransaction,
+  input: ResolveAdminDisputeCaseInput,
+  now: Date
+) => {
   const action =
     input.outcome === 'DISPUTE_CASE_DISMISSED' ? 'DISPUTE_CASE_DISMISS' : 'DISPUTE_CASE_RESOLVE';
-  const result = await adminActionService.executeCommand<AdminDisputeCaseSummary>({
+  const commandInput: AdminActionCommandInput<AdminDisputeCaseSummary> = {
     adminId: input.adminId,
     action,
     resourceType: 'dispute_case',
@@ -1098,8 +1208,43 @@ export const resolveAdminDisputeCase = async (
         },
       };
     },
+  };
+  return adminActionService.executeCommandInTransaction<AdminDisputeCaseSummary>(
+    decisionTransaction,
+    commandInput
+  );
+};
+
+export const resolveAdminDisputeCase = async (
+  input: ResolveAdminDisputeCaseInput
+): Promise<ResolveAdminDisputeCaseResult> => {
+  assertResolutionInput(input);
+  const result = await db.transaction(async (transaction) => {
+    // Sample production time after the row lock so lock wait cannot make it stale.
+    const deadline = await dismissOverdueDisputeCaseInTransaction(
+      transaction,
+      input.disputeCaseId,
+      () => (typeof input.now === 'function' ? input.now() : input.now) ?? new Date()
+    );
+    if (deadline.notFound) return { outcome: 'not-found' } as const;
+    if (deadline.systemDismissed) return { outcome: 'window-expired' } as const;
+    return {
+      outcome: 'decided',
+      result: await resolveAdminDisputeCaseInTransaction(transaction, input, deadline.checkedAt),
+    } as const;
   });
-  let resourceSummary = result.resourceSummary;
+
+  if (result.outcome === 'not-found') {
+    throw new AdminDisputeCaseError('DISPUTE_CASE_NOT_FOUND', 'Dispute Case does not exist.');
+  }
+  if (result.outcome === 'window-expired') {
+    throw new AdminDisputeCaseError(
+      'DISPUTE_CASE_WINDOW_EXPIRED',
+      'The Dispute Case decision window has expired.'
+    );
+  }
+
+  let resourceSummary = result.result.resourceSummary;
   if (!Object.prototype.hasOwnProperty.call(resourceSummary, 'category')) {
     const [persistedCase] = await db
       .select({ category: adminDisputeCase.category })
@@ -1108,7 +1253,7 @@ export const resolveAdminDisputeCase = async (
       .limit(1);
     resourceSummary = { ...resourceSummary, category: persistedCase?.category ?? null };
   }
-  return { ...result, resourceSummary, outcome: input.outcome };
+  return { ...result.result, resourceSummary, outcome: input.outcome };
 };
 
 export type QuestDisputeSummary = {
@@ -1149,10 +1294,16 @@ export const readQuestDisputeSummary = async (
           .from(questAssignment)
           .where(and(eq(questAssignment.questId, questId), eq(questAssignment.workerId, viewerId)))
           .limit(1);
+  const teamMemberOnly =
+    assignment !== undefined && (await isSelectedTeamMemberOnly(db, questId, viewerId));
   const endsAt = new Date(row.moneyHoldStartedAt.getTime() + disputeFilingWindowMs(false));
   const open = now.getTime() <= endsAt.getTime();
   return {
-    canFile: open && !existing && (viewerId === row.hirerId || assignment !== undefined),
+    canFile:
+      open &&
+      !existing &&
+      !teamMemberOnly &&
+      (viewerId === row.hirerId || assignment !== undefined),
     windowEndsAt: open ? endsAt : null,
     myCase: existing
       ? {

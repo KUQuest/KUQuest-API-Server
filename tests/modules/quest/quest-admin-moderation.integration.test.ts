@@ -1,3 +1,4 @@
+import { settleDueQuestV2RewardAllocation } from '@/modules/quest/v2/reward-allocation';
 import { app } from '@/app';
 import { db, sql } from '@/database/client';
 import { adminAction, adminReviewItem } from '@/database/schema/admin.schema';
@@ -634,7 +635,7 @@ describe('Admin Quest moderation commands', () => {
 
   // The cancellation matrix pays the whole 20% to the Team Leader in a GROUP + CANDIDATE
   // Quest, not a share per Active Worker.
-  it('pays the whole ASSIGNED cancellation share to the Team Leader of a GROUP Candidate Quest', async () => {
+  it('opens the Team split for the ASSIGNED cancellation share of a GROUP Candidate Quest', async () => {
     if (!postgresAvailable) return;
     const questId = await createQuest('QUEST_ASSIGNED', undefined, { group: true });
     const joinedAt = new Date('2020-12-31T23:00:00.000Z');
@@ -705,8 +706,22 @@ describe('Admin Quest moderation commands', () => {
         async (userId) => (await readTestWallet(userId)).earningsBalanceSatang
       )
     );
-    // 20% of the 2,000 satang Worker Reward pool, paid to the Leader alone.
-    expect(after).toEqual([before[0]! + 400, before[1]!]);
+    // Termination moves no money until the Team Reward Allocation settles.
+    expect(after).toEqual(before);
+    expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
+      status: 'ACTIVE',
+      remainingSatang: 2_040,
+    });
+
+    await settleDueQuestV2RewardAllocation(questId, new Date(Date.now() + 25 * 60 * 60 * 1000));
+
+    const settled = await Promise.all(
+      [teamLeaderId, workerId].map(
+        async (userId) => (await readTestWallet(userId)).earningsBalanceSatang
+      )
+    );
+    // 20% of the 2,000 satang Worker Reward pool, split equally at the deadline.
+    expect(settled).toEqual([before[0]! + 200, before[1]! + 200]);
     expect(await readTestQuestEscrow({ ownerUserId: hirerId, questId })).toMatchObject({
       status: 'RELEASED',
       remainingSatang: 0,

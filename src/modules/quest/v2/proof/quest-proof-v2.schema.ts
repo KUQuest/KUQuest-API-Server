@@ -105,6 +105,22 @@ const proofFileSchema = t.Object({
   position: t.Integer({ minimum: 0, maximum: 4 }),
   uploadStatus: t.Union([t.Literal('PROOF_FILE_READY'), t.Literal('PROOF_FILE_FAILED')]),
   failureCode: t.Nullable(t.String({ minLength: 1, maxLength: 64 })),
+  url: t.Optional(
+    t.Nullable(
+      t.String({
+        format: 'uri',
+        description: 'Short-lived file link for a ready Proof file; null when unavailable.',
+      })
+    )
+  ),
+  urlExpiresAt: t.Optional(
+    t.Nullable(
+      t.String({
+        format: 'date-time',
+        description: 'Expiry time for url; null when no file link is available.',
+      })
+    )
+  ),
 });
 
 const proofFileAccessSchema = t.Object({
@@ -130,7 +146,7 @@ const proofSubmissionSchema = t.Object({
     t.String({
       format: 'date-time',
       description:
-        'Exact instant the Server auto-approves this Proof Submission. Non-null only while status is PROOF_PENDING, even when later than the Quest dueAt. Not reset by any edit: a sent Proof Submission is locked.',
+        'Exact instant the Server auto-approves this Proof Submission: the later of Quest dueAt and 24 hours after submittedAt. Non-null only while status is PROOF_PENDING. Not reset by any edit: a sent Proof Submission is locked.',
     })
   ),
   reviewReason: t.Nullable(

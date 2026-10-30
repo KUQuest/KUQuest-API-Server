@@ -100,6 +100,10 @@ const serializeQuestDetail = (quest: AdminQuestDetail): AdminQuestDetailResponse
     ...proof,
     submittedAt: proof.submittedAt.toISOString(),
     reviewedAt: proof.reviewedAt ? proof.reviewedAt.toISOString() : null,
+    files: proof.files.map((proofFile) => ({
+      ...proofFile,
+      urlExpiresAt: proofFile.urlExpiresAt.toISOString(),
+    })),
   })),
   editHistory: quest.editHistory.map(serializeEditHistoryEntry),
   adminActions: quest.adminActions.map((action) => ({
